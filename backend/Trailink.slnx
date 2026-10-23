@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Trailink.Api/Trailink.Api.csproj" />
+  <Project Path="Trailink.Api.Tests/Trailink.Api.Tests.csproj" />
+</Solution>

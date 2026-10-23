@@ -1,0 +1,62 @@
+---
+description: Trailink SSOT 与最小变更：一个业务概念只保留一条实现路径
+alwaysApply: true
+---
+
+# SSOT 与最小变更
+
+优先级高于一般代码组织建议。原则：**一个业务概念，一个权威定义，一条实现路径。**
+
+订单结构调整是对现有 CRUD 的原位修改，不是新建订单系统。
+
+## 执行前必须先回答
+
+1. 对应哪个现有模块？
+2. 要改哪些现有文件？
+3. 是否已有类似功能？
+4. 是否会产生第二个事实来源？
+5. 是否需要新增数据库实体？
+6. 是否会破坏现有 API 或数据？
+
+有重复风险时，改已有实现，不另开路径。
+
+## 订单必须复用的实现
+
+- `OrdersController`、`ItineraryDaysController`
+- 现有 `TrailinkDbContext`、`Order`、`ItineraryDay` 与现有订单 DTO
+- 现有订单页面和 `frontend/src/api/orders.ts`
+- 现有 EF Core Migration 体系；禁止改写已应用的 `InitialCreate`
+
+`OrderActivity` 是已批准的独立实体，只允许这一套活动表 / API / 模型。
+
+## 修改优先
+
+先搜现有 Model / DTO / Controller / Service / API / 前端入口，在原位置做最小修改。现有结构无法合理承载时才新增文件，且必须说明原因。
+
+禁止：
+
+1. `OrdersV2`、`NewOrders` 或平行 Controller
+2. `orders_v2` 或其他替代订单表
+3. 新的订单存储服务绕过现有 DbContext
+4. 两套同时可用的订单 CRUD API
+5. 复制一套订单管理页面
+6. 独立日历数据表
+7. 新的派单关联表（派单只写 `itinerary_days.driver_id`）
+8. `PRD_V2`、`API_CONTRACT_NEW` 等重复文档
+9. 为废弃字段永久保留重复业务模型
+10. 修改或覆盖已应用的 `InitialCreate` Migration
+11. 硬编码 / Mock 绕过数据库，或为过测试另建实现路径
+
+## 权威来源
+
+- 运行时数据：PostgreSQL
+- 库结构：现有 EF Entity + Fluent + 增量 Migration。禁止重建库规避迁移。
+- API：`docs/API_CONTRACT.md`。改接口时同步契约、DTO、Controller、测试、前端调用。
+- 前端：统一 API 层和 TypeScript 类型。订单列表 / 详情 / 日历读同一后端数据。
+- 文档：只改 `docs/PRD.md`、`ARCHITECTURE.md`、`DATABASE_CONTRACT.md`、`API_CONTRACT.md`、`FRONTEND_DESIGN.md`、`DEVELOPMENT_PLAN.md`。`docs/reports/` 只追溯。
+
+## 冲突与收尾
+
+以用户最新确认需求为准。结构冲突时先报告冲突和最小改法，不另建替代架构。不可恢复丢数据时先暂停确认。
+
+完成后确认：无重复 Controller / API / 表 / 平行页面；无废弃仍被引用的实现；权威文档已同步；Migration 正确；相关测试通过。报告写入 `docs/reports/`，不取代权威文档。
