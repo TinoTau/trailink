@@ -89,12 +89,20 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
         }
 
+        var warnings = await CollectWarningsAsync(orderId, request.DriverId, request.ServiceDate, cancellationToken);
+        if (request.FailOnConflict && warnings.Count > 0)
+        {
+            return Problem(
+                title: "Schedule conflict",
+                detail: string.Join("；", warnings),
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         day.ServiceDate = request.ServiceDate;
         day.Description = request.Description;
         day.EndLocation = request.EndLocation;
         day.DriverId = request.DriverId;
 
-        var warnings = await CollectWarningsAsync(orderId, request.DriverId, request.ServiceDate, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         var updated = await LoadDayAsync(day.Id, cancellationToken);

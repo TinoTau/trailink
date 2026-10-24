@@ -20,12 +20,15 @@ public class OrderReadDto
     public int DayCount { get; set; }
     public int GuestCount { get; set; }
     public string? Notes { get; set; }
+    public Guid? AssignedDriverId { get; set; }
+    public int AssignedDayCount { get; set; }
     public List<ItineraryDayReadDto> Days { get; set; } = [];
 }
 
 public class AssignDriverDto
 {
     public Guid? DriverId { get; set; }
+    public bool FailOnConflict { get; set; }
 }
 
 public class AssignmentResultDto

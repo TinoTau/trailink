@@ -8,6 +8,7 @@ public class ItineraryDayWriteDto
     public string? Description { get; set; }
     public string? EndLocation { get; set; }
     public Guid? DriverId { get; set; }
+    public bool FailOnConflict { get; set; }
 }
 
 public class ItineraryDayReadDto

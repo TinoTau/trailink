@@ -84,13 +84,16 @@ DELETE /api/orders/{orderId}/days/{dayId}
   "serviceDate": "2026-11-12",
   "description": "基督城接客，前往特卡波。",
   "endLocation": "特卡波",
-  "driverId": null
+  "driverId": null,
+  "failOnConflict": false
 }
 ```
 
 按天派单直接使用更新接口修改 `driverId`。  
 `driverId` 可以为 `null`，表示取消分配。  
-`serviceDate` 为当地日期 `YYYY-MM-DD`，不做时区换算。
+`failOnConflict` 仅更新接口使用，默认 `false`：冲突只进 `warnings`，仍保存。调度台按天拖拽传 `true`：该司机当日已被其他订单占用时返回 409，不保存。  
+`serviceDate` 为当地日期 `YYYY-MM-DD`，不做时区换算。  
+同一订单不同行程日可以绑定不同司机，不另建订单。
 
 ---
 
@@ -106,14 +109,21 @@ PUT /api/orders/{orderId}/driver
 
 ```json
 {
-  "driverId": "UUID"
+  "driverId": "UUID",
+  "failOnConflict": false
 }
 ```
 
 语义：覆盖该订单所有行程日的司机。  
-`driverId` 可以为 `null`，表示取消整单分配。
+`driverId` 可以为 `null`，表示取消整单分配。  
+`failOnConflict` 默认为 `false`：冲突只进 `warnings`，仍保存。调度台拖拽传 `true`：存在其他订单同日占用该司机时返回 409，不保存。
 
-不提供额外的派单记录接口。
+订单列表摘要增加：
+- `assignedDriverId`：任一行程日已有司机时取第一个，全部未派则为 `null`
+- `assignedDayCount`：已绑定司机的行程日数量
+- `days`：精简行程日（含 `id`、`serviceDate`、`description`、`endLocation`、`driverId`，不含活动）
+
+不提供额外的派单记录接口。拆单只改各行程日的 `driverId`。
 
 ---
 
@@ -176,7 +186,9 @@ GET /api/driver-calendar/preview?startDate=2026-11-01&endDate=2026-11-30
 
 日期范围为当地日期闭区间。活动时间仍为 `YYYY-MM-DDTHH:mm:ss`。
 
-司机日历写操作复用同一套 `orders` / `itinerary_days`，不另建表。身份仍由服务器选择预览司机，请求不得把 `driverId` 当作登录身份。分配状态只写 `itinerary_days.driver_id`，没有单独的订单分配状态字段。
+司机日历页面与调度台读同一套 `GET /api/orders`、`GET /api/drivers`，按 `itinerary_days.driver_id` 过滤当前查看的司导。本预览接口仍是只读投影，不作为页面主数据源。
+
+司机日历写操作复用同一套 `orders` / `itinerary_days`，不另建表。页面上的领取走 `PUT /api/orders/{orderId}/driver`，框选建单走前端共用的 `createOrderWithDays`（内部仍是 `POST /api/orders` 与 `POST /api/orders/{orderId}/days`），取消只把当前司导的行程日 `driverId` 置空。调度台「创建订单」走同一套函数，行程日不传 `driverId`。前端不封装 `POST /api/driver-calendar/claim`、`/range` 客户端；这两条接口仍保留在后端。请求不得把 `driverId` 当作登录身份。分配状态只写 `itinerary_days.driver_id`，没有单独的订单分配状态字段。
 
 ```http
 POST /api/driver-calendar/claim
@@ -198,7 +210,7 @@ POST /api/driver-calendar/range
 
 新建订单并生成闭区间内每一天的行程日（仅日期），同时分配给预览司机。一次最多 31 天。系统订单号仍由后端生成。
 
-当日行程编辑、电子票和取消整单绑定仍走现有：
+当日行程编辑、电子票、领取和取消仍走现有：
 
 ```http
 PUT  /api/orders/{orderId}/days/{dayId}
@@ -206,7 +218,8 @@ POST /api/orders/{orderId}/days/{dayId}/activities
 PUT  /api/orders/{orderId}/driver
 ```
 
-取消行程时 `driverId` 传 `null`，覆盖该订单全部行程日。不另建取消接口。
+领取整单时调用 `PUT /api/orders/{orderId}/driver`。取消当前司导在该单上的日期时，对该司导名下的每一天 `PUT` `driverId: null`，不覆盖其他司导的行程日。调度台从司导日历拖一天到订单区：拆单只清空当天，未拆单则整单 `driverId: null`。不另建取消接口。
+调度台订单卡片改公司订单号和备注走 `PUT /api/orders/{id}`（写入 `platformOrderNo`、`notes`，其余字段保持原值）。删除走现有 `DELETE /api/orders/{id}`，与订单列表同一套。点某一天编辑行程复用现有活动接口，与司导日历同一套 `DriverDayEditor`。不另建订单编辑接口。
 
 `ticketPath` 只保存字符串，本阶段不提供文件上传或下载。
 

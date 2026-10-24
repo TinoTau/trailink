@@ -134,6 +134,11 @@ public class CrudApiTests : IClassFixture<ApiFactory>
             $"/api/orders/{order.Id}/driver",
             new AssignDriverDto { DriverId = zhang.Id });
         Assert.Equal(3, assignment.UpdatedDayCount);
+        var listed = await _client.GetFromJsonAsync<List<OrderReadDto>>("/api/orders", JsonOptions);
+        var listedOrder = listed!.Single(item => item.Id == order.Id);
+        Assert.Equal(zhang.Id, listedOrder.AssignedDriverId);
+        Assert.Equal(3, listedOrder.AssignedDayCount);
+        Assert.Equal(3, listedOrder.Days.Count);
 
         var reassigned = await PutAsync<ItineraryDayReadDto>(
             $"/api/orders/{order.Id}/days/{days[2].Id}",
@@ -152,6 +157,12 @@ public class CrudApiTests : IClassFixture<ApiFactory>
         Assert.Equal(zhang.Id, detail.Days[0].DriverId);
         Assert.Equal(zhang.Id, detail.Days[1].DriverId);
         Assert.Equal(li.Id, detail.Days[2].DriverId);
+
+        var listedSplit = await _client.GetFromJsonAsync<List<OrderReadDto>>("/api/orders", JsonOptions);
+        var splitSummary = listedSplit!.Single(item => item.Id == order.Id);
+        Assert.Equal(3, splitSummary.AssignedDayCount);
+        Assert.Equal(2, splitSummary.Days.Count(day => day.DriverId == zhang.Id));
+        Assert.Equal(li.Id, splitSummary.Days.Single(day => day.ServiceDate == new DateOnly(2026, 11, 14)).DriverId);
         Assert.Single(detail.Days[0].Activities);
         Assert.Equal("本地向导", detail.Days[0].Activities[0].Provider);
 
@@ -229,6 +240,71 @@ public class CrudApiTests : IClassFixture<ApiFactory>
 
         var stillAssigned = await _client.GetFromJsonAsync<OrderReadDto>($"/api/orders/{second.Id}", JsonOptions);
         Assert.All(stillAssigned!.Days, day => Assert.Equal(driver.Id, day.DriverId));
+
+        var blocked = await _client.PutAsJsonAsync(
+            $"/api/orders/{first.Id}/driver",
+            new AssignDriverDto { DriverId = driver.Id, FailOnConflict = true });
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+        var stillClear = await _client.GetFromJsonAsync<OrderReadDto>($"/api/orders/{first.Id}", JsonOptions);
+        Assert.All(stillClear!.Days, day => Assert.Null(day.DriverId));
+
+        await _client.DeleteAsync($"/api/orders/{first.Id}");
+        await _client.DeleteAsync($"/api/orders/{second.Id}");
+        await _client.DeleteAsync($"/api/drivers/{driver.Id}");
+    }
+
+    [Fact]
+    public async Task UpdateDay_failOnConflict_returns_409_without_saving()
+    {
+        var driver = await PostAsync<DriverReadDto>("/api/drivers", new DriverWriteDto { Name = "冲突司机-按天" });
+        var first = await PostAsync<OrderReadDto>("/api/orders", new OrderWriteDto
+        {
+            PlatformOrderNo = "P-DAY-CONFLICT-A",
+            StartDate = new DateOnly(2032, 3, 11),
+            GuestCount = 2
+        });
+        var second = await PostAsync<OrderReadDto>("/api/orders", new OrderWriteDto
+        {
+            PlatformOrderNo = "P-DAY-CONFLICT-B",
+            StartDate = new DateOnly(2032, 3, 11),
+            GuestCount = 2
+        });
+
+        await PostAsync<ItineraryDayReadDto>($"/api/orders/{first.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2032, 3, 11)
+        });
+        var secondDay = await PostAsync<ItineraryDayReadDto>($"/api/orders/{second.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2032, 3, 11)
+        });
+
+        await PutAsync<AssignmentResultDto>(
+            $"/api/orders/{first.Id}/driver",
+            new AssignDriverDto { DriverId = driver.Id });
+
+        var blocked = await _client.PutAsJsonAsync(
+            $"/api/orders/{second.Id}/days/{secondDay.Id}",
+            new ItineraryDayWriteDto
+            {
+                ServiceDate = secondDay.ServiceDate,
+                DriverId = driver.Id,
+                FailOnConflict = true
+            });
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+
+        var stillClear = await _client.GetFromJsonAsync<OrderReadDto>($"/api/orders/{second.Id}", JsonOptions);
+        Assert.Null(stillClear!.Days.Single().DriverId);
+
+        var warned = await PutAsync<ItineraryDayReadDto>(
+            $"/api/orders/{second.Id}/days/{secondDay.Id}",
+            new ItineraryDayWriteDto
+            {
+                ServiceDate = secondDay.ServiceDate,
+                DriverId = driver.Id
+            });
+        Assert.Equal(driver.Id, warned.DriverId);
+        Assert.Contains(warned.Warnings, item => item.Contains("2032-03-11") && item.Contains(first.OrderNo));
 
         await _client.DeleteAsync($"/api/orders/{first.Id}");
         await _client.DeleteAsync($"/api/orders/{second.Id}");

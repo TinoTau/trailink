@@ -53,6 +53,8 @@ export interface Order {
   dayCount: number
   guestCount: number
   notes?: string | null
+  assignedDriverId?: string | null
+  assignedDayCount?: number
   days: ItineraryDay[]
 }
 
@@ -95,6 +97,7 @@ export interface DriverCalendarDay {
   items: DriverCalendarTrip[]
 }
 
+/** 后端保留预览投影的前端类型；页面主数据走 Order / ItineraryDay。 */
 export interface DriverCalendarPreview {
   preview: boolean
   identityIsolated: boolean
@@ -103,6 +106,7 @@ export interface DriverCalendarPreview {
   days: DriverCalendarDay[]
 }
 
+/** 后端保留 claim/range 响应类型；页面写操作走 ordersApi，不封装该客户端。 */
 export interface DriverCalendarMutation {
   orderId: string
   orderNo: string

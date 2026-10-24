@@ -85,6 +85,8 @@ ASP.NET Core Web API → Amazon S3
 - LLM
 - GraphQL
 
+调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。两个页面都从订单列表取行程日，司导日历再按当前查看司导过滤。按天拆单只改各行程日的 `driver_id`。
+
 后端采用简单分层：
 
 - Controllers
@@ -139,7 +141,7 @@ Trailink/
 - 第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`。
 - 附件实际存储方案未在本阶段锁定。`order_files` 仍计划存文件名和路径；`order_activities.ticket_path` 仅为预留字段，不强制 S3 Object Key 或本地路径。
 - 订单起始日期和行程日期使用 PostgreSQL `DATE` / `DateOnly`。活动预订与签到时间使用 `TIMESTAMP WITHOUT TIME ZONE` / `DateTime`（`Kind=Unspecified`），表示当地钟表时间。
-- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。分配只更新 `driver_id`。未实现认证前不提供按客户端 `driverId` 查询其他司机的正式接口。
+- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`，不封装 `claim` / `range` 客户端。分配只更新 `driver_id`。未实现认证前不提供按客户端 `driverId` 查询其他司机的正式接口。
 - 不引入时区管理框架。正式创建收费云资源前必须另行确认。
 
 ---

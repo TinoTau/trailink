@@ -8,13 +8,9 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
     public async Task<OrderDriverAssignmentResult> AssignAsync(
         Order order,
         Guid? driverId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool failOnConflict = false)
     {
-        foreach (var day in order.Days)
-        {
-            day.DriverId = driverId;
-        }
-
         var warnings = driverId is Guid assignedId
             ? await scheduling.FindDriverConflictsAsync(
                 assignedId,
@@ -22,6 +18,16 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
                 order.Id,
                 cancellationToken)
             : [];
+
+        if (failOnConflict && warnings.Count > 0)
+        {
+            return new OrderDriverAssignmentResult(order.Id, driverId, order.Days.Count, warnings, false);
+        }
+
+        foreach (var day in order.Days)
+        {
+            day.DriverId = driverId;
+        }
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -33,4 +39,5 @@ public readonly record struct OrderDriverAssignmentResult(
     Guid OrderId,
     Guid? DriverId,
     int UpdatedDayCount,
-    List<string> Warnings);
+    List<string> Warnings,
+    bool Applied = true);

@@ -1,5 +1,6 @@
 import { Layout, Menu } from 'antd'
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { DispatcherPage } from './pages/dispatcher/DispatcherPage'
 import { DriverCalendarPage } from './pages/driver/DriverCalendarPage'
 import { DriversPage } from './pages/DriversPage'
 import { OrderEditPage } from './pages/OrderEditPage'
@@ -7,6 +8,14 @@ import { OrdersPage } from './pages/OrdersPage'
 
 export default function App() {
   const location = useLocation()
+  if (location.pathname.startsWith('/dispatcher')) {
+    return (
+      <Routes>
+        <Route path="/dispatcher" element={<DispatcherPage />} />
+        <Route path="/dispatcher/*" element={<Navigate to="/dispatcher" replace />} />
+      </Routes>
+    )
+  }
   if (location.pathname.startsWith('/driver')) {
     return (
       <Routes>
@@ -29,6 +38,7 @@ export default function App() {
           items={[
             { key: 'orders', label: <Link to="/orders">订单</Link> },
             { key: 'drivers', label: <Link to="/drivers">司机</Link> },
+            { key: 'dispatcher', label: <Link to="/dispatcher">调度台</Link> },
           ]}
           style={{ flex: 1, minWidth: 0 }}
         />

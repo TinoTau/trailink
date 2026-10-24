@@ -140,7 +140,19 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             }
         }
 
-        var result = await assignment.AssignAsync(order, request.DriverId, cancellationToken);
+        var result = await assignment.AssignAsync(
+            order,
+            request.DriverId,
+            cancellationToken,
+            request.FailOnConflict);
+
+        if (!result.Applied)
+        {
+            return Problem(
+                title: "Schedule conflict",
+                detail: string.Join("；", result.Warnings),
+                statusCode: StatusCodes.Status409Conflict);
+        }
 
         return Ok(new AssignmentResultDto
         {
@@ -166,6 +178,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         var endDate = order.Days.Count == 0
             ? (DateOnly?)null
             : order.Days.Max(day => day.ServiceDate);
+        var assignedDays = order.Days.Where(day => day.DriverId is not null).ToList();
 
         return new OrderReadDto
         {
@@ -177,7 +190,21 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             EndDate = endDate,
             DayCount = order.Days.Count,
             GuestCount = order.GuestCount,
-            Notes = order.Notes
+            Notes = order.Notes,
+            AssignedDriverId = assignedDays.Select(day => day.DriverId).FirstOrDefault(),
+            AssignedDayCount = assignedDays.Count,
+            Days = order.Days
+                .OrderBy(day => day.ServiceDate)
+                .Select(day => new ItineraryDayReadDto
+                {
+                    Id = day.Id,
+                    OrderId = day.OrderId,
+                    ServiceDate = day.ServiceDate,
+                    Description = day.Description,
+                    EndLocation = day.EndLocation,
+                    DriverId = day.DriverId
+                })
+                .ToList()
         };
     }
 

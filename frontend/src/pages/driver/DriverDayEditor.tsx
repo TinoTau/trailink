@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ordersApi } from '../../api/orders'
+import { formatLocalTime } from '../../localDate'
+import { splitOrderHint } from '../../orderFlags'
 import type { DriverCalendarDay, ItineraryDay, OrderActivity, OrderActivityWrite } from '../../types'
-import { formatLocalTime } from './localDate'
 
 export function DriverDayEditor({
   day,
@@ -11,6 +12,7 @@ export function DriverDayEditor({
   onChanged: () => Promise<void>
 }) {
   const [trips, setTrips] = useState<ItineraryDay[]>([])
+  const [splitHint, setSplitHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -24,6 +26,7 @@ export function DriverDayEditor({
         setTrips(day.items
           .map((trip) => daysById.get(trip.itineraryDayId))
           .filter((item): item is ItineraryDay => Boolean(item)))
+        setSplitHint(splitOrderHint(orders))
         setError(null)
       } catch (item) {
         if (active) setError(item instanceof Error ? item.message : '加载当日行程失败')
@@ -46,6 +49,7 @@ export function DriverDayEditor({
   return (
     <div className="driver-detail-card">
       {error ? <p className="driver-edit-error">{error}</p> : null}
+      {splitHint ? <p className="driver-add-hint">{splitHint}</p> : null}
       {visibleTrips.map((trip) => (
         <TripEditor
           key={trip.id}
