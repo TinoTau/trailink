@@ -5,7 +5,7 @@
 数据库：PostgreSQL  
 迁移：EF Core Migrations
 
-第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`。
+第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`。
 
 ---
 
@@ -30,7 +30,14 @@ source_company     VARCHAR(200) NULL
 start_date         DATE NOT NULL
 guest_count        INTEGER NOT NULL
 notes              TEXT NULL
+company_id         UUID NULL
+created_by_user_id UUID NULL
 ```
+
+外键：
+
+- `company_id` → `companies.id`（创建订单时写入当前公司，调度台列表仍读全部订单）
+- `created_by_user_id` → `users.id`
 
 规则：
 
@@ -97,7 +104,7 @@ sort_order         INTEGER NOT NULL DEFAULT 0
 - 删除行程日或订单时级联删除活动。
 - `booking_time`、`checkin_time` 是活动所在地的当地钟表时间，不是系统操作的 UTC 时间戳。
 - 不实现实际签到打卡。
-- `ticket_path` 是未来 Web 端电子票上传的预留字段，允许 NULL。存储格式未定，不强制 S3 Object Key 或本地绝对路径。本阶段不实现上传、下载或删除。
+- `ticket_path` 存统一本地存储的相对路径，格式 `files/tickets/{activityId}{ext}`，允许 NULL。不存绝对路径或二进制。
 
 ---
 
@@ -114,11 +121,86 @@ file_path   TEXT NOT NULL
 
 - `order_id` → `orders.id`
 
-文件实际存储在 S3 或本地开发存储中。本阶段附件上传可后置。
+文件实际存储在 `App_Data/files/orders/`。`file_path` 为相对路径 `files/orders/{fileId}{ext}`。删除订单时同时删除磁盘文件。
 
 ---
 
-## 6. 明确不创建的表
+## 6. companies
+
+```text
+id       UUID PRIMARY KEY
+name     VARCHAR(200) NOT NULL UNIQUE
+contact  VARCHAR(200) NULL
+qr_path  VARCHAR(500) NULL
+```
+
+公司账户注册时创建。`contact` 由公司账户编辑，可以是手机号或微信号。`qr_path` 指向统一本地存储的相对路径 `files/qr/{companyId}{ext}`；旧值 `company-qr/...` 仍可读取。调度台订单列表不按公司过滤；公司信息页按 `orders.company_id` 展示相关订单。
+
+---
+
+## 7. users
+
+```text
+id             UUID PRIMARY KEY
+username       VARCHAR(50) NOT NULL UNIQUE
+password_hash  VARCHAR(200) NOT NULL
+name           VARCHAR(100) NOT NULL
+role           VARCHAR(20) NOT NULL
+company_id     UUID NULL
+driver_id      UUID NULL
+avatar_path    VARCHAR(500) NULL
+```
+
+`role` 取值：`company`、`dispatcher`、`driver`。不建角色表。
+
+- 公司账户：`role=company`，`company_id` 指向本公司，一人一家。
+- 注册公司或司导时同时写一条 `drivers`，`driver_id` 指向该司机。已有账户若还没有司机身份，登录或 `me` 时补写。
+- 调度员与司导可以同时属于多家公司，关系只写 `company_members`，不再占用 `users.company_id`。
+- 批准为调度员后写入成员行，并把账户 `role` 设为 `dispatcher`；从最后一家公司移除后回到 `driver`，保留 `driver_id`。
+- `avatar_path` 指向压缩后的 `files/avatars/{userId}.jpg`。再次上传时删除该用户旧头像文件。头像、二维码、电子票、订单截图都落在 `App_Data/files/` 下各自子目录，不进 `wwwroot`。
+
+---
+
+## 8. company_members
+
+```text
+id          UUID PRIMARY KEY
+user_id     UUID NOT NULL
+company_id  UUID NOT NULL
+role        VARCHAR(20) NOT NULL
+```
+
+唯一约束：`(user_id, company_id)`。公司批准调度员后 `role=dispatcher`；调度员批准司导申请后写入 `role=driver`。
+
+---
+
+## 9. dispatcher_applications
+
+```text
+id          UUID PRIMARY KEY
+user_id     UUID NOT NULL
+company_id  UUID NOT NULL
+created_at  TIMESTAMPTZ NOT NULL
+```
+
+只保留待批准申请。同一用户对同一公司只能有一条申请。可以同时向多家公司申请。批准后删除该行。
+
+---
+
+## 10. driver_applications
+
+```text
+id                   UUID PRIMARY KEY
+user_id              UUID NOT NULL
+dispatcher_user_id   UUID NOT NULL
+created_at           TIMESTAMPTZ NOT NULL
+```
+
+只保留待批准的司导申请。同一用户对同一调度员只能有一条申请。批准后删除该行，并按调度员当前所属公司写入 `company_members`。
+
+---
+
+## 11. 明确不创建的表
 
 第一阶段不创建：
 
@@ -133,15 +215,20 @@ file_path   TEXT NOT NULL
 - invoices
 - notifications
 - workflows
-- companies
 - roles
 - permissions
 
 ---
 
-## 7. 实体关系
+## 12. 实体关系
 
 ```text
+companies 1 ──< users            （公司账户持有者）
+companies 1 ──< company_members >── users
+companies 1 ──< dispatcher_applications >── users
+users     1 ──< driver_applications >── users（申请人 / 调度员）
+companies 1 ──< orders
+drivers   1 ──  users.driver_id
 drivers 1 ──< itinerary_days >── 1 orders 1 ──< order_files
                       1
                       │
@@ -152,7 +239,7 @@ drivers 1 ──< itinerary_days >── 1 orders 1 ──< order_files
 
 ---
 
-## 8. 本阶段记录的假设
+## 13. 本阶段记录的假设
 
 1. 创建订单时不自动生成行程日，由调度员按日期新增。
 2. 删除订单时级联删除行程、活动和订单附件记录。

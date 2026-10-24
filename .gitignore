@@ -16,6 +16,7 @@ node_modules/
 frontend/dist/
 
 # Local secrets and uploads
+backend/Trailink.Api/App_Data/
 .env
 .env.*
 !.env.example

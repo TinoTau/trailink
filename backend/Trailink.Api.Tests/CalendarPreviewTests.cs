@@ -17,6 +17,7 @@ public class CalendarPreviewTests : IClassFixture<ApiFactory>
     public CalendarPreviewTests(ApiFactory factory)
     {
         _client = factory.CreateClient();
+        TestAuth.SignInCompanyAsync(_client).GetAwaiter().GetResult();
     }
 
     [Fact]
@@ -37,7 +38,7 @@ public class CalendarPreviewTests : IClassFixture<ApiFactory>
         });
 
         ItineraryDayReadDto? dayA1 = null;
-        for (var day = 1; day <= 10; day++)
+        for (var day = 1; day <= 30; day++)
         {
             var createdDay = await PostAsync<ItineraryDayReadDto>($"/api/orders/{orderA.Id}/days", new ItineraryDayWriteDto
             {
@@ -47,6 +48,14 @@ public class CalendarPreviewTests : IClassFixture<ApiFactory>
                 DriverId = preview.Id
             });
             dayA1 ??= createdDay;
+        }
+        for (var day = 1; day <= 31; day++)
+        {
+            await PostAsync<ItineraryDayReadDto>($"/api/orders/{orderA.Id}/days", new ItineraryDayWriteDto
+            {
+                ServiceDate = new DateOnly(2028, 3, day),
+                DriverId = preview.Id
+            });
         }
         await PostAsync<ItineraryDayReadDto>($"/api/orders/{orderB.Id}/days", new ItineraryDayWriteDto
         {
@@ -73,7 +82,7 @@ public class CalendarPreviewTests : IClassFixture<ApiFactory>
         Assert.True(document.RootElement.GetProperty("preview").GetBoolean());
         Assert.False(document.RootElement.GetProperty("identityIsolated").GetBoolean());
         Assert.Equal(preview.Id, document.RootElement.GetProperty("driverId").GetGuid());
-        Assert.Equal(10, document.RootElement.GetProperty("days").GetArrayLength());
+        Assert.Equal(30, document.RootElement.GetProperty("days").GetArrayLength());
 
         var firstDay = document.RootElement.GetProperty("days")[0];
         Assert.Equal("2027-06-01", firstDay.GetProperty("date").GetString());

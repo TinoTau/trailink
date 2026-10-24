@@ -29,19 +29,6 @@
   color: #8c8c8c;
 }
 
-.driver-calendar-driver {
-  display: block;
-  margin-top: 8px;
-  height: 32px;
-  max-width: 220px;
-  padding: 0 10px;
-  border: 1px solid #f0f0f0;
-  border-radius: 999px;
-  background: #fff;
-  color: #262626;
-  font-size: 13px;
-}
-
 .driver-add-button {
   height: 32px;
   padding: 0 12px;
@@ -87,13 +74,23 @@
   opacity: 0.6;
 }
 
+.driver-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .driver-ghost-button {
+  display: inline-flex;
+  align-items: center;
   height: 36px;
+  padding: 0 12px;
   border: 1px solid #f0f0f0;
   border-radius: 10px;
   background: #fff;
   color: #262626;
   font-size: 14px;
+  text-decoration: none;
 }
 
 .driver-ghost-button.danger {
@@ -236,6 +233,16 @@
   flex: 0 0 auto;
   color: #8c8c8c;
   font-size: 13px;
+  text-decoration: none;
+}
+
+.driver-ticket-btn {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #8c8c8c;
+  font-size: 12px;
+  padding: 0;
 }
 
 .driver-calendar-colors {

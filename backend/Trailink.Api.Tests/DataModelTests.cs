@@ -7,7 +7,7 @@ namespace Trailink.Api.Tests;
 public class DataModelTests
 {
     [Fact]
-    public void DbContext_maps_five_core_tables()
+    public void DbContext_maps_core_tables()
     {
         using var db = CreateContext();
         var tables = db.Model.GetEntityTypes()
@@ -17,7 +17,9 @@ public class DataModelTests
             .OrderBy(name => name)
             .ToArray();
 
-        Assert.Equal(["drivers", "itinerary_days", "order_activities", "order_files", "orders"], tables);
+        Assert.Equal(
+            ["companies", "company_members", "dispatcher_applications", "driver_applications", "drivers", "itinerary_days", "order_activities", "order_files", "orders", "users"],
+            tables);
     }
 
     [Fact]

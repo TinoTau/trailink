@@ -85,7 +85,7 @@ ASP.NET Core Web API → Amazon S3
 - LLM
 - GraphQL
 
-调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。两个页面都从订单列表取行程日，司导日历再按当前查看司导过滤。按天拆单只改各行程日的 `driver_id`。
+调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。两个页面都从订单列表取行程日，日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`。
 
 后端采用简单分层：
 
@@ -138,10 +138,10 @@ Trailink/
 ## 4. 数据与文件
 
 - 使用 EF Core Migrations 管理数据库结构。
-- 第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`。
-- 附件实际存储方案未在本阶段锁定。`order_files` 仍计划存文件名和路径；`order_activities.ticket_path` 仅为预留字段，不强制 S3 Object Key 或本地路径。
+- 第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`users`、`dispatcher_applications`、`driver_applications`。
+- 四种上传（公司二维码、用户头像、电子票、订单截图）共用 `AppFileStore`，根目录 `App_Data/files/{qr,avatars,tickets,orders}/`。库里只存相对路径：`companies.qr_path`、`users.avatar_path`、`order_activities.ticket_path`、`order_files.file_path`。不进 `wwwroot`，不另开第二套存储。旧二维码路径 `company-qr/` 仍可读取。头像在写入前经 `AvatarImage`（SkiaSharp）缩到最长边 256 并压成 JPEG，覆盖时删掉该用户旧文件。二维码 / 电子票 / 订单截图保持原图。
 - 订单起始日期和行程日期使用 PostgreSQL `DATE` / `DateOnly`。活动预订与签到时间使用 `TIMESTAMP WITHOUT TIME ZONE` / `DateTime`（`Kind=Unspecified`），表示当地钟表时间。
-- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`，不封装 `claim` / `range` 客户端。分配只更新 `driver_id`。未实现认证前不提供按客户端 `driverId` 查询其他司机的正式接口。
+- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`，不封装 `claim` / `range` 客户端。分配只更新 `driver_id`。公司、调度员、司导登录后都只看自己的 `driver_id`。
 - 不引入时区管理框架。正式创建收费云资源前必须另行确认。
 
 ---
@@ -153,7 +153,7 @@ Trailink/
 - 使用环境变量或本地未入库配置文件。
 - 需要基本错误处理、输入校验和基础日志。
 - 暂不实现业务审计日志。
-- 第一阶段不实现登录认证与角色权限。
+- Cookie 登录。`users.role` 为 `company` / `dispatcher` / `driver`。不建角色表或权限表。角色变化以数据库为准，不依赖 Cookie 里的角色声明。
 
 ---
 
@@ -169,6 +169,6 @@ Trailink/
 
 1. 前端通过 Vite 开发服务器访问后端 API，开发环境开启 CORS。
 2. 生产环境可由同一容器或反向代理托管前端静态文件与 API；具体部署方式在 Phase 4 说明中确定，不提前拆分服务。
-3. 本阶段不增加文件存储抽象层，也不实现电子票上传。`ticket_path` 仅预留。
+3. 文件存储先用可替换的本地 `AppFileStore`，不创建正式 AWS 资源。四种文件同一根目录。
 4. 技术版本已锁定为 .NET 10 LTS。NuGet 只使用稳定正式版：EF Core 10.0.13、Npgsql EF 10.0.3。不使用 Preview 或 RC。
 5. 本机系统 PATH 中可能仍有 .NET 9；开发与 CI 必须以 `global.json` 指定的 .NET 10 SDK 为准。

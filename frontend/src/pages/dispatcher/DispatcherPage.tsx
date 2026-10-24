@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { message, Modal } from 'antd'
 import { createOrderWithDays, ordersApi } from '../../api/orders'
+import { AccountMenu } from '../AccountMenu'
 import { driversApi } from '../../api/drivers'
 import { PRESET_COLORS, contrastText } from '../../calendarUi'
-import { addMonths, formatLocalDate, formatMonthDay, monthEnd, monthStart, orderedRange, toDateOnly, todayLocal } from '../../localDate'
+import { addMonths, formatLocalDate, formatMonthDay, laterDate, monthEnd, monthStart, orderedRange, toDateOnly, todayLocal } from '../../localDate'
 import { assignedDayCount, hasUnassignedDays, isSplitOrder } from '../../orderFlags'
 import type { Driver, DriverCalendarDay, ItineraryDay, Order } from '../../types'
+import { OrderFilesBlock } from '../OrderFilesBlock'
 import { DriverDayEditor } from '../driver/DriverDayEditor'
 import { DispatcherCalendarCard, DispatcherDayCard, type CalendarMark } from './DispatcherCalendarCard'
 import '../driver/driver-calendar.css'
@@ -245,6 +247,8 @@ export function DispatcherPage() {
     [drivers, layout.hiddenIds],
   )
   const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? null
+  const orderRangeStart = selectedOrder?.days[0]?.serviceDate || selectedOrder?.startDate || today
+  const orderRangeEnd = selectedOrder?.endDate || selectedOrder?.days.at(-1)?.serviceDate || orderRangeStart
   const selectedOrderDay = selectedOrder?.days.find((day) => day.id === selectedOrderDayId) ?? null
   const orderEditorDay = useMemo(
     () => (selectedOrder && selectedOrderDay ? toOrderCalendarDay(selectedOrder, selectedOrderDay) : null),
@@ -384,7 +388,7 @@ export function DispatcherPage() {
     }
     const frame = window.requestAnimationFrame(() => syncDriverCalendarFromOrder())
     return () => window.cancelAnimationFrame(frame)
-  }, [selectedOrderId, selectedDriverId, selectedOrderDayId])
+  }, [selectedOrderId, selectedDriverId, selectedOrderDayId, orderRangeEnd])
 
   function persistLayout(next: DriverLayout) {
     setLayout(next)
@@ -706,9 +710,7 @@ export function DispatcherPage() {
     )
     .sort((left, right) => left.date.localeCompare(right.date))
 
-  const orderRangeStart = selectedOrder?.days[0]?.serviceDate || selectedOrder?.startDate || today
-  const orderRangeEnd = selectedOrder?.endDate || selectedOrder?.days.at(-1)?.serviceDate || orderRangeStart
-  const driverRangeEnd = driverMarks.at(-1)?.date || today
+  const driverRangeEnd = laterDate(driverMarks.at(-1)?.date, selectedOrder ? orderRangeEnd : undefined, today) || today
 
   const draggingOrder =
     drag?.kind === 'order' ? orders.find((order) => order.id === drag.id) : undefined
@@ -755,7 +757,10 @@ export function DispatcherPage() {
               {profileName}
             </button>
           )}
-          <p>调度台 · 开发预览</p>
+          <p>调度台</p>
+        </div>
+        <div className="dispatcher-header-actions">
+          <AccountMenu />
         </div>
       </header>
 
@@ -906,6 +911,17 @@ export function DispatcherPage() {
                 onNotesSave={() => {
                   void saveOrderInfo()
                 }}
+                notesExtra={
+                  <label className="dispatcher-notes-field">
+                    订单截图
+                    <OrderFilesBlock
+                      compact
+                      orderId={selectedOrder.id}
+                      files={selectedOrder.files ?? []}
+                      onChanged={() => void loadBoard()}
+                    />
+                  </label>
+                }
                 onRemove={deleteSelectedOrder}
                 removeLabel="删除订单"
                 onClose={() => setSelectedOrderId(null)}

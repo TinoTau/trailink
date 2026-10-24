@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Trailink.Api.Data;
 
 namespace Trailink.Api.Controllers;
 
+[AllowAnonymous]
 [ApiController]
 [Route("api/health")]
 public class HealthController(TrailinkDbContext db) : ControllerBase

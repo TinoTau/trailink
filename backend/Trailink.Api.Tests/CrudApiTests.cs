@@ -17,6 +17,7 @@ public class CrudApiTests : IClassFixture<ApiFactory>
     public CrudApiTests(ApiFactory factory)
     {
         _client = factory.CreateClient();
+        TestAuth.SignInCompanyAsync(_client).GetAwaiter().GetResult();
     }
 
     [Fact]

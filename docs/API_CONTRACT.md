@@ -5,7 +5,54 @@
 
 统一前缀：`/api`  
 统一使用 JSON。  
-错误响应采用 ASP.NET Core ProblemDetails。
+错误响应采用 ASP.NET Core ProblemDetails。  
+除 `/api/health`、`/api/auth/register`、`/api/auth/login` 外，接口需要登录 Cookie `trailink.auth`。
+
+---
+
+## 0. Auth / Company API
+
+```http
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/logout
+GET  /api/auth/me
+POST /api/auth/avatar
+GET  /api/auth/avatar
+GET  /api/companies?name=
+POST /api/companies/applications
+GET  /api/company?companyId=
+PUT  /api/company
+POST /api/company/qr
+GET  /api/company/{companyId}/qr
+POST /api/company/applications/{applicationId}/approve
+DELETE /api/company/dispatchers/{userId}
+GET  /api/dispatchers?name=
+POST /api/dispatchers/applications
+GET  /api/dispatchers/applications
+POST /api/dispatchers/applications/{applicationId}/approve
+```
+
+注册：
+
+```json
+{
+  "username": "driver1",
+  "password": "Passw0rd!",
+  "name": "张师傅",
+  "accountType": "driver"
+}
+```
+
+公司注册另传 `"accountType": "company"` 和 `companyName`。成功后写入登录 Cookie。
+
+`accountType` 只能是 `driver` 或 `company`。调度员不能直接注册，须由司导申请、公司批准。
+
+`GET /api/auth/me` 返回角色、所属公司列表、本人 `driverId`、`hasAvatar`、待批准的调度员申请，以及待批准的司导申请。角色以数据库为准。一人可属于多家公司。公司与调度员若还没有司机身份，登录或 `me` 时会补一条 `drivers` 记录，与司导共用行程日历。
+
+`POST /api/auth/avatar` 上传本人头像，`GET /api/auth/avatar` 读取。只接受 8MB 以内的 jpg / png / webp。服务端缩小到最长边 256 并压成 JPEG 后再写入 `App_Data/files/avatars/`，`users.avatar_path` 存相对路径。覆盖上传时删除该用户旧头像（含不同扩展名）。读取带 `Cache-Control: private, max-age=86400`。
+
+`GET /api/companies?name=` 需登录，按名称模糊查找，最多 20 条。司导和调度员都可以申请成为某家公司的调度员。已经是该公司司导成员的仍可申请升为调度员；已经是调度员则不能再申请。`GET /api/dispatchers?name=` 按调度员姓名模糊查找。司导和调度员可以申请成为某位调度员的司导；批准后写入该调度员所在公司的 `company_members`，`role=driver`。调度员在个人信息页查看并批准申请。已经是对方全部所属公司成员的不能再申请。`GET /api/company` 返回可查看的公司列表和当前公司桌面：名称、负责人、联系方式、二维码、以及自己分配或跑过的订单缩略。公司账户可 `PUT` 联系方式、上传二维码，并批准或移除调度员。二维码走同一套本地存储，写入 `App_Data/files/qr/`，`companies.qr_path` 存相对路径；旧的 `company-qr/` 路径仍可读取。`POST /api/orders` 可带 `companyId`，写入当前公司，不改变调度台读全库订单。
 
 ---
 
@@ -62,7 +109,7 @@ GET /api/orders?startDate=2026-11-01&endDate=2026-11-30
 `orderNo` 由后端生成，请求中指定无效。  
 `platformOrderNo` 可为空。  
 `startDate` 为当地日期 `YYYY-MM-DD`，不做时区换算。  
-`GET /api/orders/{id}` 返回订单主体、每日行程及每日活动项目。  
+`GET /api/orders/{id}` 返回订单主体、每日行程、每日活动项目和订单截图列表。  
 `GET /api/orders` 可用 `orderNo` 精确匹配系统订单号或平台订单号。  
 `endDate` 和 `dayCount` 由行程日期计算，只读。
 
@@ -186,7 +233,7 @@ GET /api/driver-calendar/preview?startDate=2026-11-01&endDate=2026-11-30
 
 日期范围为当地日期闭区间。活动时间仍为 `YYYY-MM-DDTHH:mm:ss`。
 
-司机日历页面与调度台读同一套 `GET /api/orders`、`GET /api/drivers`，按 `itinerary_days.driver_id` 过滤当前查看的司导。本预览接口仍是只读投影，不作为页面主数据源。
+司机日历页面读 `GET /api/orders`，按登录用户 `driverId` 过滤行程日。调度台另读 `GET /api/drivers` 做派单。本预览接口仍是只读投影，不作为页面主数据源。
 
 司机日历写操作复用同一套 `orders` / `itinerary_days`，不另建表。页面上的领取走 `PUT /api/orders/{orderId}/driver`，框选建单走前端共用的 `createOrderWithDays`（内部仍是 `POST /api/orders` 与 `POST /api/orders/{orderId}/days`），取消只把当前司导的行程日 `driverId` 置空。调度台「创建订单」走同一套函数，行程日不传 `driverId`。前端不封装 `POST /api/driver-calendar/claim`、`/range` 客户端；这两条接口仍保留在后端。请求不得把 `driverId` 当作登录身份。分配状态只写 `itinerary_days.driver_id`，没有单独的订单分配状态字段。
 
@@ -215,13 +262,16 @@ POST /api/driver-calendar/range
 ```http
 PUT  /api/orders/{orderId}/days/{dayId}
 POST /api/orders/{orderId}/days/{dayId}/activities
+POST /api/orders/{orderId}/days/{dayId}/activities/{activityId}/ticket
+GET  /api/orders/{orderId}/days/{dayId}/activities/{activityId}/ticket
+DELETE /api/orders/{orderId}/days/{dayId}/activities/{activityId}/ticket
 PUT  /api/orders/{orderId}/driver
 ```
 
 领取整单时调用 `PUT /api/orders/{orderId}/driver`。取消当前司导在该单上的日期时，对该司导名下的每一天 `PUT` `driverId: null`，不覆盖其他司导的行程日。调度台从司导日历拖一天到订单区：拆单只清空当天，未拆单则整单 `driverId: null`。不另建取消接口。
 调度台订单卡片改公司订单号和备注走 `PUT /api/orders/{id}`（写入 `platformOrderNo`、`notes`，其余字段保持原值）。删除走现有 `DELETE /api/orders/{id}`，与订单列表同一套。点某一天编辑行程复用现有活动接口，与司导日历同一套 `DriverDayEditor`。不另建订单编辑接口。
 
-`ticketPath` 只保存字符串，本阶段不提供文件上传或下载。
+电子票上传写入 `App_Data/files/tickets/`，`order_activities.ticket_path` 存相对路径。活动内容更新不再改写 `ticketPath`。只接受 8MB 以内的 jpg / png / webp / pdf。
 
 ---
 
@@ -230,10 +280,11 @@ PUT  /api/orders/{orderId}/driver
 ```http
 GET    /api/orders/{orderId}/files
 POST   /api/orders/{orderId}/files
+GET    /api/orders/{orderId}/files/{fileId}
 DELETE /api/orders/{orderId}/files/{fileId}
 ```
 
-上传采用 `multipart/form-data`。本轮尚未实现。
+上传采用 `multipart/form-data`，字段名 `file`。订单截图写入 `App_Data/files/orders/`，`order_files` 存文件名和相对路径。只接受 8MB 以内的 jpg / png / webp。四种上传（二维码、头像、电子票、订单截图）共用 `AppFileStore`，不另开存储路径。
 
 ---
 
@@ -257,6 +308,6 @@ DELETE /api/orders/{orderId}/files/{fileId}
 ## 9. 本阶段记录的假设
 
 1. API 使用 camelCase JSON。
-2. 第一阶段不实现认证。
+2. 登录使用 Cookie，角色为公司、调度员、司导。不实现 JWT 刷新或权限矩阵。
 3. 订单详情一次返回行程和活动，减少前端往返。
-4. 司机日历预览按当地日期闭区间查询；正式司机隔离须等身份机制。
+4. 司机日历预览按当地日期闭区间查询；司导页面以登录 `driverId` 为准。

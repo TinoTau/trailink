@@ -1,3 +1,4 @@
+import { readCurrentCompanyId } from '../currentCompany'
 import { eachLocalDate } from '../localDate'
 import type {
   AssignmentResult,
@@ -5,6 +6,7 @@ import type {
   Order,
   OrderActivity,
   OrderActivityWrite,
+  OrderFile,
   OrderWrite,
 } from '../types'
 import { api } from './client'
@@ -16,6 +18,7 @@ export async function createOrderWithDays(input: {
   endDate: string
   driverId?: string | null
   guestCount?: number
+  companyId?: string
 }) {
   if (!input.startDate || !input.endDate) {
     throw new Error('请先在日历上选择起止日期')
@@ -26,9 +29,11 @@ export async function createOrderWithDays(input: {
     throw new RangeError(`一次最多添加 ${MAX_ORDER_RANGE_DAYS} 天`)
   }
 
+  const companyId = input.companyId || readCurrentCompanyId() || undefined
   const order = await ordersApi.create({
     startDate: input.startDate,
     guestCount: input.guestCount ?? 0,
+    ...(companyId ? { companyId } : {}),
   })
   const warnings: string[] = []
   for (const date of dates) {
@@ -80,4 +85,25 @@ export const ordersApi = {
     api.delete(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}`),
   reorderActivities: (orderId: string, dayId: string, activityIds: string[]) =>
     api.put<OrderActivity[]>(`/api/orders/${orderId}/days/${dayId}/activities/reorder`, { activityIds }),
+  listFiles: (orderId: string) => api.get<OrderFile[]>(`/api/orders/${orderId}/files`),
+  uploadFile: (orderId: string, file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return api.postForm<OrderFile>(`/api/orders/${orderId}/files`, body)
+  },
+  removeFile: (orderId: string, fileId: string) => api.delete(`/api/orders/${orderId}/files/${fileId}`),
+  fileUrl: (orderId: string, fileId: string) => `/api/orders/${orderId}/files/${fileId}`,
+  uploadTicket: (orderId: string, dayId: string, activityId: string, file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return api.postForm<OrderActivity>(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`, body)
+  },
+  removeTicket: (orderId: string, dayId: string, activityId: string) =>
+    api.delete(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`),
+  ticketUrl: (orderId: string, dayId: string, activityId: string) =>
+    `/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`,
+}
+
+export function isStoredFile(path?: string | null) {
+  return Boolean(path && (path.startsWith('files/') || path.startsWith('company-qr/')))
 }

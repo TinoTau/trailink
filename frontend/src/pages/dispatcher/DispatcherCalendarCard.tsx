@@ -33,6 +33,7 @@ interface DispatcherCalendarCardProps {
   notes?: string
   onNotesChange?: (value: string) => void
   onNotesSave?: () => void
+  notesExtra?: ReactNode
   onRemove?: () => void
   removeLabel?: string
   bodyRef?: Ref<HTMLDivElement>
@@ -62,6 +63,7 @@ export function DispatcherCalendarCard({
   notes,
   onNotesChange,
   onNotesSave,
+  notesExtra,
   onRemove,
   removeLabel = '移除',
   bodyRef,
@@ -173,6 +175,7 @@ export function DispatcherCalendarCard({
               />
             </label>
           ) : null}
+          {notesExtra}
         </div>
       ) : null}
       <div

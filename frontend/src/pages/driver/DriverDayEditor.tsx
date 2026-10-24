@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ordersApi } from '../../api/orders'
+import { isStoredFile, ordersApi } from '../../api/orders'
+import { FileField } from '../FileField'
 import { formatLocalTime } from '../../localDate'
 import { splitOrderHint } from '../../orderFlags'
 import type { DriverCalendarDay, ItineraryDay, OrderActivity, OrderActivityWrite } from '../../types'
@@ -149,6 +150,7 @@ function TripEditor({
             }
           }}
           onPointerUp={() => void persistOrder()}
+          onUpdated={() => void onChanged()}
           onRemoved={() => {
             setActivities((current) => current.filter((item) => item.id !== activity.id))
             void onChanged()
@@ -186,6 +188,7 @@ function SavedActivity({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onUpdated,
   onRemoved,
 }: {
   orderId: string
@@ -195,11 +198,17 @@ function SavedActivity({
   onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void
   onPointerUp: () => void
+  onUpdated: () => void
   onRemoved: () => void
 }) {
   const details = [activity.provider, formatLocalTime(activity.bookingTime), formatLocalTime(activity.checkinTime)]
     .filter(Boolean)
     .join(' · ')
+
+  async function uploadTicket(file: File) {
+    await ordersApi.uploadTicket(orderId, dayId, activity.id, file)
+    onUpdated()
+  }
 
   return (
     <div
@@ -218,7 +227,19 @@ function SavedActivity({
         {details ? <span className="driver-activity-meta">{details}</span> : null}
       </div>
       <div className="driver-saved-activity-side">
-        {activity.ticketPath ? <span className="driver-ticket">电子票</span> : null}
+        {isStoredFile(activity.ticketPath) ? (
+          <a className="driver-ticket" href={ordersApi.ticketUrl(orderId, dayId, activity.id)} target="_blank" rel="noreferrer">
+            电子票
+          </a>
+        ) : activity.ticketPath ? (
+          <span className="driver-ticket">电子票</span>
+        ) : null}
+        <FileField
+          label={activity.ticketPath ? '更换' : '上传电子票'}
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          className="driver-ticket-btn"
+          onPick={(file) => void uploadTicket(file)}
+        />
         <button
           type="button"
           className="danger"
@@ -251,7 +272,7 @@ function ActivityComposer({
   const [provider, setProvider] = useState('')
   const [bookingTime, setBookingTime] = useState('')
   const [checkinTime, setCheckinTime] = useState('')
-  const [ticketPath, setTicketPath] = useState('')
+  const [ticket, setTicket] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -261,7 +282,6 @@ function ActivityComposer({
       provider: provider.trim() || undefined,
       bookingTime: fromTimeInput(date, bookingTime),
       checkinTime: fromTimeInput(date, checkinTime),
-      ticketPath: ticketPath.trim() || undefined,
     }
     if (!body.content) {
       setError('请填写活动内容')
@@ -272,7 +292,8 @@ function ActivityComposer({
     setError(null)
     try {
       const created = await ordersApi.createActivity(orderId, dayId, body)
-      onCreated(created)
+      const withTicket = ticket ? await ordersApi.uploadTicket(orderId, dayId, created.id, ticket) : created
+      onCreated(withTicket)
     } catch (item) {
       setError(item instanceof Error ? item.message : '添加活动失败')
     } finally {
@@ -294,10 +315,11 @@ function ActivityComposer({
           <input type="time" value={checkinTime} onChange={(event) => setCheckinTime(event.target.value)} />
         </label>
       </div>
-      <input
-        placeholder="电子票路径或备注"
-        value={ticketPath}
-        onChange={(event) => setTicketPath(event.target.value)}
+      <FileField
+        label={ticket ? `已选 ${ticket.name}` : '上传电子票'}
+        accept="image/jpeg,image/png,image/webp,application/pdf"
+        className="driver-ticket-btn"
+        onPick={setTicket}
       />
       {error ? <p className="driver-edit-error">{error}</p> : null}
       <div className="driver-activity-actions">

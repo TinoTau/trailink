@@ -3,12 +3,13 @@ using Microsoft.EntityFrameworkCore;
 using Trailink.Api.Data;
 using Trailink.Api.DTOs;
 using Trailink.Api.Models;
+using Trailink.Api.Services;
 
 namespace Trailink.Api.Controllers;
 
 [ApiController]
 [Route("api/orders/{orderId:guid}/days/{dayId:guid}/activities")]
-public class OrderActivitiesController(TrailinkDbContext db) : ControllerBase
+public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<OrderActivityReadDto>>> List(
@@ -96,7 +97,6 @@ public class OrderActivitiesController(TrailinkDbContext db) : ControllerBase
         activity.Provider = TrimToNull(request.Provider);
         activity.BookingTime = AsUnspecified(request.BookingTime);
         activity.CheckinTime = AsUnspecified(request.CheckinTime);
-        activity.TicketPath = TrimToNull(request.TicketPath);
         await db.SaveChangesAsync(cancellationToken);
         return Ok(ToRead(activity));
     }
@@ -116,7 +116,73 @@ public class OrderActivitiesController(TrailinkDbContext db) : ControllerBase
             return NotFound();
         }
 
+        files.Delete(activity.TicketPath);
         db.OrderActivities.Remove(activity);
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("{activityId:guid}/ticket")]
+    [RequestSizeLimit(8_000_000)]
+    public async Task<ActionResult<OrderActivityReadDto>> UploadTicket(
+        Guid orderId,
+        Guid dayId,
+        Guid activityId,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        var activity = await LoadActivityAsync(orderId, dayId, activityId, cancellationToken);
+        if (activity is null)
+        {
+            return NotFound();
+        }
+
+        var (path, error) = await files.SaveAsync(
+            StoredFileKind.Ticket,
+            activity.Id,
+            file,
+            activity.TicketPath,
+            AppFileStore.DocumentExtensions,
+            AppFileStore.DocumentLimit,
+            "电子票请上传 8MB 以内的 jpg / png / webp / pdf。",
+            cancellationToken);
+        if (error is not null)
+        {
+            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        activity.TicketPath = path;
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(ToRead(activity));
+    }
+
+    [HttpGet("{activityId:guid}/ticket")]
+    public async Task<IActionResult> Ticket(
+        Guid orderId,
+        Guid dayId,
+        Guid activityId,
+        CancellationToken cancellationToken)
+    {
+        var activity = await LoadActivityAsync(orderId, dayId, activityId, cancellationToken);
+        var opened = files.Open(activity?.TicketPath);
+        return opened is null ? NotFound() : PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+    }
+
+    [HttpDelete("{activityId:guid}/ticket")]
+    public async Task<IActionResult> DeleteTicket(
+        Guid orderId,
+        Guid dayId,
+        Guid activityId,
+        CancellationToken cancellationToken)
+    {
+        var activity = await LoadActivityAsync(orderId, dayId, activityId, cancellationToken);
+        if (activity is null)
+        {
+            return NotFound();
+        }
+
+        files.Delete(activity.TicketPath);
+        activity.TicketPath = null;
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -165,6 +231,20 @@ public class OrderActivitiesController(TrailinkDbContext db) : ControllerBase
         TicketPath = activity.TicketPath,
         SortOrder = activity.SortOrder
     };
+
+    private async Task<OrderActivity?> LoadActivityAsync(
+        Guid orderId,
+        Guid dayId,
+        Guid activityId,
+        CancellationToken cancellationToken)
+    {
+        var activity = await db.OrderActivities
+            .Include(item => item.ItineraryDay)
+            .FirstOrDefaultAsync(item => item.Id == activityId, cancellationToken);
+        return activity is null || activity.ItineraryDayId != dayId || activity.ItineraryDay.OrderId != orderId
+            ? null
+            : activity;
+    }
 
     private async Task<bool> DayExistsAsync(Guid orderId, Guid dayId, CancellationToken cancellationToken)
     {

@@ -22,6 +22,97 @@ namespace Trailink.Api.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Trailink.Api.Models.Company", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Contact")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("contact");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("QrPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("qr_path");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("companies", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.CompanyMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("role");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("UserId", "CompanyId")
+                        .IsUnique();
+
+                    b.ToTable("company_members", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.DispatcherApplication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("UserId", "CompanyId")
+                        .IsUnique();
+
+                    b.ToTable("dispatcher_applications", (string)null);
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.Driver", b =>
                 {
                     b.Property<Guid>("Id")
@@ -47,6 +138,35 @@ namespace Trailink.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("drivers", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.DriverApplication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DispatcherUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("dispatcher_user_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DispatcherUserId");
+
+                    b.HasIndex("UserId", "DispatcherUserId")
+                        .IsUnique();
+
+                    b.ToTable("driver_applications", (string)null);
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.ItineraryDay", b =>
@@ -94,6 +214,14 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
                     b.Property<int>("GuestCount")
                         .HasColumnType("integer")
                         .HasColumnName("guest_count");
@@ -123,6 +251,10 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnName("start_date");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("OrderNo")
                         .IsUnique();
@@ -203,6 +335,119 @@ namespace Trailink.Api.Data.Migrations
                     b.ToTable("order_files", (string)null);
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.User", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AvatarPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("avatar_path");
+
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("company_id");
+
+                    b.Property<Guid?>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("password_hash");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("role");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("username");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("DriverId");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.CompanyMember", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.Company", "Company")
+                        .WithMany("Members")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.User", "User")
+                        .WithMany("Memberships")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.DispatcherApplication", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.Company", "Company")
+                        .WithMany("Applications")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.User", "User")
+                        .WithMany("Applications")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.DriverApplication", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.User", "Dispatcher")
+                        .WithMany("IncomingDriverApplications")
+                        .HasForeignKey("DispatcherUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.User", "User")
+                        .WithMany("DriverApplications")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Dispatcher");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.ItineraryDay", b =>
                 {
                     b.HasOne("Trailink.Api.Models.Driver", "Driver")
@@ -219,6 +464,23 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("Driver");
 
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.Order", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Trailink.Api.Models.User", "CreatedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("CreatedBy");
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.OrderActivity", b =>
@@ -243,6 +505,32 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("Order");
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.User", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.Company", "Company")
+                        .WithMany("Users")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Trailink.Api.Models.Driver", "Driver")
+                        .WithMany()
+                        .HasForeignKey("DriverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Driver");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.Company", b =>
+                {
+                    b.Navigation("Applications");
+
+                    b.Navigation("Members");
+
+                    b.Navigation("Users");
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.Driver", b =>
                 {
                     b.Navigation("ItineraryDays");
@@ -258,6 +546,17 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("Days");
 
                     b.Navigation("Files");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.User", b =>
+                {
+                    b.Navigation("Applications");
+
+                    b.Navigation("DriverApplications");
+
+                    b.Navigation("IncomingDriverApplications");
+
+                    b.Navigation("Memberships");
                 });
 #pragma warning restore 612, 618
         }

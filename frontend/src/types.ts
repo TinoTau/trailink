@@ -1,3 +1,74 @@
+export type UserRole = 'company' | 'dispatcher' | 'driver'
+
+export interface PendingApplication {
+  id: string
+  companyId: string
+  companyName: string
+}
+
+export interface SessionUser {
+  id: string
+  username: string
+  name: string
+  role: UserRole
+  companyId?: string | null
+  companyName?: string | null
+  driverId?: string | null
+  hasAvatar?: boolean
+  companies?: CompanySearch[]
+  pendingApplications?: PendingApplication[]
+  pendingDriverApplications?: PendingDriverApplication[]
+}
+
+export interface PendingDriverApplication {
+  id: string
+  dispatcherUserId: string
+  dispatcherName: string
+}
+
+export interface DispatcherSearch {
+  id: string
+  name: string
+}
+
+export interface DriverApplicant {
+  id: string
+  userId: string
+  username: string
+  name: string
+}
+
+export interface CompanySearch {
+  id: string
+  name: string
+}
+
+export interface CompanyHome {
+  companies: CompanySearch[]
+  desk?: CompanyDesk | null
+}
+
+export interface CompanyDesk {
+  id: string
+  name: string
+  ownerName: string
+  contact?: string | null
+  hasQr: boolean
+  canEdit: boolean
+  canManage: boolean
+  applications: Array<{ id: string; userId: string; username: string; name: string }>
+  dispatchers: Array<{ userId: string; username: string; name: string }>
+  orders: CompanyOrderSummary[]
+}
+
+export interface CompanyOrderSummary {
+  id: string
+  orderNo: string
+  startDate: string
+  dayCount: number
+  kind: 'company' | 'assigned' | 'driven'
+}
+
 export interface Driver {
   id: string
   name: string
@@ -56,6 +127,13 @@ export interface Order {
   assignedDriverId?: string | null
   assignedDayCount?: number
   days: ItineraryDay[]
+  files?: OrderFile[]
+}
+
+export interface OrderFile {
+  id: string
+  orderId: string
+  fileName: string
 }
 
 export interface OrderWrite {
@@ -64,6 +142,7 @@ export interface OrderWrite {
   startDate: string
   guestCount: number
   notes?: string
+  companyId?: string
 }
 
 export interface AssignmentResult {
@@ -97,20 +176,3 @@ export interface DriverCalendarDay {
   items: DriverCalendarTrip[]
 }
 
-/** 后端保留预览投影的前端类型；页面主数据走 Order / ItineraryDay。 */
-export interface DriverCalendarPreview {
-  preview: boolean
-  identityIsolated: boolean
-  driverId?: string | null
-  driverName?: string | null
-  days: DriverCalendarDay[]
-}
-
-/** 后端保留 claim/range 响应类型；页面写操作走 ordersApi，不封装该客户端。 */
-export interface DriverCalendarMutation {
-  orderId: string
-  orderNo: string
-  driverId?: string | null
-  updatedDayCount: number
-  warnings: string[]
-}

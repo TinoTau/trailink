@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { message } from 'antd'
-import { driversApi } from '../../api/drivers'
+import { useAuth } from '../../auth/AuthContext'
+import { AccountMenu } from '../AccountMenu'
 import { createOrderWithDays, ordersApi } from '../../api/orders'
 import { PRESET_COLORS, contrastText } from '../../calendarUi'
 import {
@@ -13,12 +14,11 @@ import {
   orderedRange,
   todayLocal,
 } from '../../localDate'
-import type { Driver, DriverCalendarDay, DriverCalendarTrip, Order } from '../../types'
+import type { DriverCalendarDay, DriverCalendarTrip, Order } from '../../types'
 import { DriverDayEditor } from './DriverDayEditor'
 import './driver-calendar.css'
 
 const COLOR_STORAGE_KEY = 'trailink.driverCalendar.colors.v2'
-const DRIVER_STORAGE_KEY = 'trailink.driverCalendar.previewDriverId'
 
 interface CalendarColors {
   past: string
@@ -44,25 +44,6 @@ function readColors(): CalendarColors {
   } catch {
     return DEFAULT_COLORS
   }
-}
-
-function pickDriverId(drivers: Driver[], orders: Order[], stored: string | null) {
-  if (stored && drivers.some((driver) => driver.id === stored)) {
-    return stored
-  }
-  const counts = new Map<string, number>()
-  for (const order of orders) {
-    for (const day of order.days) {
-      if (day.driverId) {
-        counts.set(day.driverId, (counts.get(day.driverId) ?? 0) + 1)
-      }
-    }
-  }
-  return [...drivers]
-    .sort((left, right) => {
-      const countDelta = (counts.get(right.id) ?? 0) - (counts.get(left.id) ?? 0)
-      return countDelta !== 0 ? countDelta : left.name.localeCompare(right.name, 'zh')
-    })[0]?.id ?? null
 }
 
 function daysByDriver(orders: Order[], driverId: string | null): Record<string, DriverCalendarDay> {
@@ -91,12 +72,12 @@ function daysByDriver(orders: Order[], driverId: string | null): Record<string, 
 }
 
 export function DriverCalendarPage() {
+  const { user } = useAuth()
+  const driverId = user?.driverId ?? null
   const today = useMemo(() => todayLocal(), [])
   const todayKey = formatLocalDate(today)
   const [months, setMonths] = useState(() => [-2, -1, 0, 1, 2].map((offset) => addMonths(today, offset)))
   const [orders, setOrders] = useState<Order[]>([])
-  const [drivers, setDrivers] = useState<Driver[]>([])
-  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(localStorage.getItem(DRIVER_STORAGE_KEY))
   const [colors, setColors] = useState<CalendarColors>(readColors)
   const [colorTarget, setColorTarget] = useState<'past' | 'upcoming' | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -113,24 +94,14 @@ export function DriverCalendarPage() {
   const rangeDragging = useRef(false)
   const unbindLock = useRef(false)
 
-  const daysByDate = useMemo(() => daysByDriver(orders, selectedDriverId), [orders, selectedDriverId])
+  const daysByDate = useMemo(() => daysByDriver(orders, driverId), [orders, driverId])
   const selectedDay = selectedDate ? daysByDate[selectedDate] : undefined
-  const selectedDriver = drivers.find((driver) => driver.id === selectedDriverId) ?? null
   const [rangeFrom, rangeTo] = rangeStart ? orderedRange(rangeStart, rangeEnd) : [null, null]
   const addingTrip = menuOpen && !canceling
 
   async function loadBoard() {
     try {
-      const [nextOrders, nextDrivers] = await Promise.all([ordersApi.list(), driversApi.list()])
-      setOrders(nextOrders)
-      setDrivers(nextDrivers)
-      setSelectedDriverId((current) => {
-        const next = pickDriverId(nextDrivers, nextOrders, current)
-        if (next && next !== current) {
-          localStorage.setItem(DRIVER_STORAGE_KEY, next)
-        }
-        return next
-      })
+      setOrders(await ordersApi.list())
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载行程失败')
     }
@@ -168,12 +139,6 @@ export function DriverCalendarPage() {
   function persistColors(next: CalendarColors) {
     setColors(next)
     localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(next))
-  }
-
-  function persistDriver(driverId: string) {
-    setSelectedDriverId(driverId)
-    localStorage.setItem(DRIVER_STORAGE_KEY, driverId)
-    setSelectedDate(null)
   }
 
   function prependMonth() {
@@ -284,8 +249,8 @@ export function DriverCalendarPage() {
       message.warning('请输入订单号')
       return
     }
-    if (!selectedDriverId) {
-      message.warning('请先选择司导')
+    if (!driverId) {
+      message.warning('还没有司机身份')
       return
     }
     setBusy(true)
@@ -296,7 +261,7 @@ export function DriverCalendarPage() {
         message.error('找不到该订单号')
         return
       }
-      const result = await ordersApi.assignDriver(order.id, selectedDriverId)
+      const result = await ordersApi.assignDriver(order.id, driverId)
       if (result.warnings.length > 0) {
         message.warning(result.warnings.join('；'))
       } else {
@@ -316,8 +281,8 @@ export function DriverCalendarPage() {
       message.warning('请先在日历上选择起止日期')
       return
     }
-    if (!selectedDriverId) {
-      message.warning('请先选择司导')
+    if (!driverId) {
+      message.warning('还没有司机身份')
       return
     }
     setBusy(true)
@@ -325,7 +290,7 @@ export function DriverCalendarPage() {
       const created = await createOrderWithDays({
         startDate: rangeFrom,
         endDate: rangeTo,
-        driverId: selectedDriverId,
+        driverId,
       })
       if (created.warnings.length > 0) {
         message.warning(created.warnings.join('；'))
@@ -347,11 +312,11 @@ export function DriverCalendarPage() {
   }
 
   async function unbindOrder(orderId: string, orderLabel: string) {
-    if (unbindLock.current || !selectedDriverId) {
+    if (unbindLock.current || !driverId) {
       return
     }
     const order = orders.find((item) => item.id === orderId)
-    const days = order?.days.filter((day) => day.driverId === selectedDriverId) ?? []
+    const days = order?.days.filter((day) => day.driverId === driverId) ?? []
     if (!order || days.length === 0) {
       message.warning('当前司导没有可取消的日期')
       return
@@ -405,22 +370,10 @@ export function DriverCalendarPage() {
       <header className="driver-calendar-header">
         <div>
           <h1>我的行程</h1>
-          <p>与调度台同一套行程日 · 开发预览</p>
-          {drivers.length > 0 ? (
-            <select
-              className="driver-calendar-driver"
-              aria-label="当前查看的司导"
-              value={selectedDriverId ?? ''}
-              onChange={(event) => persistDriver(event.target.value)}
-            >
-              {drivers.map((driver) => (
-                <option key={driver.id} value={driver.id}>
-                  {driver.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
+          <p>{user?.name || '与调度台同一套行程日'}</p>
         </div>
+        <div className="driver-header-actions">
+          <AccountMenu />
         <button
           type="button"
           className={`driver-add-button${menuOpen ? ' active' : ''}`}
@@ -443,6 +396,7 @@ export function DriverCalendarPage() {
         >
           行程管理
         </button>
+        </div>
       </header>
       {menuOpen ? (
         <section className="driver-add-panel">
@@ -459,7 +413,7 @@ export function DriverCalendarPage() {
           </button>
           <p className="driver-add-hint">
             {canceling
-              ? `点击日历上已有行程的某一天，只取消${selectedDriver ? `「${selectedDriver.name}」` : '当前司导'}在该单上的日期，其他司导不受影响。`
+              ? `点击日历上已有行程的某一天，只取消${user?.name ? `「${user.name}」` : '当前司导'}在该单上的日期，其他司导不受影响。`
               : '不知道订单号时，在日历上按住并拖选起止日期。'}
           </p>
           {rangeFrom && rangeTo && !canceling ? (

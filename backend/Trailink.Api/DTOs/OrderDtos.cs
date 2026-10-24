@@ -7,6 +7,7 @@ public class OrderWriteDto
     public DateOnly StartDate { get; set; }
     public int GuestCount { get; set; }
     public string? Notes { get; set; }
+    public Guid? CompanyId { get; set; }
 }
 
 public class OrderReadDto
@@ -23,6 +24,14 @@ public class OrderReadDto
     public Guid? AssignedDriverId { get; set; }
     public int AssignedDayCount { get; set; }
     public List<ItineraryDayReadDto> Days { get; set; } = [];
+    public List<OrderFileReadDto> Files { get; set; } = [];
+}
+
+public class OrderFileReadDto
+{
+    public Guid Id { get; set; }
+    public Guid OrderId { get; set; }
+    public string FileName { get; set; } = string.Empty;
 }
 
 public class AssignDriverDto

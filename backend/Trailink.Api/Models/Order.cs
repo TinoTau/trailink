@@ -9,7 +9,11 @@ public class Order
     public DateOnly StartDate { get; set; }
     public int GuestCount { get; set; }
     public string? Notes { get; set; }
+    public Guid? CompanyId { get; set; }
+    public Guid? CreatedByUserId { get; set; }
 
+    public Company? Company { get; set; }
+    public User? CreatedBy { get; set; }
     public ICollection<ItineraryDay> Days { get; set; } = [];
     public ICollection<OrderFile> Files { get; set; } = [];
 

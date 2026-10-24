@@ -4,8 +4,10 @@ import dayjs from 'dayjs'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { driversApi } from '../api/drivers'
-import { ordersApi } from '../api/orders'
-import type { Driver, ItineraryDay, OrderActivity, OrderActivityWrite } from '../types'
+import { isStoredFile, ordersApi } from '../api/orders'
+import type { Driver, ItineraryDay, OrderActivity, OrderActivityWrite, OrderFile } from '../types'
+import { FileField } from './FileField'
+import { OrderFilesBlock } from './OrderFilesBlock'
 
 interface OrderFormValues {
   platformOrderNo?: string
@@ -26,6 +28,7 @@ export function OrderEditPage() {
   const [saving, setSaving] = useState(false)
   const [currentOrderId, setCurrentOrderId] = useState<string | null>(isNew ? null : orderId)
   const [orderNo, setOrderNo] = useState<string>('')
+  const [files, setFiles] = useState<OrderFile[]>([])
   const [newDayDate, setNewDayDate] = useState<Dayjs | null>(null)
 
   useEffect(() => {
@@ -37,6 +40,7 @@ export function OrderEditPage() {
     setCurrentOrderId(order.id)
     setOrderNo(order.orderNo)
     setDays(order.days ?? [])
+    setFiles(order.files ?? [])
     setSelectedDayId((current) => current ?? order.days[0]?.id ?? null)
     form.setFieldsValue({
       platformOrderNo: order.platformOrderNo ?? undefined,
@@ -167,6 +171,12 @@ export function OrderEditPage() {
             保存订单
           </Button>
         </Form>
+        {currentOrderId ? (
+          <div style={{ marginTop: 16 }}>
+            <Typography.Text strong>订单截图</Typography.Text>
+            <OrderFilesBlock orderId={currentOrderId} files={files} onChanged={() => void loadOrder(currentOrderId)} />
+          </div>
+        ) : null}
       </Card>
 
       {currentOrderId && (
@@ -249,8 +259,11 @@ export function OrderEditPage() {
             {selectedDay.activities.map((activity) => (
               <ActivityForm
                 key={activity.id}
+                orderId={currentOrderId}
+                dayId={selectedDay.id}
                 activity={activity}
                 onSave={(values) => void saveActivity(selectedDay, activity, values)}
+                onTicketChanged={() => void loadOrder(currentOrderId).then(() => setSelectedDayId(selectedDay.id))}
                 onDelete={async () => {
                   await ordersApi.removeActivity(currentOrderId, selectedDay.id, activity.id)
                   await loadOrder(currentOrderId)
@@ -258,7 +271,11 @@ export function OrderEditPage() {
                 }}
               />
             ))}
-            <ActivityForm onSave={(values) => void saveActivity(selectedDay, null, values)} />
+            <ActivityForm
+              orderId={currentOrderId}
+              dayId={selectedDay.id}
+              onSave={(values) => void saveActivity(selectedDay, null, values)}
+            />
           </Space>
         </Card>
       )}
@@ -288,12 +305,18 @@ function formatLocalDateTime(value: string | Dayjs | null | undefined) {
 }
 
 function ActivityForm({
+  orderId,
+  dayId,
   activity,
   onSave,
+  onTicketChanged,
   onDelete,
 }: {
+  orderId: string
+  dayId: string
   activity?: OrderActivity
   onSave: (values: OrderActivityWrite) => void
+  onTicketChanged?: () => void
   onDelete?: () => void
 }) {
   const [form] = Form.useForm<OrderActivityWrite>()
@@ -302,7 +325,6 @@ function ActivityForm({
     form.setFieldsValue({
       content: activity?.content,
       provider: activity?.provider ?? undefined,
-      ticketPath: activity?.ticketPath ?? undefined,
       bookingTime: activity?.bookingTime ?? undefined,
       checkinTime: activity?.checkinTime ?? undefined,
     })
@@ -333,9 +355,24 @@ function ActivityForm({
         <Form.Item name="checkinTime" label="签到时间" getValueProps={(value) => ({ value: value ? dayjs(value) : null })}>
           <DatePicker showTime style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item name="ticketPath" label="电子票路径">
-          <Input placeholder="本阶段只保存路径" />
-        </Form.Item>
+        {activity ? (
+          <Form.Item label="电子票">
+            <Space>
+              {isStoredFile(activity.ticketPath) ? (
+                <a href={ordersApi.ticketUrl(orderId, dayId, activity.id)} target="_blank" rel="noreferrer">
+                  查看电子票
+                </a>
+              ) : null}
+              <FileField
+                label={activity.ticketPath ? '更换电子票' : '上传电子票'}
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                onPick={(file) => {
+                  void ordersApi.uploadTicket(orderId, dayId, activity.id, file).then(() => onTicketChanged?.())
+                }}
+              />
+            </Space>
+          </Form.Item>
+        ) : null}
         <Space>
           <Button htmlType="submit" type="primary">
             {activity ? '保存活动' : '添加活动'}

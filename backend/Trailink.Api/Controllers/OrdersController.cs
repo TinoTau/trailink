@@ -9,7 +9,7 @@ namespace Trailink.Api.Controllers;
 
 [ApiController]
 [Route("api/orders")]
-public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assignment) : ControllerBase
+public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assignment, AuthSession session, AppFileStore files) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<OrderReadDto>>> List(
@@ -18,7 +18,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         [FromQuery] string? orderNo,
         CancellationToken cancellationToken)
     {
-        var query = db.Orders.Include(order => order.Days).AsQueryable();
+        var query = db.Orders.Include(order => order.Days).Include(order => order.Files).AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(orderNo))
         {
@@ -59,6 +59,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
         }
 
+        var user = await session.GetUserAsync(cancellationToken);
         var order = new Order
         {
             Id = Guid.NewGuid(),
@@ -67,7 +68,9 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             SourceCompany = TrimToNull(request.SourceCompany),
             StartDate = request.StartDate,
             GuestCount = request.GuestCount,
-            Notes = request.Notes
+            Notes = request.Notes,
+            CreatedByUserId = user?.Id,
+            CompanyId = ResolveCompanyId(user, request.CompanyId)
         };
 
         db.Orders.Add(order);
@@ -106,13 +109,99 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
+        var order = await db.Orders
+            .Include(item => item.Files)
+            .Include(item => item.Days)
+            .ThenInclude(day => day.Activities)
+            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (order is null)
+        {
+            return NotFound();
+        }
+
+        foreach (var file in order.Files)
+        {
+            files.Delete(file.FilePath);
+        }
+
+        foreach (var activity in order.Days.SelectMany(day => day.Activities))
+        {
+            files.Delete(activity.TicketPath);
+        }
+
+        db.Orders.Remove(order);
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpGet("{id:guid}/files")]
+    public async Task<ActionResult<List<OrderFileReadDto>>> ListFiles(Guid id, CancellationToken cancellationToken)
+    {
+        var order = await db.Orders.Include(item => item.Files).FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        return order is null ? NotFound() : Ok(order.Files.OrderBy(file => file.FileName).Select(ToFile).ToList());
+    }
+
+    [HttpPost("{id:guid}/files")]
+    [RequestSizeLimit(8_000_000)]
+    public async Task<ActionResult<OrderFileReadDto>> UploadFile(Guid id, IFormFile file, CancellationToken cancellationToken)
+    {
         var order = await db.Orders.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (order is null)
         {
             return NotFound();
         }
 
-        db.Orders.Remove(order);
+        var fileId = Guid.NewGuid();
+        var (path, error) = await files.SaveAsync(
+            StoredFileKind.Order,
+            fileId,
+            file,
+            null,
+            AppFileStore.ImageExtensions,
+            AppFileStore.DocumentLimit,
+            "订单截图请上传 8MB 以内的 jpg / png / webp。",
+            cancellationToken);
+        if (error is not null)
+        {
+            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var stored = new OrderFile
+        {
+            Id = fileId,
+            OrderId = order.Id,
+            FileName = Path.GetFileName(file.FileName),
+            FilePath = path!
+        };
+        if (stored.FileName.Length > 255)
+        {
+            stored.FileName = stored.FileName[..255];
+        }
+
+        db.OrderFiles.Add(stored);
+        await db.SaveChangesAsync(cancellationToken);
+        return CreatedAtAction(nameof(DownloadFile), new { id, fileId }, ToFile(stored));
+    }
+
+    [HttpGet("{id:guid}/files/{fileId:guid}")]
+    public async Task<IActionResult> DownloadFile(Guid id, Guid fileId, CancellationToken cancellationToken)
+    {
+        var stored = await db.OrderFiles.FirstOrDefaultAsync(item => item.Id == fileId && item.OrderId == id, cancellationToken);
+        var opened = files.Open(stored?.FilePath);
+        return opened is null ? NotFound() : PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+    }
+
+    [HttpDelete("{id:guid}/files/{fileId:guid}")]
+    public async Task<IActionResult> DeleteFile(Guid id, Guid fileId, CancellationToken cancellationToken)
+    {
+        var stored = await db.OrderFiles.FirstOrDefaultAsync(item => item.Id == fileId && item.OrderId == id, cancellationToken);
+        if (stored is null)
+        {
+            return NotFound();
+        }
+
+        files.Delete(stored.FilePath);
+        db.OrderFiles.Remove(stored);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -170,6 +259,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             .ThenInclude(day => day.Driver)
             .Include(order => order.Days)
             .ThenInclude(day => day.Activities)
+            .Include(order => order.Files)
             .FirstOrDefaultAsync(order => order.Id == id, cancellationToken);
     }
 
@@ -204,9 +294,20 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
                     EndLocation = day.EndLocation,
                     DriverId = day.DriverId
                 })
+                .ToList(),
+            Files = order.Files
+                .OrderBy(file => file.FileName)
+                .Select(ToFile)
                 .ToList()
         };
     }
+
+    internal static OrderFileReadDto ToFile(OrderFile file) => new()
+    {
+        Id = file.Id,
+        OrderId = file.OrderId,
+        FileName = file.FileName
+    };
 
     internal static OrderReadDto ToDetail(Order order)
     {
@@ -216,6 +317,36 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             .Select(ItineraryDaysController.ToRead)
             .ToList();
         return dto;
+    }
+
+    private static Guid? ResolveCompanyId(User? user, Guid? requested)
+    {
+        if (user is null)
+        {
+            return null;
+        }
+
+        if (requested is Guid companyId)
+        {
+            if (user.Role == UserRoles.Company && user.CompanyId == companyId)
+            {
+                return companyId;
+            }
+
+            if (user.Memberships.Any(member => member.CompanyId == companyId))
+            {
+                return companyId;
+            }
+
+            return null;
+        }
+
+        if (user.Role == UserRoles.Company)
+        {
+            return user.CompanyId;
+        }
+
+        return user.Memberships.Count == 1 ? user.Memberships.First().CompanyId : null;
     }
 
     private static string? Validate(OrderWriteDto request)
