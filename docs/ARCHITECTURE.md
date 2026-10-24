@@ -85,7 +85,7 @@ ASP.NET Core Web API → Amazon S3
 - LLM
 - GraphQL
 
-调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。两个页面都从订单列表取行程日，日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`。
+调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。两个页面都从订单列表取行程日；「所有订单」和本人日历排除已派完且已结束的历史单。历史单只在 `/company` 展示：公司账户看本公司全部，调度员/司导看自己创建或跑过的。日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`。
 
 后端采用简单分层：
 
@@ -138,10 +138,10 @@ Trailink/
 ## 4. 数据与文件
 
 - 使用 EF Core Migrations 管理数据库结构。
-- 第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`users`、`dispatcher_applications`、`driver_applications`。
+- 第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`。
 - 四种上传（公司二维码、用户头像、电子票、订单截图）共用 `AppFileStore`，根目录 `App_Data/files/{qr,avatars,tickets,orders}/`。库里只存相对路径：`companies.qr_path`、`users.avatar_path`、`order_activities.ticket_path`、`order_files.file_path`。不进 `wwwroot`，不另开第二套存储。旧二维码路径 `company-qr/` 仍可读取。头像在写入前经 `AvatarImage`（SkiaSharp）缩到最长边 256 并压成 JPEG，覆盖时删掉该用户旧文件。二维码 / 电子票 / 订单截图保持原图。
 - 订单起始日期和行程日期使用 PostgreSQL `DATE` / `DateOnly`。活动预订与签到时间使用 `TIMESTAMP WITHOUT TIME ZONE` / `DateTime`（`Kind=Unspecified`），表示当地钟表时间。
-- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`，不封装 `claim` / `range` 客户端。分配只更新 `driver_id`。公司、调度员、司导登录后都只看自己的 `driver_id`。
+- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`。不提供 `claim` / `range` / preview 日历接口。分配只更新 `driver_id`。公司、调度员、司导登录后都只看自己的 `driver_id`。
 - 不引入时区管理框架。正式创建收费云资源前必须另行确认。
 
 ---

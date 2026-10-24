@@ -14,6 +14,7 @@ import {
   orderedRange,
   todayLocal,
 } from '../../localDate'
+import { isHistoricalOrder } from '../../orderFlags'
 import type { DriverCalendarDay, DriverCalendarTrip, Order } from '../../types'
 import { DriverDayEditor } from './DriverDayEditor'
 import './driver-calendar.css'
@@ -46,12 +47,15 @@ function readColors(): CalendarColors {
   }
 }
 
-function daysByDriver(orders: Order[], driverId: string | null): Record<string, DriverCalendarDay> {
+function daysByDriver(orders: Order[], driverId: string | null, today: string): Record<string, DriverCalendarDay> {
   if (!driverId) {
     return {}
   }
   const next: Record<string, DriverCalendarDay> = {}
   for (const order of orders) {
+    if (isHistoricalOrder(order, today)) {
+      continue
+    }
     for (const day of order.days) {
       if (day.driverId !== driverId) {
         continue
@@ -94,7 +98,7 @@ export function DriverCalendarPage() {
   const rangeDragging = useRef(false)
   const unbindLock = useRef(false)
 
-  const daysByDate = useMemo(() => daysByDriver(orders, driverId), [orders, driverId])
+  const daysByDate = useMemo(() => daysByDriver(orders, driverId, todayKey), [orders, driverId, todayKey])
   const selectedDay = selectedDate ? daysByDate[selectedDate] : undefined
   const [rangeFrom, rangeTo] = rangeStart ? orderedRange(rangeStart, rangeEnd) : [null, null]
   const addingTrip = menuOpen && !canceling

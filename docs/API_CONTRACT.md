@@ -52,7 +52,7 @@ POST /api/dispatchers/applications/{applicationId}/approve
 
 `POST /api/auth/avatar` 上传本人头像，`GET /api/auth/avatar` 读取。只接受 8MB 以内的 jpg / png / webp。服务端缩小到最长边 256 并压成 JPEG 后再写入 `App_Data/files/avatars/`，`users.avatar_path` 存相对路径。覆盖上传时删除该用户旧头像（含不同扩展名）。读取带 `Cache-Control: private, max-age=86400`。
 
-`GET /api/companies?name=` 需登录，按名称模糊查找，最多 20 条。司导和调度员都可以申请成为某家公司的调度员。已经是该公司司导成员的仍可申请升为调度员；已经是调度员则不能再申请。`GET /api/dispatchers?name=` 按调度员姓名模糊查找。司导和调度员可以申请成为某位调度员的司导；批准后写入该调度员所在公司的 `company_members`，`role=driver`。调度员在个人信息页查看并批准申请。已经是对方全部所属公司成员的不能再申请。`GET /api/company` 返回可查看的公司列表和当前公司桌面：名称、负责人、联系方式、二维码、以及自己分配或跑过的订单缩略。公司账户可 `PUT` 联系方式、上传二维码，并批准或移除调度员。二维码走同一套本地存储，写入 `App_Data/files/qr/`，`companies.qr_path` 存相对路径；旧的 `company-qr/` 路径仍可读取。`POST /api/orders` 可带 `companyId`，写入当前公司，不改变调度台读全库订单。
+`GET /api/companies?name=` 需登录，按名称模糊查找，最多 20 条。司导和调度员都可以申请成为某家公司的调度员。已经是该公司司导成员的仍可申请升为调度员；已经是调度员则不能再申请。`GET /api/dispatchers?name=` 按调度员姓名模糊查找。司导和调度员可以申请成为某位调度员的司导；批准后写入该调度员所在公司的 `company_members`，`role=driver`。调度员在个人信息页查看并批准申请。已经是对方全部所属公司成员的不能再申请。`GET /api/company` 返回可查看的公司列表和当前公司桌面：名称、负责人、联系方式、二维码、以及已派完且结束日早于今天的历史订单缩略。公司账户看本公司全部历史单；调度员和司导只看 `created_by_user_id` 是自己，或行程日 `driver_id` 是自己的。公司账户可 `PUT` 联系方式、上传二维码，并批准或移除调度员。二维码走同一套本地存储，写入 `App_Data/files/qr/`，`companies.qr_path` 存相对路径；旧的 `company-qr/` 路径仍可读取。`POST /api/orders` 可带 `companyId`，写入当前公司。调度台「所有订单」在前端排除历史单，仍读 `GET /api/orders`。
 
 ---
 
@@ -214,50 +214,13 @@ PUT /api/orders/{orderId}/days/{dayId}/activities/reorder
 
 ---
 
-## 6. Driver Calendar Preview API
+## 6. 司机日历写入
 
-```http
-GET /api/driver-calendar/preview?startDate=2026-11-01&endDate=2026-11-30
-```
+司机日历页面读 `GET /api/orders`，按登录用户 `driverId` 过滤行程日。调度台另读 `GET /api/drivers` 做派单。不提供 `GET /api/driver-calendar/preview` 或 `GET /api/calendar`。
 
-只读查询现有 `itinerary_days`、`orders`、`order_activities`、`drivers`。不建日历表。
+司机日历写操作复用同一套 `orders` / `itinerary_days`，不另建表。页面上的领取走 `PUT /api/orders/{orderId}/driver`，框选建单走前端共用的 `createOrderWithDays`（内部仍是 `POST /api/orders` 与 `POST /api/orders/{orderId}/days`），取消只把当前司导的行程日 `driverId` 置空。调度台「创建订单」走同一套函数，行程日不传 `driverId`。不提供 `POST /api/driver-calendar/claim`、`/range`。请求不得把 `driverId` 当作登录身份。分配状态只写 `itinerary_days.driver_id`，没有单独的订单分配状态字段。
 
-当前没有登录认证，此接口是开发预览：
-
-- `preview` 恒为 `true`
-- `identityIsolated` 恒为 `false`
-- 预览司机由服务器配置 `Calendar:PreviewDriverId` 决定；未配置时取全库派单天数最多的司机；没有已分配司机时返回空日历，不展示未分配行程
-- 请求中的 `driverId` 不是身份凭证，必须忽略
-- 不提供 `GET /api/calendar?driverId=` 作为正式司机隔离接口
-- 不返回 `ticketPath`，只返回 `hasTicket` 和 `ticketAccessible`（本阶段后者恒为 `false`）
-
-日期范围为当地日期闭区间。活动时间仍为 `YYYY-MM-DDTHH:mm:ss`。
-
-司机日历页面读 `GET /api/orders`，按登录用户 `driverId` 过滤行程日。调度台另读 `GET /api/drivers` 做派单。本预览接口仍是只读投影，不作为页面主数据源。
-
-司机日历写操作复用同一套 `orders` / `itinerary_days`，不另建表。页面上的领取走 `PUT /api/orders/{orderId}/driver`，框选建单走前端共用的 `createOrderWithDays`（内部仍是 `POST /api/orders` 与 `POST /api/orders/{orderId}/days`），取消只把当前司导的行程日 `driverId` 置空。调度台「创建订单」走同一套函数，行程日不传 `driverId`。前端不封装 `POST /api/driver-calendar/claim`、`/range` 客户端；这两条接口仍保留在后端。请求不得把 `driverId` 当作登录身份。分配状态只写 `itinerary_days.driver_id`，没有单独的订单分配状态字段。
-
-```http
-POST /api/driver-calendar/claim
-```
-
-```json
-{ "orderNo": "TL-20261023-ABCDEF" }
-```
-
-按系统订单号或平台订单号找到已有订单，把它的全部行程日分配给预览司机。找不到返回 404。
-
-```http
-POST /api/driver-calendar/range
-```
-
-```json
-{ "startDate": "2026-11-01", "endDate": "2026-11-03" }
-```
-
-新建订单并生成闭区间内每一天的行程日（仅日期），同时分配给预览司机。一次最多 31 天。系统订单号仍由后端生成。
-
-当日行程编辑、电子票、领取和取消仍走现有：
+当日行程编辑、电子票、领取和取消走现有：
 
 ```http
 PUT  /api/orders/{orderId}/days/{dayId}

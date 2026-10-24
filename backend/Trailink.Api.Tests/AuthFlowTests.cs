@@ -236,4 +236,95 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         });
         Assert.Equal(HttpStatusCode.BadRequest, again.StatusCode);
     }
+
+    [Fact]
+    public async Task Company_desk_lists_only_handled_historical_orders()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var companyClient = _factory.CreateClient();
+        await companyClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"firm_{suffix}",
+            Password = "Passw0rd!",
+            Name = "历史公司",
+            AccountType = "company",
+            CompanyName = $"历史公司{suffix}"
+        });
+        var companyUser = await (await companyClient.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<SessionUserDto>();
+
+        var dispatcherClient = _factory.CreateClient();
+        await dispatcherClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"disp_{suffix}",
+            Password = "Passw0rd!",
+            Name = "历史调度",
+            AccountType = "driver"
+        });
+        var dispatcherUser = await (await dispatcherClient.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<SessionUserDto>();
+        await dispatcherClient.PostAsJsonAsync("/api/companies/applications", new ApplyDispatcherDto
+        {
+            CompanyId = companyUser!.CompanyId!.Value
+        });
+        var home = await companyClient.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        await companyClient.PostAsJsonAsync($"/api/company/applications/{home!.Desk!.Applications[0].Id}/approve", new { });
+
+        var driverClient = _factory.CreateClient();
+        await driverClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"guide_{suffix}",
+            Password = "Passw0rd!",
+            Name = "历史司导",
+            AccountType = "driver"
+        });
+        var driverUser = await (await driverClient.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<SessionUserDto>();
+        await driverClient.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = dispatcherUser!.Id
+        });
+        var incoming = await dispatcherClient.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications");
+        await dispatcherClient.PostAsJsonAsync($"/api/dispatchers/applications/{incoming![0].Id}/approve", new { });
+
+        async Task<Guid> AddOrderAsync(HttpClient client, DateOnly date, Guid? driverId)
+        {
+            var created = await client.PostAsJsonAsync("/api/orders", new OrderWriteDto
+            {
+                StartDate = date,
+                CompanyId = companyUser.CompanyId
+            });
+            created.EnsureSuccessStatusCode();
+            var order = await created.Content.ReadFromJsonAsync<OrderReadDto>();
+            var day = await client.PostAsJsonAsync($"/api/orders/{order!.Id}/days", new ItineraryDayWriteDto
+            {
+                ServiceDate = date,
+                DriverId = driverId
+            });
+            day.EnsureSuccessStatusCode();
+            return order.Id;
+        }
+
+        var assignedPast = await AddOrderAsync(dispatcherClient, today.AddDays(-3), driverUser!.DriverId);
+        var companyPast = await AddOrderAsync(companyClient, today.AddDays(-2), driverUser.DriverId);
+        var future = await AddOrderAsync(dispatcherClient, today.AddDays(5), driverUser.DriverId);
+        var openPast = await AddOrderAsync(dispatcherClient, today.AddDays(-4), null);
+
+        var companyDesk = await companyClient.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        var dispatcherDesk = await dispatcherClient.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        var driverDesk = await driverClient.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+
+        Assert.Equal(2, companyDesk!.Desk!.Orders.Count);
+        Assert.Contains(companyDesk.Desk.Orders, item => item.Id == assignedPast && item.Kind == "company");
+        Assert.Contains(companyDesk.Desk.Orders, item => item.Id == companyPast);
+        Assert.DoesNotContain(companyDesk.Desk.Orders, item => item.Id == future);
+        Assert.DoesNotContain(companyDesk.Desk.Orders, item => item.Id == openPast);
+
+        Assert.Single(dispatcherDesk!.Desk!.Orders);
+        Assert.Equal(assignedPast, dispatcherDesk.Desk.Orders[0].Id);
+        Assert.Equal("assigned", dispatcherDesk.Desk.Orders[0].Kind);
+
+        Assert.Equal(2, driverDesk!.Desk!.Orders.Count);
+        Assert.All(driverDesk.Desk.Orders, item => Assert.Equal("driven", item.Kind));
+        Assert.Contains(driverDesk.Desk.Orders, item => item.Id == assignedPast);
+        Assert.Contains(driverDesk.Desk.Orders, item => item.Id == companyPast);
+    }
 }

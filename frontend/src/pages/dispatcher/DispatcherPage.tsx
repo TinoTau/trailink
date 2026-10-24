@@ -5,7 +5,7 @@ import { AccountMenu } from '../AccountMenu'
 import { driversApi } from '../../api/drivers'
 import { PRESET_COLORS, contrastText } from '../../calendarUi'
 import { addMonths, formatLocalDate, formatMonthDay, laterDate, monthEnd, monthStart, orderedRange, toDateOnly, todayLocal } from '../../localDate'
-import { assignedDayCount, hasUnassignedDays, isSplitOrder } from '../../orderFlags'
+import { assignedDayCount, hasUnassignedDays, isHistoricalOrder, isSplitOrder } from '../../orderFlags'
 import type { Driver, DriverCalendarDay, ItineraryDay, Order } from '../../types'
 import { OrderFilesBlock } from '../OrderFilesBlock'
 import { DriverDayEditor } from '../driver/DriverDayEditor'
@@ -234,7 +234,7 @@ export function DispatcherPage() {
     const listed =
       filter === 'unassigned'
         ? orders.filter((order) => isIncomplete(order, today) && order.dayCount > 0 && hasUnassignedDays(order))
-        : orders.filter((order) => order.dayCount > 0)
+        : orders.filter((order) => order.dayCount > 0 && !isHistoricalOrder(order, today))
     return sortBoardOrders(listed, today)
   }, [filter, orders, today])
   const [createFrom, createTo] = createRangeStart ? orderedRange(createRangeStart, createRangeEnd) : [null, null]
@@ -815,7 +815,7 @@ export function DispatcherPage() {
           </div>
         ) : null}
         <p className="dispatcher-hint">
-          创建订单与司导界面相同：在日历上按住并拖选起止日期。点击订单看日历，可改公司订单号和备注。点击某一天编辑行程，拖动某一天只派那天。拖动卡片整单派单。从司导卡片把一天拖回订单区可取消：拆单只取消那天，未拆单取消整单。冲突会报错，卡片保持打开。
+          创建订单与司导界面相同：在日历上按住并拖选起止日期。点击订单看日历，可改公司订单号和备注。点击某一天编辑行程，拖动某一天只派那天。拖动卡片整单派单。从司导卡片把一天拖回订单区可取消：拆单只取消那天，未拆单取消整单。已派完且结束的单不出现在这里，只在公司信息里查看。冲突会报错，卡片保持打开。
         </p>
         <div className="dispatcher-grid">
           {visibleOrders.length === 0 ? <p className="dispatcher-empty">暂无订单</p> : null}

@@ -260,8 +260,8 @@ export function CompanyPage() {
           ) : null}
 
           <section className="account-section">
-            <h2>订单</h2>
-            {desk.orders.length === 0 ? <p className="account-empty">还没有相关订单</p> : null}
+            <h2>历史订单</h2>
+            {desk.orders.length === 0 ? <p className="account-empty">暂无历史订单</p> : null}
             <div className="account-grid">
               {desk.orders.map((order) => (
                 <button

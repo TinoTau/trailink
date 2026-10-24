@@ -255,7 +255,12 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             return null;
         }
 
-        var ordersQuery = db.Orders.Where(order => order.CompanyId == company.Id);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var ordersQuery = db.Orders.Where(order =>
+            order.CompanyId == company.Id &&
+            order.Days.Count > 0 &&
+            order.Days.All(day => day.DriverId != null) &&
+            order.Days.Max(day => day.ServiceDate) < today);
         if (!isOwner)
         {
             ordersQuery = ordersQuery.Where(order =>

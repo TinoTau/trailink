@@ -36,8 +36,8 @@ created_by_user_id UUID NULL
 
 外键：
 
-- `company_id` → `companies.id`（创建订单时写入当前公司，调度台列表仍读全部订单）
-- `created_by_user_id` → `users.id`
+- `company_id` → `companies.id`（创建订单时写入当前公司；调度台「所有订单」不含已派完且已结束的单）
+- `created_by_user_id` → `users.id`（公司信息页判断「自己派出」；「自己跑完」看行程日 `driver_id`。不另记派单历史）
 
 规则：
 
@@ -134,7 +134,7 @@ contact  VARCHAR(200) NULL
 qr_path  VARCHAR(500) NULL
 ```
 
-公司账户注册时创建。`contact` 由公司账户编辑，可以是手机号或微信号。`qr_path` 指向统一本地存储的相对路径 `files/qr/{companyId}{ext}`；旧值 `company-qr/...` 仍可读取。调度台订单列表不按公司过滤；公司信息页按 `orders.company_id` 展示相关订单。
+公司账户注册时创建。`contact` 由公司账户编辑，可以是手机号或微信号。`qr_path` 指向统一本地存储的相对路径 `files/qr/{companyId}{ext}`；旧值 `company-qr/...` 仍可读取。调度台订单列表不按公司过滤，但已派完且结束日早于今天的单不出现在调度台。公司信息页按 `orders.company_id` 只展示这类历史订单；非公司账户再按创建人或行程日司导收窄。
 
 ---
 

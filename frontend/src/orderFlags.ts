@@ -23,6 +23,14 @@ export function hasUnassignedDays(order: Order) {
   return assignedDayCount(order) < order.dayCount
 }
 
+export function isHistoricalOrder(order: Order, today: string) {
+  if (order.dayCount <= 0) {
+    return false
+  }
+  const end = order.endDate || order.startDate
+  return Boolean(end && end < today && !hasUnassignedDays(order))
+}
+
 export function splitOrderHint(orders: Order[]) {
   if (orders.some((order) => assignedDriverIds(order).size > 1)) {
     return '此单部分日期由其他司导负责'
