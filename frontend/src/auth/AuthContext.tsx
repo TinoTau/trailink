@@ -1,23 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { authApi } from '../api/auth'
-import type { SessionUser, UserRole } from '../types'
-
-interface AuthState {
-  user: SessionUser | null
-  ready: boolean
-  refresh: () => Promise<void>
-  setUser: (user: SessionUser | null) => void
-  logout: () => Promise<void>
-}
-
-const AuthContext = createContext<AuthState | null>(null)
-
-export function homeFor(role: UserRole) {
-  if (role === 'driver') {
-    return '/driver/calendar'
-  }
-  return '/dispatcher'
-}
+import type { SessionUser } from '../types'
+import { AuthContext, type AuthState } from './authState'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null)
@@ -34,6 +18,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
+    // 初次挂载从 Cookie 会话恢复用户，这是认证外部状态同步。
+    // oxlint-disable-next-line react/set-state-in-effect
     void refresh()
   }, [])
 
@@ -55,12 +41,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const value = useContext(AuthContext)
-  if (!value) {
-    throw new Error('useAuth 必须在 AuthProvider 内使用')
-  }
-  return value
 }

@@ -1,178 +1,134 @@
+import type {
+  AssignmentResultDto,
+  CompanyApplicationDto,
+  CompanyBriefDto,
+  CompanyDeskDto,
+  CompanyHomeDto,
+  CompanyMemberDto,
+  CompanyOrderDto,
+  DispatcherSearchDto,
+  DriverApplicantDto,
+  DriverNoteWriteDto,
+  DriverReadDto,
+  ItineraryDayReadDto,
+  ItineraryDayWriteDto,
+  OrderActivityReadDto,
+  OrderActivityWriteDto,
+  OrderFileReadDto,
+  OrderReadDto,
+  OrderWriteDto,
+  PendingApplicationDto,
+  PendingDriverApplicationDto,
+  SessionUserDto,
+} from './api/generated'
+
+type RequiredApi<T> = { [K in keyof T]-?: T[K] }
+type WithNumbers<T, K extends keyof T> = Omit<RequiredApi<T>, K> & { [P in K]-?: number }
+
 export type UserRole = 'company' | 'dispatcher' | 'driver'
 
-export interface PendingApplication {
-  id: string
-  companyId: string
-  companyName: string
-}
+export type PendingApplication = RequiredApi<PendingApplicationDto>
+export type PendingDriverApplication = RequiredApi<PendingDriverApplicationDto>
+export type DispatcherSearch = RequiredApi<DispatcherSearchDto>
+export type DriverApplicant = RequiredApi<DriverApplicantDto>
+export type CompanySearch = RequiredApi<CompanyBriefDto>
+export type CompanyApplication = RequiredApi<CompanyApplicationDto>
+export type CompanyMember = RequiredApi<CompanyMemberDto>
 
-export interface SessionUser {
-  id: string
-  username: string
-  name: string
+export type SessionUser = Omit<
+  RequiredApi<SessionUserDto>,
+  'role' | 'companies' | 'pendingApplications' | 'pendingDriverApplications'
+> & {
   role: UserRole
-  companyId?: string | null
-  companyName?: string | null
-  driverId?: string | null
-  hasAvatar?: boolean
-  companies?: CompanySearch[]
-  pendingApplications?: PendingApplication[]
-  pendingDriverApplications?: PendingDriverApplication[]
-}
-
-export interface PendingDriverApplication {
-  id: string
-  dispatcherUserId: string
-  dispatcherName: string
-}
-
-export interface DispatcherSearch {
-  id: string
-  name: string
-}
-
-export interface DriverApplicant {
-  id: string
-  userId: string
-  username: string
-  name: string
-}
-
-export interface CompanySearch {
-  id: string
-  name: string
-}
-
-export interface CompanyHome {
   companies: CompanySearch[]
-  desk?: CompanyDesk | null
+  pendingApplications: PendingApplication[]
+  pendingDriverApplications: PendingDriverApplication[]
 }
 
-export interface CompanyDesk {
-  id: string
-  name: string
-  ownerName: string
-  contact?: string | null
-  hasQr: boolean
-  canEdit: boolean
-  canManage: boolean
-  applications: Array<{ id: string; userId: string; username: string; name: string }>
-  dispatchers: Array<{ userId: string; username: string; name: string }>
-  orders: CompanyOrderSummary[]
-}
-
-export interface CompanyOrderSummary {
-  id: string
-  orderNo: string
-  startDate: string
-  dayCount: number
+export type CompanyOrderSummary = Omit<
+  WithNumbers<CompanyOrderDto, 'dayCount'>,
+  'kind'
+> & {
   kind: 'company' | 'assigned' | 'driven'
 }
 
-export interface Driver {
-  id: string
-  name: string
-  phone?: string | null
-  notes?: string | null
+export type CompanyDesk = Omit<
+  RequiredApi<CompanyDeskDto>,
+  'applications' | 'dispatchers' | 'orders'
+> & {
+  applications: CompanyApplication[]
+  dispatchers: CompanyMember[]
+  orders: CompanyOrderSummary[]
 }
 
-export interface DriverWrite {
-  name: string
-  phone?: string
-  notes?: string
+export type CompanyHome = Omit<RequiredApi<CompanyHomeDto>, 'companies' | 'desk'> & {
+  companies: CompanySearch[]
+  desk: CompanyDesk | null
 }
 
-export interface OrderActivity {
-  id: string
-  itineraryDayId: string
+export type Driver = RequiredApi<DriverReadDto>
+export type DriverNoteWrite = RequiredApi<DriverNoteWriteDto>
+
+export type OrderActivity = Omit<
+  WithNumbers<OrderActivityReadDto, 'sortOrder'>,
+  'bookingTime' | 'checkinTime'
+> & {
+  bookingTime: string | null
+  checkinTime: string | null
+}
+
+export type OrderActivityWrite = Omit<
+  OrderActivityWriteDto,
+  'content' | 'bookingTime' | 'checkinTime'
+> & {
   content: string
-  provider?: string | null
   bookingTime?: string | null
   checkinTime?: string | null
-  ticketPath?: string | null
-  sortOrder: number
 }
 
-export interface OrderActivityWrite {
-  content: string
-  provider?: string
-  bookingTime?: string | null
-  checkinTime?: string | null
-  ticketPath?: string
-}
-
-export interface ItineraryDay {
-  id: string
-  orderId: string
+export type ItineraryDayWrite = Omit<ItineraryDayWriteDto, 'serviceDate'> & {
   serviceDate: string
-  description?: string | null
-  endLocation?: string | null
-  driverId?: string | null
-  driverName?: string | null
-  activityCount: number
+}
+
+export type ItineraryDay = Omit<
+  RequiredApi<ItineraryDayReadDto>,
+  'activities'
+> & {
   activities: OrderActivity[]
-  warnings?: string[]
 }
 
-export interface Order {
-  id: string
-  orderNo: string
-  platformOrderNo?: string | null
-  sourceCompany?: string | null
-  startDate: string
-  endDate?: string | null
-  dayCount: number
-  guestCount: number
-  notes?: string | null
-  assignedDriverId?: string | null
-  assignedDayCount?: number
+export type OrderFile = RequiredApi<OrderFileReadDto>
+
+export type Order = Omit<
+  WithNumbers<OrderReadDto, 'dayCount' | 'guestCount' | 'assignedDayCount'>,
+  'days' | 'files'
+> & {
   days: ItineraryDay[]
-  files?: OrderFile[]
+  files: OrderFile[]
 }
 
-export interface OrderFile {
-  id: string
-  orderId: string
-  fileName: string
-}
-
-export interface OrderWrite {
-  platformOrderNo?: string
-  sourceCompany?: string
+export type OrderWrite = Omit<OrderWriteDto, 'startDate' | 'guestCount'> & {
   startDate: string
   guestCount: number
-  notes?: string
-  companyId?: string
 }
 
-export interface AssignmentResult {
-  orderId: string
-  driverId?: string | null
-  updatedDayCount: number
+export type AssignmentResult = Omit<
+  WithNumbers<AssignmentResultDto, 'updatedDayCount'>,
+  'warnings'
+> & {
   warnings: string[]
-}
-
-export interface DriverCalendarActivity {
-  id: string
-  content: string
-  provider?: string | null
-  bookingTime?: string | null
-  checkinTime?: string | null
-  hasTicket: boolean
-  ticketAccessible: boolean
 }
 
 export interface DriverCalendarTrip {
   orderId: string
-  orderNo: string
+  label: string
   itineraryDayId: string
-  endLocation?: string | null
-  description?: string | null
-  activities: DriverCalendarActivity[]
+  endLocation: string | null
 }
 
 export interface DriverCalendarDay {
   date: string
   items: DriverCalendarTrip[]
+  assignerName?: string
 }
 

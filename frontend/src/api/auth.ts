@@ -21,6 +21,13 @@ export const authApi = {
     api.post<SessionUser>('/api/auth/login', { username, password }),
   logout: () => api.post<void>('/api/auth/logout', {}),
   me: () => api.get<SessionUser>('/api/auth/me'),
+  updateName: (name: string) => api.put<SessionUser>('/api/auth/name', { name }),
+  updateUsername: (username: string) => api.put<SessionUser>('/api/auth/username', { username }),
+  updatePassword: (currentPassword: string, password: string) =>
+    api.put<SessionUser>('/api/auth/password', { currentPassword, password }),
+  updateContact: (contact: string) => api.put<SessionUser>('/api/auth/contact', { contact }),
+  updateAssignedColor: (assignedColor: string) =>
+    api.put<SessionUser>('/api/auth/assigned-color', { assignedColor }),
   uploadAvatar: (file: File) => {
     const body = new FormData()
     body.append('file', file)
@@ -35,6 +42,8 @@ export const companyApi = {
     api.get<CompanyHome>(companyId ? `/api/company?companyId=${encodeURIComponent(companyId)}` : '/api/company'),
   updateContact: (companyId: string, contact: string) =>
     api.put<CompanyHome>('/api/company', { companyId, contact }),
+  updateName: (companyId: string, name: string) =>
+    api.put<CompanyHome>('/api/company', { companyId, name }),
   uploadQr: (companyId: string, file: File) => {
     const body = new FormData()
     body.append('companyId', companyId)
@@ -47,6 +56,10 @@ export const companyApi = {
     ),
   removeDispatcher: (userId: string, companyId?: string) =>
     api.delete(`/api/company/dispatchers/${userId}`).then(() => companyApi.desk(companyId)),
+  updateDispatcherNotes: (userId: string, notes: string) =>
+    api.put<CompanyHome>(`/api/company/dispatchers/${userId}/notes`, { notes }),
+  updateNote: (companyId: string, notes: string) =>
+    api.put<CompanyHome>('/api/company/notes', { companyId, notes }),
 }
 
 export const dispatcherApi = {

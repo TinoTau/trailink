@@ -114,8 +114,16 @@ a.account-chip {
 
 .account-search {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-top: 12px;
+}
+
+.account-note-label {
+  flex: none;
+  font-size: 14px;
+  color: #262626;
+  white-space: nowrap;
 }
 
 .account-search input {
@@ -267,18 +275,166 @@ a.account-chip {
 }
 
 .account-card-bar h2,
-.account-card p,
-.account-days p {
+.account-card p {
   margin: 0 0 8px;
   font-size: 14px;
 }
 
-.account-days p {
+.account-day {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.account-day span {
+  flex: none;
+  color: #8c8c8c;
+}
+
+.account-day-driver {
+  max-width: 6em;
+  overflow: hidden;
+  color: #262626;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-day input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-overflow: ellipsis;
+}
+
+.account-day input:focus {
+  text-overflow: clip;
+}
+
+.profile-main {
+  gap: 16px;
+}
+
+.profile-block {
+  padding: 12px 14px;
+  border: 1px solid #f0f0f0;
+  border-radius: 16px;
+}
+
+.profile-block h2 {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.profile-block > .account-hint {
+  margin-top: 8px;
+}
+
+.profile-block > .account-search {
+  margin-top: 0;
+}
+
+.profile-identity {
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
-.account-days span {
+.profile-avatar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-avatar .account-chip {
+  white-space: nowrap;
+}
+
+.profile-avatar .account-qr {
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+}
+
+.profile-avatar .account-qr.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+  color: #8c8c8c;
+}
+
+.profile-avatar .account-avatar {
+  width: 64px;
+  height: 64px;
+  font-size: 24px;
+}
+
+.profile-fields {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.profile-fields .account-search {
+  margin-top: 0;
+  min-width: 0;
+}
+
+.profile-fields .account-chip {
+  flex: none;
+  white-space: nowrap;
+}
+
+.profile-fields .account-search input {
+  min-width: 0;
+}
+
+.profile-fields .account-note-label {
+  width: 4.5em;
+}
+
+.profile-fields p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.profile-fields p span {
+  color: #8c8c8c;
+}
+
+.profile-block .account-row {
+  min-height: 36px;
+  padding: 4px 0;
+}
+
+.profile-block .account-row:last-child {
+  border-bottom: 0;
+}
+
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f5f5f5;
+}
+
+.profile-meta p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.profile-meta span {
   color: #8c8c8c;
 }

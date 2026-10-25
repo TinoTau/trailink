@@ -70,6 +70,8 @@ public class FileUploadTests : IClassFixture<ApiFactory>
 
         var fileGet = await client.GetAsync($"/api/orders/{createdOrder.Id}/files/{stored.Id}");
         fileGet.EnsureSuccessStatusCode();
+        var files = await client.GetFromJsonAsync<List<OrderFileReadDto>>($"/api/orders/{createdOrder.Id}/files");
+        Assert.Equal(stored.Id, Assert.Single(files!).Id);
 
         var day = await client.PostAsJsonAsync($"/api/orders/{createdOrder.Id}/days", new ItineraryDayWriteDto
         {
@@ -103,6 +105,34 @@ public class FileUploadTests : IClassFixture<ApiFactory>
         var ticketGet = await client.GetAsync(
             $"/api/orders/{createdOrder.Id}/days/{createdDay.Id}/activities/{createdActivity.Id}/ticket");
         ticketGet.EnsureSuccessStatusCode();
+
+        var deleteTicket = await client.DeleteAsync(
+            $"/api/orders/{createdOrder.Id}/days/{createdDay.Id}/activities/{createdActivity.Id}/ticket");
+        Assert.Equal(HttpStatusCode.NoContent, deleteTicket.StatusCode);
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await client.GetAsync(
+                $"/api/orders/{createdOrder.Id}/days/{createdDay.Id}/activities/{createdActivity.Id}/ticket")).StatusCode);
+        var withoutTicket = await client.GetFromJsonAsync<List<OrderActivityReadDto>>(
+            $"/api/orders/{createdOrder.Id}/days/{createdDay.Id}/activities");
+        Assert.Null(Assert.Single(withoutTicket!).TicketPath);
+
+        var deleteFile = await client.DeleteAsync($"/api/orders/{createdOrder.Id}/files/{stored.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteFile.StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<List<OrderFileReadDto>>(
+            $"/api/orders/{createdOrder.Id}/files"))!);
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await client.GetAsync($"/api/orders/{createdOrder.Id}/files/{stored.Id}")).StatusCode);
+
+        var deleteDay = await client.DeleteAsync($"/api/orders/{createdOrder.Id}/days/{createdDay.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteDay.StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<List<ItineraryDayReadDto>>(
+            $"/api/orders/{createdOrder.Id}/days"))!);
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await client.GetAsync(
+                $"/api/orders/{createdOrder.Id}/days/{createdDay.Id}/activities")).StatusCode);
 
         var rejected = await client.PostAsync("/api/auth/avatar", TextForm("note.txt"));
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);

@@ -10,4 +10,5 @@ public class Company
     public ICollection<User> Users { get; set; } = [];
     public ICollection<CompanyMember> Members { get; set; } = [];
     public ICollection<DispatcherApplication> Applications { get; set; } = [];
+    public ICollection<CompanyNote> Notes { get; set; } = [];
 }

@@ -145,6 +145,140 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         return Ok(ToSession(user));
     }
 
+    [HttpPut("name")]
+    public async Task<ActionResult<SessionUserDto>> UpdateName(
+        ProfileNameWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var name = request.Name?.Trim() ?? "";
+        if (name.Length is < 1 or > 100)
+        {
+            return Problem(title: "Validation error", detail: "请填写姓名。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        user.Name = name;
+        if (user.DriverId is Guid driverId)
+        {
+            var driver = await db.Drivers.FirstOrDefaultAsync(item => item.Id == driverId, cancellationToken);
+            if (driver is not null)
+            {
+                driver.Name = name;
+            }
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(ToSession(user));
+    }
+
+    [HttpPut("username")]
+    public async Task<ActionResult<SessionUserDto>> UpdateUsername(
+        ProfileUsernameWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var username = request.Username?.Trim() ?? "";
+        if (username.Length is < 3 or > 50)
+        {
+            return Problem(title: "Validation error", detail: "用户名需要 3 到 50 个字符。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (!string.Equals(user.Username, username, StringComparison.Ordinal))
+        {
+            var taken = await db.Users.AnyAsync(
+                item => item.Id != user.Id && item.Username.ToLower() == username.ToLower(),
+                cancellationToken);
+            if (taken)
+            {
+                return Problem(title: "Validation error", detail: "用户名已被使用。", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            user.Username = username;
+            await db.SaveChangesAsync(cancellationToken);
+            await session.SignInAsync(user);
+        }
+
+        return Ok(ToSession(user));
+    }
+
+    [HttpPut("password")]
+    public async Task<ActionResult<SessionUserDto>> UpdatePassword(
+        ProfilePasswordWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrEmpty(request.CurrentPassword) || !PasswordHashing.Verify(request.CurrentPassword, user.PasswordHash))
+        {
+            return Problem(title: "Validation error", detail: "当前密码不正确。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (string.IsNullOrEmpty(request.Password) || request.Password.Length < 8)
+        {
+            return Problem(title: "Validation error", detail: "密码至少 8 位。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        user.PasswordHash = PasswordHashing.Hash(request.Password);
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(ToSession(user));
+    }
+
+    [HttpPut("contact")]
+    public async Task<ActionResult<SessionUserDto>> UpdateContact(
+        ProfileContactWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var contact = request.Contact?.Trim() ?? "";
+        if (contact.Length > 200)
+        {
+            return Problem(title: "Validation error", detail: "联系方式不能超过 200 个字。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        user.Contact = contact.Length == 0 ? null : contact;
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(ToSession(user));
+    }
+
+    [HttpPut("assigned-color")]
+    public async Task<ActionResult<SessionUserDto>> UpdateAssignedColor(
+        AssignedColorWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!AssignedColors.IsAllowed(request.AssignedColor))
+        {
+            return Problem(title: "Validation error", detail: "只能选择已提供的已分配颜色。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        user.AssignedColor = AssignedColors.Resolve(request.AssignedColor);
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(ToSession(user));
+    }
+
     [HttpGet("avatar")]
     public async Task<IActionResult> Avatar(CancellationToken cancellationToken)
     {
@@ -179,6 +313,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
             .ToList();
 
         var pendingDrivers = user.DriverApplications
+            .Where(item => item.ApprovedAt is null)
             .OrderBy(item => item.CreatedAt)
             .Select(item => new PendingDriverApplicationDto
             {
@@ -193,11 +328,13 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
             Id = user.Id,
             Username = user.Username,
             Name = user.Name,
+            Contact = user.Contact,
             Role = user.Role,
             CompanyId = companies.FirstOrDefault()?.Id ?? user.CompanyId,
             CompanyName = companies.FirstOrDefault()?.Name ?? user.Company?.Name,
             DriverId = user.DriverId,
             HasAvatar = !string.IsNullOrWhiteSpace(user.AvatarPath),
+            AssignedColor = AssignedColors.Resolve(user.AssignedColor),
             Companies = companies,
             PendingApplications = pending,
             PendingDriverApplications = pendingDrivers

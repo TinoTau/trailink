@@ -1,26 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { useAuth } from '../auth/AuthContext'
+import { useAuthenticatedAuth } from '../auth/authState'
+import { accountMenuItems } from '../navigation'
 import './account-menu.css'
 
-const ITEMS = [
-  { to: '/dispatcher', label: '调度台', staffOnly: true },
-  { to: '/company', label: '公司信息' },
-  { to: '/me', label: '个人信息' },
-] as const
-
-function matchesPath(path: string, to: string) {
-  return path === to || path.startsWith(`${to}/`)
-}
-
 export function AccountMenu() {
-  const { user, logout } = useAuth()
+  const { user, logout } = useAuthenticatedAuth()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const onCalendar = location.pathname.startsWith('/driver')
 
   useEffect(() => {
+    if (!open) {
+      return
+    }
     function onPointerDown(event: PointerEvent) {
       if (!rootRef.current?.contains(event.target as Node)) {
         setOpen(false)
@@ -31,24 +25,18 @@ export function AccountMenu() {
         setOpen(false)
       }
     }
-    document.addEventListener('pointerdown', onPointerDown)
+    const timer = window.setTimeout(() => {
+      document.addEventListener('pointerdown', onPointerDown)
+    }, 0)
     document.addEventListener('keydown', onKey)
     return () => {
+      window.clearTimeout(timer)
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [])
+  }, [open])
 
-  if (!user) {
-    return null
-  }
-
-  const links = ITEMS.filter((item) => {
-    if (item.staffOnly && user.role === 'driver') {
-      return false
-    }
-    return !matchesPath(location.pathname, item.to)
-  })
+  const links = accountMenuItems(user.role, location.pathname)
 
   return (
     <div className="account-menu-group">
@@ -71,15 +59,16 @@ export function AccountMenu() {
         {open ? (
           <div className="account-menu-list" role="menu">
             {links.map((item) => (
-              <Link key={item.to} role="menuitem" to={item.to} onClick={() => setOpen(false)}>
+              <Link key={item.path} role="menuitem" to={item.path} onClick={() => setOpen(false)}>
                 {item.label}
               </Link>
             ))}
             <button
               type="button"
               role="menuitem"
-              onClick={() => {
-                setOpen(false)
+              onPointerDown={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
                 void logout()
               }}
             >

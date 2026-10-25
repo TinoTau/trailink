@@ -62,7 +62,6 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
             Provider = TrimToNull(request.Provider),
             BookingTime = AsUnspecified(request.BookingTime),
             CheckinTime = AsUnspecified(request.CheckinTime),
-            TicketPath = TrimToNull(request.TicketPath),
             SortOrder = nextOrder + 1
         };
 

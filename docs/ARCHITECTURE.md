@@ -26,6 +26,8 @@
 - Vite
 - Ant Design
 - Ant Design Calendar
+- API transport types 由后端 `/openapi/v1.json` 生成；`types.ts` 只做生成类型别名与纯前端视图模型
+- 页面路径、菜单可见性和角色准入统一由 `navigation.ts` 定义
 
 云平台：
 
@@ -85,7 +87,7 @@ ASP.NET Core Web API → Amazon S3
 - LLM
 - GraphQL
 
-调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。两个页面都从订单列表取行程日；「所有订单」和本人日历排除已派完且已结束的历史单。历史单只在 `/company` 展示：公司账户看本公司全部，调度员/司导看自己创建或跑过的。日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`。
+调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。公司把整单交给调度员写 `orders.assigned_dispatcher_user_id`，页面复用 `/company/assign` 的同一套调度台，不另开订单系统。订单所属公司只写 `orders.company_id`：公司建单即本公司，调度员和司导建单都不默认绑所属公司，即使只属于一家；调度员须搜索点选后立即绑定、改绑，或明确传 `null` 解绑。调度员给司导的备注写 `driver_notes`（`user_id` + `driver_id`），由 `/api/drivers/{id}/notes` 独立于司导档案写入。公司给调度员的备注写 `dispatcher_notes`（`user_id` + `dispatcher_user_id`），只在派给调度里读写，调度员看不到。两个页面都从订单列表取行程日；调度台「所有订单」排除已派完且已结束的历史单，本人日历保留这些日期并显示为已完成。`/company` 的订单：公司账户只看已派完且已结束的历史单；司导看自己当前接的单，调度员看自己当前接的和分配的单，已结束和尚未结束都在内。分配以当前行程日为准，改派后原经手人不再看到。日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`；多分配人也按拆单处理。司导取消本人行程不看分配人。已绑定 `company_id` 的真实订单派给司导时，现有 `OrderScheduling` / `OrderDriverAssignment` 覆盖并删除该司导自建且未绑公司的占位单；未绑定公司的单仍走原冲突规则。不另建占位表或覆盖接口。
 
 后端采用简单分层：
 
@@ -138,10 +140,12 @@ Trailink/
 ## 4. 数据与文件
 
 - 使用 EF Core Migrations 管理数据库结构。
-- 第一阶段核心表：`drivers`、`orders`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`。
+- 第一阶段核心表：`drivers`、`driver_notes`、`dispatcher_notes`、`orders`、`order_notes`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`company_notes`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`。
+- 每人给公司的缩写只写 `company_notes`（`company_id` + `user_id`）。还没有记录时默认写入公司账户已保存的简称，没有则写入公司名前两个字。个人简称写好后不会被公司后来的修改覆盖。公司信息页下拉包含所属公司，以及创建过、被指派、派出或跑过的订单所属公司。司导日历在「公司名+调度员名」超过 6 个字时使用这条缩写。
+- 人员名单不跨公司共享。调度台司导只来自当前调度员已批准的 `driver_applications`（`approved_at` 非空）。公司的调度员名单和派给调度只来自本公司 `company_members.role=dispatcher`。公司账户或该公司调度员把公司订单派给有账号的司导时，写入 `company_members.role=driver`，不再单独批准。批准前双方都看不到对方。
 - 四种上传（公司二维码、用户头像、电子票、订单截图）共用 `AppFileStore`，根目录 `App_Data/files/{qr,avatars,tickets,orders}/`。库里只存相对路径：`companies.qr_path`、`users.avatar_path`、`order_activities.ticket_path`、`order_files.file_path`。不进 `wwwroot`，不另开第二套存储。旧二维码路径 `company-qr/` 仍可读取。头像在写入前经 `AvatarImage`（SkiaSharp）缩到最长边 256 并压成 JPEG，覆盖时删掉该用户旧文件。二维码 / 电子票 / 订单截图保持原图。
 - 订单起始日期和行程日期使用 PostgreSQL `DATE` / `DateOnly`。活动预订与签到时间使用 `TIMESTAMP WITHOUT TIME ZONE` / `DateTime`（`Kind=Unspecified`），表示当地钟表时间。
-- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`。不提供 `claim` / `range` / preview 日历接口。分配只更新 `driver_id`。公司、调度员、司导登录后都只看自己的 `driver_id`。
+- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`。领取与调度台派单共用 `PUT /api/orders/{id}/driver` 和同一套占位单覆盖。不提供 `claim` / `range` / preview 日历接口。分配只更新 `driver_id`。公司、调度员、司导登录后都只看自己的 `driver_id`。
 - 不引入时区管理框架。正式创建收费云资源前必须另行确认。
 
 ---
@@ -153,7 +157,7 @@ Trailink/
 - 使用环境变量或本地未入库配置文件。
 - 需要基本错误处理、输入校验和基础日志。
 - 暂不实现业务审计日志。
-- Cookie 登录。`users.role` 为 `company` / `dispatcher` / `driver`。不建角色表或权限表。角色变化以数据库为准，不依赖 Cookie 里的角色声明。
+- Cookie 登录。`users.role` 为 `company` / `dispatcher` / `driver`。不建角色表或权限表。角色变化以数据库为准，不依赖 Cookie 里的角色声明。本人可在个人信息修改 `users.username`、`password_hash` 和 `users.contact`，不另建账号表。公司调度员名单、调度台司导详情，以及我的行程点开日期后的调度员姓名旁，都读 `users.contact`。调度台已分配颜色写 `users.assigned_color`，每人一条，不另建颜色表。
 
 ---
 

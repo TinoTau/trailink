@@ -1,8 +1,8 @@
-import { readCurrentCompanyId } from '../currentCompany'
-import { eachLocalDate } from '../localDate'
+import { eachLocalDate, toDateOnly } from '../localDate'
 import type {
   AssignmentResult,
   ItineraryDay,
+  ItineraryDayWrite,
   Order,
   OrderActivity,
   OrderActivityWrite,
@@ -29,7 +29,7 @@ export async function createOrderWithDays(input: {
     throw new RangeError(`一次最多添加 ${MAX_ORDER_RANGE_DAYS} 天`)
   }
 
-  const companyId = input.companyId || readCurrentCompanyId() || undefined
+  const companyId = input.companyId || undefined
   const order = await ordersApi.create({
     startDate: input.startDate,
     guestCount: input.guestCount ?? 0,
@@ -48,6 +48,35 @@ export async function createOrderWithDays(input: {
   return { order, dates, warnings }
 }
 
+export function clearDayDriver(day: {
+  serviceDate: string
+  description?: string | null
+  endLocation?: string | null
+}) {
+  return {
+    serviceDate: day.serviceDate,
+    description: day.description,
+    endLocation: day.endLocation,
+    driverId: null,
+  }
+}
+
+export function updateOrderInfo(
+  order: Order,
+  fields: { platformOrderNo?: string; notes?: string; driverNotes?: string; companyId?: string | null },
+) {
+  return ordersApi.update(order.id, {
+    platformOrderNo: fields.platformOrderNo !== undefined
+      ? fields.platformOrderNo.trim() || undefined
+      : order.platformOrderNo ?? undefined,
+    startDate: toDateOnly(order.startDate),
+    guestCount: order.guestCount,
+    notes: fields.notes !== undefined ? fields.notes : order.notes,
+    driverNotes: fields.driverNotes !== undefined ? fields.driverNotes : order.driverNotes,
+    companyId: fields.companyId !== undefined ? fields.companyId : order.companyId,
+  })
+}
+
 export const ordersApi = {
   list: (params?: { orderNo?: string }) => {
     const search = new URLSearchParams()
@@ -63,20 +92,15 @@ export const ordersApi = {
   remove: (id: string) => api.delete(`/api/orders/${id}`),
   assignDriver: (orderId: string, driverId: string | null, failOnConflict = false) =>
     api.put<AssignmentResult>(`/api/orders/${orderId}/driver`, { driverId, failOnConflict }),
-  createDay: (orderId: string, body: { serviceDate: string; description?: string; endLocation?: string; driverId?: string | null }) =>
+  assignDispatcher: (orderId: string, dispatcherUserId: string | null) =>
+    api.put<Order>(`/api/orders/${orderId}/dispatcher`, { dispatcherUserId }),
+  createDay: (orderId: string, body: ItineraryDayWrite) =>
     api.post<ItineraryDay>(`/api/orders/${orderId}/days`, body),
   updateDay: (
     orderId: string,
     dayId: string,
-    body: {
-      serviceDate: string
-      description?: string | null
-      endLocation?: string | null
-      driverId?: string | null
-      failOnConflict?: boolean
-    },
+    body: ItineraryDayWrite,
   ) => api.put<ItineraryDay>(`/api/orders/${orderId}/days/${dayId}`, body),
-  removeDay: (orderId: string, dayId: string) => api.delete(`/api/orders/${orderId}/days/${dayId}`),
   createActivity: (orderId: string, dayId: string, body: OrderActivityWrite) =>
     api.post<OrderActivity>(`/api/orders/${orderId}/days/${dayId}/activities`, body),
   updateActivity: (orderId: string, dayId: string, activityId: string, body: OrderActivityWrite) =>
@@ -85,7 +109,6 @@ export const ordersApi = {
     api.delete(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}`),
   reorderActivities: (orderId: string, dayId: string, activityIds: string[]) =>
     api.put<OrderActivity[]>(`/api/orders/${orderId}/days/${dayId}/activities/reorder`, { activityIds }),
-  listFiles: (orderId: string) => api.get<OrderFile[]>(`/api/orders/${orderId}/files`),
   uploadFile: (orderId: string, file: File) => {
     const body = new FormData()
     body.append('file', file)
@@ -98,8 +121,6 @@ export const ordersApi = {
     body.append('file', file)
     return api.postForm<OrderActivity>(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`, body)
   },
-  removeTicket: (orderId: string, dayId: string, activityId: string) =>
-    api.delete(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`),
   ticketUrl: (orderId: string, dayId: string, activityId: string) =>
     `/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`,
 }

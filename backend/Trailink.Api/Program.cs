@@ -8,7 +8,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddProblemDetails();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.Strict;
+});
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<TrailinkDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
@@ -53,6 +56,22 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+if (args.Contains("--wipe-data"))
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<TrailinkDbContext>();
+    await DemoDataSeeder.WipeAsync(db, Console.Out);
+    return;
+}
+
+if (args.Contains("--wipe-orders"))
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<TrailinkDbContext>();
+    await DemoDataSeeder.WipeOrdersAsync(db, Console.Out);
+    return;
+}
+
 if (args.Contains("--seed-demo"))
 {
     using var scope = app.Services.CreateScope();
@@ -61,7 +80,7 @@ if (args.Contains("--seed-demo"))
     return;
 }
 
-app.MapOpenApi();
+app.MapOpenApi().AllowAnonymous();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();

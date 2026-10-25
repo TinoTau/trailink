@@ -20,7 +20,9 @@ public class ItineraryDayReadDto
     public string? EndLocation { get; set; }
     public Guid? DriverId { get; set; }
     public string? DriverName { get; set; }
-    public int ActivityCount { get; set; }
+    public Guid? AssignedByUserId { get; set; }
+    public string? AssignedByName { get; set; }
+    public string? AssignedByContact { get; set; }
     public List<OrderActivityReadDto> Activities { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
 }
@@ -35,8 +37,6 @@ public class OrderActivityWriteDto
 
     [JsonConverter(typeof(LocalDateTimeJsonConverter))]
     public DateTime? CheckinTime { get; set; }
-
-    public string? TicketPath { get; set; }
 }
 
 public class OrderActivityReorderDto

@@ -1,3 +1,5 @@
+using Trailink.Api.Models;
+
 namespace Trailink.Api.Services;
 
 public enum StoredFileKind
@@ -101,6 +103,19 @@ public sealed class AppFileStore(IWebHostEnvironment env)
         if (full is not null && File.Exists(full))
         {
             File.Delete(full);
+        }
+    }
+
+    public void DeleteOrderAttachments(Order order)
+    {
+        foreach (var file in order.Files)
+        {
+            Delete(file.FilePath);
+        }
+
+        foreach (var activity in order.Days.SelectMany(day => day.Activities))
+        {
+            Delete(activity.TicketPath);
         }
     }
 

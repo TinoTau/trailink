@@ -17,16 +17,44 @@ public class LoginDto
     public string Password { get; set; } = string.Empty;
 }
 
+public class AssignedColorWriteDto
+{
+    public string AssignedColor { get; set; } = string.Empty;
+}
+
+public class ProfileNameWriteDto
+{
+    public string Name { get; set; } = string.Empty;
+}
+
+public class ProfileUsernameWriteDto
+{
+    public string Username { get; set; } = string.Empty;
+}
+
+public class ProfilePasswordWriteDto
+{
+    public string CurrentPassword { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+}
+
+public class ProfileContactWriteDto
+{
+    public string? Contact { get; set; }
+}
+
 public class SessionUserDto
 {
     public Guid Id { get; set; }
     public string Username { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? Contact { get; set; }
     public string Role { get; set; } = string.Empty;
     public Guid? CompanyId { get; set; }
     public string? CompanyName { get; set; }
     public Guid? DriverId { get; set; }
     public bool HasAvatar { get; set; }
+    public string AssignedColor { get; set; } = AssignedColors.Default;
     public List<CompanyBriefDto> Companies { get; set; } = [];
     public List<PendingApplicationDto> PendingApplications { get; set; } = [];
     public List<PendingDriverApplicationDto> PendingDriverApplications { get; set; } = [];
@@ -36,6 +64,7 @@ public class CompanyBriefDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Notes { get; set; }
 
     public static List<CompanyBriefDto> FromMemberships(User user)
     {
@@ -107,6 +136,7 @@ public class CompanyDeskDto
     public string Name { get; set; } = string.Empty;
     public string OwnerName { get; set; } = string.Empty;
     public string? Contact { get; set; }
+    public string? Notes { get; set; }
     public bool HasQr { get; set; }
     public bool CanEdit { get; set; }
     public bool CanManage { get; set; }
@@ -119,6 +149,9 @@ public class CompanyOrderDto
 {
     public Guid Id { get; set; }
     public string OrderNo { get; set; } = string.Empty;
+    public string? PlatformOrderNo { get; set; }
+    public string? Notes { get; set; }
+    public string? DriverNotes { get; set; }
     public DateOnly StartDate { get; set; }
     public int DayCount { get; set; }
     public string Kind { get; set; } = "company";
@@ -127,6 +160,7 @@ public class CompanyOrderDto
 public class CompanyContactDto
 {
     public Guid CompanyId { get; set; }
+    public string? Name { get; set; }
     public string? Contact { get; set; }
 }
 
@@ -143,4 +177,17 @@ public class CompanyMemberDto
     public Guid UserId { get; set; }
     public string Username { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? Contact { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class DispatcherNoteWriteDto
+{
+    public string? Notes { get; set; }
+}
+
+public class CompanyNoteWriteDto
+{
+    public Guid CompanyId { get; set; }
+    public string? Notes { get; set; }
 }

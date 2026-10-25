@@ -8,12 +8,16 @@ public static class DemoDataSeeder
 {
     public const string Password = "Passw0rd!";
 
-    public static async Task ResetAsync(TrailinkDbContext db, TextWriter output)
+    public static async Task WipeAsync(TrailinkDbContext db, TextWriter output)
     {
         await db.Database.ExecuteSqlRawAsync("""
             TRUNCATE TABLE
                 order_activities,
                 order_files,
+                order_notes,
+                dispatcher_notes,
+                driver_notes,
+                company_notes,
                 itinerary_days,
                 orders,
                 dispatcher_applications,
@@ -24,6 +28,28 @@ public static class DemoDataSeeder
                 drivers
             RESTART IDENTITY CASCADE
             """);
+        await output.WriteLineAsync("已清空业务表，未写入演示数据。");
+    }
+
+    public static async Task WipeOrdersAsync(TrailinkDbContext db, TextWriter output)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            TRUNCATE TABLE
+                order_activities,
+                order_files,
+                order_notes,
+                itinerary_days,
+                orders
+            RESTART IDENTITY CASCADE
+            """);
+        var users = await db.Users.CountAsync();
+        var companies = await db.Companies.CountAsync();
+        await output.WriteLineAsync($"已清空订单、行程、活动和订单附件记录。用户 {users}，公司 {companies}。");
+    }
+
+    public static async Task ResetAsync(TrailinkDbContext db, TextWriter output)
+    {
+        await WipeAsync(db, TextWriter.Null);
 
         var hash = PasswordHashing.Hash(Password);
 
@@ -64,8 +90,7 @@ public static class DemoDataSeeder
             ("drv10", "冯司导"),
             ("drv11", "陈司导"),
             ("drv12", "褚司导"),
-            ("drv13", "卫司导"),
-            ("drv14", "蒋司导")
+            ("drv13", "卫司导")
         };
 
         var driverRows = driverSpecs.Select(spec => new Driver { Id = Guid.NewGuid(), Name = spec.Name }).ToArray();
@@ -107,62 +132,49 @@ public static class DemoDataSeeder
             }
         }
 
+        var now = DateTimeOffset.UtcNow;
+        var driverLinks = new (int Index, User Dispatcher)[]
+        {
+            (0, chen),
+            (1, chen), (1, lin),
+            (2, chen), (2, lin),
+            (3, chen), (3, lin),
+            (4, chen), (4, lin), (4, huang),
+            (5, chen),
+            (6, lin),
+            (7, huang),
+            (8, huang), (8, wu),
+            (9, huang), (9, wu),
+            (10, huang), (10, wu),
+            (11, wu),
+            (12, wu)
+        };
+        foreach (var (index, dispatcher) in driverLinks)
+        {
+            db.DriverApplications.Add(new DriverApplication
+            {
+                Id = Guid.NewGuid(),
+                UserId = driverUsers[index].Id,
+                DispatcherUserId = dispatcher.Id,
+                CreatedAt = now,
+                ApprovedAt = now
+            });
+        }
+
         db.DispatcherApplications.Add(new DispatcherApplication
         {
             Id = Guid.NewGuid(),
-            UserId = driverUsers[13].Id,
+            UserId = driverUsers[4].Id,
             CompanyId = north.Id,
-            CreatedAt = DateTimeOffset.UtcNow
+            CreatedAt = now
         });
-
-        Guid? D(int index) => driverRows[index].Id;
-
-        // 未分配
-        AddOrder(db, north, chen, "2026-11-02", 3, null, "未派 · 奥克兰接机");
-        AddOrder(db, north, lin, "2026-11-12", 2, null, "未派 · 霍比特村");
-        AddOrder(db, north, chen, "2026-11-20", 4, null, "未派 · 北岛环线");
-        AddOrder(db, south, huang, "2026-11-05", 3, null, "未派 · 皇后镇");
-        AddOrder(db, south, wu, "2026-11-18", 2, null, "未派 · 米尔福德");
-        AddOrder(db, south, huang, "2026-12-02", 3, null, "未派 · 蒂卡波");
-        AddOrder(db, central, chen, "2026-11-08", 2, null, "未派 · 陶波");
-        AddOrder(db, central, huang, "2026-12-06", 3, null, "未派 · 朗吉蒂基");
-
-        // 历史已完成（结束早于今天）
-        AddOrder(db, north, chen, "2026-09-02", 2, D(0), "已完成 · 陈→王");
-        AddOrder(db, north, chen, "2026-09-06", 2, D(1), "已完成 · 陈→李");
-        AddOrder(db, north, chen, "2026-09-10", 3, D(2), "已完成 · 陈→张");
-        AddOrder(db, central, chen, "2026-09-16", 2, D(3), "已完成 · 陈→赵");
-        AddOrder(db, central, chen, "2026-09-20", 2, D(4), "已完成 · 陈→刘");
-        AddOrder(db, north, lin, "2026-09-04", 2, D(2), "已完成 · 林→张");
-        AddOrder(db, north, lin, "2026-09-08", 2, D(3), "已完成 · 林→赵");
-        AddOrder(db, north, lin, "2026-09-12", 2, D(4), "已完成 · 林→刘");
-        AddOrder(db, north, lin, "2026-09-18", 2, D(5), "已完成 · 林→孙");
-        AddOrder(db, north, lin, "2026-09-22", 2, D(6), "已完成 · 林→周");
-        AddOrder(db, south, huang, "2026-09-03", 2, D(7), "已完成 · 黄→吴");
-        AddOrder(db, south, huang, "2026-09-07", 3, D(8), "已完成 · 黄→郑");
-        AddOrder(db, south, huang, "2026-09-14", 2, D(9), "已完成 · 黄→冯");
-        AddOrder(db, central, huang, "2026-09-19", 2, D(4), "已完成 · 黄→刘");
-        AddOrder(db, central, huang, "2026-09-24", 2, D(10), "已完成 · 黄→陈");
-        AddOrder(db, south, wu, "2026-09-05", 2, D(8), "已完成 · 吴→郑");
-        AddOrder(db, south, wu, "2026-09-09", 2, D(9), "已完成 · 吴→冯");
-        AddOrder(db, south, wu, "2026-09-13", 2, D(10), "已完成 · 吴→陈");
-        AddOrder(db, south, wu, "2026-09-17", 2, D(11), "已完成 · 吴→褚");
-        AddOrder(db, south, wu, "2026-09-21", 3, D(12), "已完成 · 吴→卫");
-
-        // 未完成已派，方便司导日历和调度台对照
-        AddOrder(db, north, chen, "2026-10-28", 3, D(0), "进行中 · 陈→王");
-        AddOrder(db, north, lin, "2026-10-30", 2, D(5), "进行中 · 林→孙");
-        AddOrder(db, south, huang, "2026-11-01", 2, D(7), "进行中 · 黄→吴");
-        AddOrder(db, south, wu, "2026-11-03", 2, D(11), "进行中 · 吴→褚");
-        AddOrder(db, central, chen, "2026-10-26", 2, D(4), "进行中 · 陈→刘");
 
         await db.SaveChangesAsync();
 
-        await output.WriteLineAsync("演示数据已重置。密码均为 Passw0rd!");
+        await output.WriteLineAsync("账号已按名单重建，订单为空。密码均为 Passw0rd!");
         await output.WriteLineAsync("公司  north / south / central");
         await output.WriteLineAsync("调度  chen(北岛+中部) lin(北岛) huang(南岛+中部) wu(南岛)");
-        await output.WriteLineAsync("司导  drv01-drv13；drv05 属三家公司；drv14 已申请北岛待批");
-        await output.WriteLineAsync("陈: drv01-05  林: drv03-07  黄: drv05,08-11  吴: drv09-13");
+        await output.WriteLineAsync("司导  drv01-drv13；drv05 属三家公司，已向北岛申请调度员");
     }
 
     private static Company Company(string name, string contact) => new()
@@ -197,37 +209,4 @@ public static class DemoDataSeeder
         Role = role
     };
 
-    private static void AddOrder(
-        TrailinkDbContext db,
-        Company company,
-        User creator,
-        string start,
-        int dayCount,
-        Guid? driverId,
-        string notes)
-    {
-        var startDate = DateOnly.Parse(start);
-        var order = new Order
-        {
-            Id = Guid.NewGuid(),
-            OrderNo = Order.NewOrderNo(),
-            StartDate = startDate,
-            GuestCount = 4,
-            Notes = notes,
-            CompanyId = company.Id,
-            CreatedByUserId = creator.Id
-        };
-        db.Orders.Add(order);
-        for (var offset = 0; offset < dayCount; offset++)
-        {
-            db.ItineraryDays.Add(new ItineraryDay
-            {
-                Id = Guid.NewGuid(),
-                OrderId = order.Id,
-                ServiceDate = startDate.AddDays(offset),
-                Description = notes,
-                DriverId = driverId
-            });
-        }
-    }
 }

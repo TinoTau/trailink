@@ -2,7 +2,8 @@ import { Button, Card, Form, Input, Tabs, Typography, message } from 'antd'
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
-import { homeFor, useAuth } from '../auth/AuthContext'
+import { useAuth } from '../auth/authState'
+import { homeFor } from '../navigation'
 
 export function LoginPage() {
   const { user, setUser } = useAuth()

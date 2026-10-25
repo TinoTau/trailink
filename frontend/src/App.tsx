@@ -1,26 +1,11 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { homeFor, useAuth } from './auth/AuthContext'
+import { useAuth } from './auth/authState'
+import { canRoleOpenPath, homeFor } from './navigation'
 import { CompanyPage } from './pages/CompanyPage'
 import { DispatcherPage } from './pages/dispatcher/DispatcherPage'
 import { DriverCalendarPage } from './pages/driver/DriverCalendarPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProfilePage } from './pages/ProfilePage'
-import type { UserRole } from './types'
-
-function canOpen(role: UserRole, path: string) {
-  if (role === 'company') {
-    return true
-  }
-  if (role === 'dispatcher') {
-    return (
-      path.startsWith('/dispatcher') ||
-      path.startsWith('/company') ||
-      path.startsWith('/driver') ||
-      path.startsWith('/me')
-    )
-  }
-  return path.startsWith('/driver') || path.startsWith('/company') || path.startsWith('/me')
-}
 
 export default function App() {
   const { user, ready } = useAuth()
@@ -38,7 +23,7 @@ export default function App() {
     return <Navigate to="/login" replace />
   }
 
-  if (!canOpen(user.role, location.pathname)) {
+  if (!canRoleOpenPath(user.role, location.pathname)) {
     return <Navigate to={homeFor(user.role)} replace />
   }
 
@@ -49,6 +34,7 @@ export default function App() {
       <Route path="/dispatcher/*" element={<Navigate to="/dispatcher" replace />} />
       <Route path="/driver/calendar" element={<DriverCalendarPage />} />
       <Route path="/driver/*" element={<Navigate to="/driver/calendar" replace />} />
+      <Route path="/company/assign" element={<DispatcherPage />} />
       <Route path="/company" element={<CompanyPage />} />
       <Route path="/me" element={<ProfilePage />} />
       <Route path="/orders/*" element={<Navigate to={homeFor(user.role)} replace />} />

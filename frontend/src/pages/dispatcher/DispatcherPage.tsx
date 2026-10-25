@@ -1,21 +1,24 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import { Navigate, useLocation } from 'react-router-dom'
 import { message, Modal } from 'antd'
-import { createOrderWithDays, ordersApi } from '../../api/orders'
+import { authApi, companyApi } from '../../api/auth'
+import { clearDayDriver, createOrderWithDays, ordersApi, updateOrderInfo } from '../../api/orders'
+import { useAuthenticatedAuth } from '../../auth/authState'
 import { AccountMenu } from '../AccountMenu'
 import { driversApi } from '../../api/drivers'
+import { readCurrentCompanyId } from '../../currentCompany'
 import { PRESET_COLORS, contrastText } from '../../calendarUi'
-import { addMonths, formatLocalDate, formatMonthDay, laterDate, monthEnd, monthStart, orderedRange, toDateOnly, todayLocal } from '../../localDate'
-import { assignedDayCount, hasUnassignedDays, isHistoricalOrder, isSplitOrder } from '../../orderFlags'
-import type { Driver, DriverCalendarDay, ItineraryDay, Order } from '../../types'
+import { addMonths, formatLocalDate, formatMonthDay, laterDate, monthEnd, monthStart, orderedRange, todayLocal } from '../../localDate'
+import { assignedDayCount, driverDisplayLabel, hasDispatcherAssignment, hasUnassignedDays, isHistoricalOrder, isIncomplete, isInProgress, isOwnAssignment, isSplitOrder, orderAssignerName, orderDisplayLabel } from '../../orderFlags'
+import type { DriverCalendarDay, ItineraryDay, Order } from '../../types'
 import { OrderFilesBlock } from '../OrderFilesBlock'
 import { DriverDayEditor } from '../driver/DriverDayEditor'
 import { DispatcherCalendarCard, DispatcherDayCard, type CalendarMark } from './DispatcherCalendarCard'
 import '../driver/driver-calendar.css'
 import './dispatcher.css'
 
-const COLOR_KEY = 'trailink.dispatcher.assignedColor'
 const LAYOUT_KEY = 'trailink.dispatcher.driverLayout'
-const PROFILE_KEY = 'trailink.dispatcher.profile'
+const ASSIGN_LAYOUT_KEY = 'trailink.company.dispatcherLayout'
 const DEFAULT_ASSIGNED_COLOR = '#C6F0E0'
 const DRAG_THRESHOLD = 8
 
@@ -25,7 +28,15 @@ interface DriverLayout {
   hiddenIds: string[]
 }
 
+interface BoardPerson {
+  id: string
+  name: string
+  notes: string | null
+  contact: string | null
+}
+
 type OrderFilter = 'unassigned' | 'all'
+type PoolFilter = 'open' | 'done'
 type DragKind = 'order' | 'driver' | 'day'
 
 interface DragState {
@@ -38,13 +49,9 @@ interface DragState {
   y: number
 }
 
-function readColor() {
-  return localStorage.getItem(COLOR_KEY) || DEFAULT_ASSIGNED_COLOR
-}
-
-function readLayout(): DriverLayout {
+function readLayout(key = LAYOUT_KEY): DriverLayout {
   try {
-    const parsed = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '') as DriverLayout
+    const parsed = JSON.parse(localStorage.getItem(key) || '') as DriverLayout
     return {
       pinnedIds: parsed.pinnedIds ?? [],
       sortIds: parsed.sortIds ?? [],
@@ -53,25 +60,6 @@ function readLayout(): DriverLayout {
   } catch {
     return { pinnedIds: [], sortIds: [], hiddenIds: [] }
   }
-}
-
-function readProfileName() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PROFILE_KEY) || '') as { name?: string }
-    return parsed.name?.trim() || '调度员'
-  } catch {
-    return '调度员'
-  }
-}
-
-function isIncomplete(order: Order, today: string) {
-  const end = order.endDate || order.startDate
-  return end >= today
-}
-
-function isInProgress(order: Order, today: string) {
-  const end = order.endDate || order.startDate
-  return order.startDate <= today && end >= today
 }
 
 function sortBoardOrders(orders: Order[], today: string) {
@@ -88,12 +76,12 @@ function sortBoardOrders(orders: Order[], today: string) {
   })
 }
 
-function sortDrivers(drivers: Driver[], layout: DriverLayout) {
-  const hidden = new Set(layout.hiddenIds)
+function sortDrivers(drivers: BoardPerson[], layout: DriverLayout, hideable = true) {
+  const hidden = new Set(hideable ? layout.hiddenIds : [])
   const visible = drivers.filter((driver) => !hidden.has(driver.id))
   const pinned = layout.pinnedIds
     .map((id) => visible.find((driver) => driver.id === id))
-    .filter((driver): driver is Driver => Boolean(driver))
+    .filter((driver): driver is BoardPerson => Boolean(driver))
   const pinnedIds = new Set(layout.pinnedIds)
   const rest = visible.filter((driver) => !pinnedIds.has(driver.id))
   const sortIndex = new Map(layout.sortIds.map((id, index) => [id, index]))
@@ -179,23 +167,31 @@ function alignCalendarScroll(source: HTMLElement, target: HTMLElement) {
 }
 
 export function DispatcherPage() {
+  const { user, setUser } = useAuthenticatedAuth()
+  const location = useLocation()
+  const assignDesk = location.pathname.startsWith('/company/assign')
+  const layoutKey = assignDesk ? ASSIGN_LAYOUT_KEY : LAYOUT_KEY
   const today = formatLocalDate(todayLocal())
+  const companyId = user.companyId || readCurrentCompanyId()
   const [orders, setOrders] = useState<Order[]>([])
-  const [drivers, setDrivers] = useState<Driver[]>([])
+  const [drivers, setDrivers] = useState<BoardPerson[]>([])
   const [filter, setFilter] = useState<OrderFilter>('unassigned')
-  const [assignedColor, setAssignedColor] = useState(readColor)
+  const [poolFilter, setPoolFilter] = useState<PoolFilter>('open')
+  const [assignedColor, setAssignedColor] = useState(user.assignedColor || DEFAULT_ASSIGNED_COLOR)
   const [showColors, setShowColors] = useState(false)
-  const [layout, setLayout] = useState<DriverLayout>(readLayout)
-  const [profileName, setProfileName] = useState(readProfileName)
-  const [editingName, setEditingName] = useState(false)
+  const [layout, setLayout] = useState<DriverLayout>(() => readLayout(layoutKey))
   const [showHidden, setShowHidden] = useState(false)
   const [busy, setBusy] = useState(false)
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [selectedOrderDayId, setSelectedOrderDayId] = useState<string | null>(null)
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
   const [driverNotes, setDriverNotes] = useState('')
+  const driverNotesRef = useRef('')
+  const driverNoteLock = useRef(false)
   const [orderPlatformNo, setOrderPlatformNo] = useState('')
   const [orderNotes, setOrderNotes] = useState('')
+  const [orderCompanyId, setOrderCompanyId] = useState<string | null>(null)
+  const [orderCompanyName, setOrderCompanyName] = useState('')
   const [orderInfoOpen, setOrderInfoOpen] = useState(false)
   const [creatingOrder, setCreatingOrder] = useState(false)
   const [createRangeStart, setCreateRangeStart] = useState<string | null>(null)
@@ -204,6 +200,9 @@ export function DispatcherPage() {
   const ordersRef = useRef<Order[]>([])
   const orderPlatformNoRef = useRef('')
   const orderNotesRef = useRef('')
+  const orderCompanyIdRef = useRef<string | null>(null)
+  const selectedOrderIdRef = useRef<string | null>(null)
+  const companyBindGen = useRef(0)
   const selectOrderDayRef = useRef<(dayId: string) => void>(() => undefined)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [hoverDriverId, setHoverDriverId] = useState<string | null>(null)
@@ -231,17 +230,35 @@ export function DispatcherPage() {
   }, [drivers, orders])
 
   const visibleOrders = useMemo(() => {
+    const scoped = assignDesk && companyId
+      ? orders.filter((order) => order.companyId === companyId)
+      : orders
     const listed =
       filter === 'unassigned'
-        ? orders.filter((order) => isIncomplete(order, today) && order.dayCount > 0 && hasUnassignedDays(order))
-        : orders.filter((order) => order.dayCount > 0 && !isHistoricalOrder(order, today))
+        ? scoped.filter((order) =>
+            order.dayCount > 0 &&
+            (assignDesk ? !hasDispatcherAssignment(order) : hasUnassignedDays(order)))
+        : scoped.filter((order) => order.dayCount > 0 && !isHistoricalOrder(order, today))
     return sortBoardOrders(listed, today)
-  }, [filter, orders, today])
+  }, [assignDesk, companyId, filter, orders, today])
   const [createFrom, createTo] = createRangeStart ? orderedRange(createRangeStart, createRangeEnd) : [null, null]
   const createCalStart = formatLocalDate(monthStart(addMonths(todayLocal(), -1)))
   const createCalEnd = formatLocalDate(monthEnd(addMonths(todayLocal(), 3)))
 
-  const visibleDrivers = useMemo(() => sortDrivers(drivers, layout), [drivers, layout])
+  const visibleDrivers = useMemo(() => sortDrivers(drivers, layout, !assignDesk), [assignDesk, drivers, layout])
+  const dispatcherOrders = useMemo(() => {
+    if (!assignDesk || !selectedDriverId || !companyId) {
+      return []
+    }
+    const owned = orders.filter(
+      (order) => order.companyId === companyId && order.assignedDispatcherUserId === selectedDriverId && order.dayCount > 0,
+    )
+    const listed =
+      poolFilter === 'open'
+        ? owned.filter((order) => isIncomplete(order, today))
+        : owned.filter((order) => !isIncomplete(order, today))
+    return sortBoardOrders(listed, today)
+  }, [assignDesk, companyId, orders, poolFilter, selectedDriverId, today])
   const hiddenDrivers = useMemo(
     () => drivers.filter((driver) => layout.hiddenIds.includes(driver.id)),
     [drivers, layout.hiddenIds],
@@ -257,34 +274,61 @@ export function DispatcherPage() {
   const selectedDriver = drivers.find((driver) => driver.id === selectedDriverId) ?? null
   const driverById = useMemo(() => new Map(drivers.map((driver) => [driver.id, driver])), [drivers])
 
-  async function loadBoard() {
+  const loadBoard = useCallback(async () => {
     try {
+      if (assignDesk) {
+        const [nextOrders, home] = await Promise.all([ordersApi.list(), companyApi.desk(companyId)])
+        setOrders(nextOrders)
+        setDrivers((home.desk?.dispatchers ?? []).map((item) => ({
+          id: item.userId,
+          name: item.name,
+          notes: item.notes,
+          contact: item.contact,
+        })))
+        return
+      }
       const [nextOrders, nextDrivers] = await Promise.all([ordersApi.list(), driversApi.list()])
       setOrders(nextOrders)
       setDrivers(nextDrivers)
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载调度台失败')
     }
-  }
+  }, [assignDesk, companyId])
 
   useEffect(() => {
+    // 路由在调度台和派给调度之间切换时，需要重新载入各自的本地布局。
+    // oxlint-disable-next-line react/set-state-in-effect
+    setLayout(readLayout(layoutKey))
     void loadBoard()
-  }, [])
+  }, [layoutKey, loadBoard])
 
   useEffect(() => {
-    setDriverNotes(driversRef.current.find((item) => item.id === selectedDriverId)?.notes ?? '')
+    const notes = driversRef.current.find((item) => item.id === selectedDriverId)?.notes ?? ''
+    driverNotesRef.current = notes
+    // 选择对象变化时，编辑草稿必须切换到该对象自己的值。
+    // oxlint-disable-next-line react/set-state-in-effect
+    setDriverNotes(notes)
+    setPoolFilter('open')
   }, [selectedDriverId])
 
   useEffect(() => {
+    // 订单切换时重建编辑草稿，避免把上一单内容保存到下一单。
+    // oxlint-disable-next-line react/set-state-in-effect
+    selectedOrderIdRef.current = selectedOrderId
     setSelectedOrderDayId(null)
     setOrderInfoOpen(false)
     const order = ordersRef.current.find((item) => item.id === selectedOrderId)
     const platformOrderNo = order?.platformOrderNo ?? ''
     const notes = order?.notes ?? ''
+    const nextCompanyId = order?.companyId ?? null
+    const nextCompanyName = order?.companyName ?? ''
     orderPlatformNoRef.current = platformOrderNo
     orderNotesRef.current = notes
+    orderCompanyIdRef.current = nextCompanyId
     setOrderPlatformNo(platformOrderNo)
     setOrderNotes(notes)
+    setOrderCompanyId(nextCompanyId)
+    setOrderCompanyName(nextCompanyName)
   }, [selectedOrderId])
 
   useEffect(() => {
@@ -306,7 +350,7 @@ export function DispatcherPage() {
       }
       setDrag({ ...current, x: event.clientX, y: event.clientY })
       setHoverDriverId(resolveDriverId(event.clientX, event.clientY, selectedDriverIdRef.current))
-      setHoverOrderPane(current.kind === 'day' && current.from === 'driver' && isOverOrderPane(event.clientX, event.clientY))
+      setHoverOrderPane(current.from === 'driver' && isOverOrderPane(event.clientX, event.clientY))
     }
     function onUp(event: PointerEvent) {
       createRangeDragging.current = false
@@ -320,8 +364,11 @@ export function DispatcherPage() {
         setHoverDriverId(null)
         setHoverOrderPane(false)
         dragRef.current = null
-        if (current.kind === 'day' && current.from === 'driver' && current.orderId && current.dayId && overOrderPane) {
-          void unbindDayRef.current(current.orderId, current.dayId)
+        if (current.from === 'driver' && overOrderPane) {
+          const orderId = current.kind === 'order' ? current.id : current.orderId
+          if (orderId) {
+            void unbindDayRef.current(orderId, current.dayId ?? '')
+          }
           return
         }
         if (current.kind === 'day' && current.from === 'order' && current.dayId && !driverId) {
@@ -392,12 +439,24 @@ export function DispatcherPage() {
 
   function persistLayout(next: DriverLayout) {
     setLayout(next)
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(next))
+    localStorage.setItem(layoutKey, JSON.stringify(next))
   }
 
   function persistColor(color: string) {
+    if (color === assignedColor) {
+      return
+    }
     setAssignedColor(color)
-    localStorage.setItem(COLOR_KEY, color)
+    void authApi.updateAssignedColor(color).then(
+      (saved) => {
+        setUser(saved)
+        setAssignedColor(saved.assignedColor || color)
+      },
+      (error) => {
+        setAssignedColor(user.assignedColor || DEFAULT_ASSIGNED_COLOR)
+        message.error(error instanceof Error ? error.message : '无法保存已分配颜色')
+      },
+    )
   }
 
   function closeCreateOrder() {
@@ -441,7 +500,11 @@ export function DispatcherPage() {
     }
     setBusy(true)
     try {
-      const created = await createOrderWithDays({ startDate: createFrom, endDate: createTo })
+      const created = await createOrderWithDays({
+        startDate: createFrom,
+        endDate: createTo,
+        companyId: assignDesk ? companyId || undefined : undefined,
+      })
       if (created.warnings.length > 0) {
         message.warning(created.warnings.join('；'))
       } else {
@@ -461,12 +524,6 @@ export function DispatcherPage() {
     }
   }
 
-  function persistName(name: string) {
-    const value = name.trim() || '调度员'
-    setProfileName(value)
-    localStorage.setItem(PROFILE_KEY, JSON.stringify({ name: value }))
-  }
-
   function beginPointer(event: ReactPointerEvent, next: DragState) {
     if (busy) {
       return
@@ -484,11 +541,16 @@ export function DispatcherPage() {
     assignLock.current = true
     setBusy(true)
     try {
-      await ordersApi.assignDriver(orderId, driverId, true)
-      message.success('已分配给司导')
+      if (assignDesk) {
+        await ordersApi.assignDispatcher(orderId, driverId)
+        message.success('已整单分配给调度员')
+      } else {
+        await ordersApi.assignDriver(orderId, driverId, true)
+        message.success('已分配给司导')
+      }
       await loadBoard()
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '日期冲突，无法分配')
+      message.error(error instanceof Error ? error.message : assignDesk ? '无法分配给调度员' : '日期冲突，无法分配')
     } finally {
       assignLock.current = false
       setBusy(false)
@@ -498,19 +560,39 @@ export function DispatcherPage() {
   async function unbindDriverDay(orderId: string, dayId: string) {
     const order = orders.find((item) => item.id === orderId)
     const day = order?.days.find((item) => item.id === dayId)
-    if (!order || !day?.driverId || assignLock.current || busy) {
+    if (!order || assignLock.current || busy) {
+      return
+    }
+    if (assignDesk) {
+      if (!order.assignedDispatcherUserId) {
+        return
+      }
+      assignLock.current = true
+      setBusy(true)
+      try {
+        await ordersApi.assignDispatcher(orderId, null)
+        message.success('已整单收回，司导分配一并取消')
+        await loadBoard()
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '取消分配失败')
+      } finally {
+        assignLock.current = false
+        setBusy(false)
+      }
+      return
+    }
+    if (!day?.driverId) {
+      return
+    }
+    if (!isOwnAssignment(order, day, user.id)) {
+      message.warning('只能移除自己分配的订单')
       return
     }
     assignLock.current = true
     setBusy(true)
     try {
       if (isSplitOrder(order)) {
-        await ordersApi.updateDay(orderId, dayId, {
-          serviceDate: day.serviceDate,
-          description: day.description,
-          endLocation: day.endLocation,
-          driverId: null,
-        })
+        await ordersApi.updateDay(orderId, dayId, clearDayDriver(day))
         message.success('已取消该日拆单')
       } else {
         await ordersApi.assignDriver(orderId, null)
@@ -526,6 +608,10 @@ export function DispatcherPage() {
   }
 
   async function assignDay(orderId: string, dayId: string, driverId: string) {
+    if (assignDesk) {
+      void assignOrder(orderId, driverId)
+      return
+    }
     const order = orders.find((item) => item.id === orderId)
     const day = order?.days.find((item) => item.id === dayId)
     if (!order || !day || assignLock.current || busy) {
@@ -579,10 +665,19 @@ export function DispatcherPage() {
     if (!order || assignLock.current || busy) {
       return
     }
+    const releaseToPool = user.role === 'dispatcher' && Boolean(order.companyId)
     Modal.confirm({
-      title: '确定删除这个订单？',
-      content: order.orderNo,
-      okText: '删除',
+      title: releaseToPool ? '确定退回公司池？' : '确定删除这个订单？',
+      content: (() => {
+        const label = orderDisplayLabel(order)
+        if (!releaseToPool) {
+          return label || '该订单'
+        }
+        return label
+          ? `${label} 将解除调度员和已派司导，订单仍由公司保留。`
+          : '将解除调度员和已派司导，订单仍由公司保留。'
+      })(),
+      okText: releaseToPool ? '退回' : '删除',
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
@@ -590,12 +685,12 @@ export function DispatcherPage() {
         setBusy(true)
         try {
           await ordersApi.remove(order.id)
-          message.success('订单已删除')
+          message.success(releaseToPool ? '已退回公司池' : '订单已删除')
           setSelectedOrderId(null)
           setSelectedOrderDayId(null)
           await loadBoard()
         } catch (error) {
-          message.error(error instanceof Error ? error.message : '删除订单失败')
+          message.error(error instanceof Error ? error.message : releaseToPool ? '无法退回公司池' : '删除订单失败')
           throw error
         } finally {
           assignLock.current = false
@@ -633,25 +728,55 @@ export function DispatcherPage() {
     setOrderNotes(value)
   }
 
+  async function changeOrderCompany(nextId: string, nextName: string) {
+    const order = selectedOrder ?? ordersRef.current.find((item) => item.id === selectedOrderId)
+    const orderId = order?.id ?? null
+    const previousId = order?.companyId ?? null
+    const previousName = order?.companyName ?? ''
+    const gen = ++companyBindGen.current
+    orderCompanyIdRef.current = nextId
+    setOrderCompanyId(nextId)
+    setOrderCompanyName(nextName)
+    if (!order || previousId === nextId) {
+      return
+    }
+    try {
+      const saved = await updateOrderInfo(order, { companyId: nextId })
+      if (gen !== companyBindGen.current || selectedOrderIdRef.current !== orderId) {
+        return
+      }
+      orderCompanyIdRef.current = saved.companyId ?? null
+      setOrderCompanyId(orderCompanyIdRef.current)
+      setOrderCompanyName(saved.companyName ?? nextName)
+      message.success(saved.companyName ? `已绑定${saved.companyName}` : '已绑定公司')
+      await loadBoard()
+    } catch (error) {
+      if (gen === companyBindGen.current && selectedOrderIdRef.current === orderId) {
+        orderCompanyIdRef.current = previousId
+        setOrderCompanyId(previousId)
+        setOrderCompanyName(previousName)
+      }
+      message.error(error instanceof Error ? error.message : '绑定公司失败')
+    }
+  }
+
   async function saveOrderInfo() {
     const order = selectedOrder ?? ordersRef.current.find((item) => item.id === selectedOrderId)
     if (!order) {
       return
     }
-    const platformOrderNo = orderPlatformNoRef.current.trim() || undefined
+    const platformOrderNo = orderPlatformNoRef.current
     const notes = orderNotesRef.current
+    const nextCompanyId = orderCompanyIdRef.current
     try {
-      const saved = await ordersApi.update(order.id, {
-        platformOrderNo,
-        sourceCompany: order.sourceCompany ?? undefined,
-        startDate: toDateOnly(order.startDate),
-        guestCount: order.guestCount,
-        notes,
-      })
+      const saved = await updateOrderInfo(order, { platformOrderNo, notes, companyId: nextCompanyId })
       orderPlatformNoRef.current = saved.platformOrderNo ?? ''
       orderNotesRef.current = saved.notes ?? ''
+      orderCompanyIdRef.current = saved.companyId ?? null
       setOrderPlatformNo(orderPlatformNoRef.current)
       setOrderNotes(orderNotesRef.current)
+      setOrderCompanyId(orderCompanyIdRef.current)
+      setOrderCompanyName(saved.companyName ?? '')
       message.success('订单已保存')
       setOrderInfoOpen(false)
       await loadBoard()
@@ -660,20 +785,38 @@ export function DispatcherPage() {
     }
   }
 
+  function changeDriverNotes(value: string) {
+    driverNotesRef.current = value
+    setDriverNotes(value)
+  }
+
   async function saveDriverNotes() {
-    if (!selectedDriver || (selectedDriver.notes ?? '') === driverNotes) {
+    const driver = selectedDriver ?? driversRef.current.find((item) => item.id === selectedDriverId)
+    const notes = driverNotesRef.current
+    if (!driver || driverNoteLock.current || (driver.notes ?? '') === notes) {
       return
     }
+    driverNoteLock.current = true
     try {
-      const saved = await driversApi.update(selectedDriver.id, {
-        name: selectedDriver.name,
-        phone: selectedDriver.phone ?? undefined,
-        notes: driverNotes,
-      })
-      setDrivers((current) => current.map((driver) => (driver.id === saved.id ? saved : driver)))
+      if (assignDesk) {
+        const home = await companyApi.updateDispatcherNotes(driver.id, notes)
+        const saved = home.desk?.dispatchers.find((item) => item.userId === driver.id)
+        driverNotesRef.current = saved?.notes ?? ''
+        setDriverNotes(driverNotesRef.current)
+        setDrivers((current) =>
+          current.map((item) => (item.id === driver.id ? { ...item, notes: saved?.notes ?? '' } : item)),
+        )
+      } else {
+        const saved = await driversApi.updateNotes(driver.id, { notes })
+        driverNotesRef.current = saved.notes ?? ''
+        setDriverNotes(driverNotesRef.current)
+        setDrivers((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+      }
       message.success('备注已保存')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '保存备注失败')
+    } finally {
+      driverNoteLock.current = false
     }
   }
 
@@ -687,28 +830,48 @@ export function DispatcherPage() {
     selectedOrderDayIdRef.current = selectedOrderDayId
   })
 
-  const orderMarks: CalendarMark[] = (selectedOrder?.days ?? []).map((day) => ({
-    date: day.serviceDate,
-    dayId: day.id,
-    orderId: selectedOrder!.id,
-    label: day.driverId ? driverById.get(day.driverId)?.name.slice(0, 1) : '未派',
-    assigned: Boolean(day.driverId),
-    color: day.driverId ? assignedColor : '#FFF1B8',
-    textColor: day.driverId ? contrastText(assignedColor) : '#d46b08',
-  }))
+  const orderMarks: CalendarMark[] = (selectedOrder?.days ?? []).map((day) => {
+    const assigned = Boolean(day.driverId)
+    const label = day.driverId
+      ? (day.driverName ?? driverById.get(day.driverId)?.name)?.slice(0, 1)
+      : '未派'
+    return {
+      date: day.serviceDate,
+      dayId: day.id,
+      orderId: selectedOrder!.id,
+      label,
+      assigned,
+      color: assigned ? assignedColor : '#FFF1B8',
+      textColor: assigned ? contrastText(assignedColor) : '#d46b08',
+    }
+  })
 
-  const driverMarks: CalendarMark[] = orders
-    .flatMap((order) =>
-      order.days
-        .filter((day) => day.driverId === selectedDriverId && day.serviceDate >= today)
-        .map((day) => ({
-          date: day.serviceDate,
-          dayId: day.id,
-          orderId: order.id,
-          label: isSplitOrder(order) ? `${order.orderNo.slice(-4)}拆` : order.orderNo.slice(-4),
-        })),
-    )
-    .sort((left, right) => left.date.localeCompare(right.date))
+  const driverMarks: CalendarMark[] = (assignDesk
+    ? orders
+        .filter((order) => order.assignedDispatcherUserId === selectedDriverId)
+        .flatMap((order) =>
+          order.days
+            .filter((day) => day.serviceDate >= today)
+            .map((day) => ({
+              date: day.serviceDate,
+              dayId: day.id,
+              orderId: order.id,
+              owned: true,
+              label: orderDisplayLabel(order).slice(0, 2) || undefined,
+            })),
+        )
+    : orders.flatMap((order) =>
+        order.days
+          .filter((day) => day.driverId === selectedDriverId && day.serviceDate >= today)
+          .map((day) => ({
+            date: day.serviceDate,
+            dayId: day.id,
+            orderId: order.id,
+            owned: isOwnAssignment(order, day, user.id),
+            label: isOwnAssignment(order, day, user.id) ? orderAssignerName(order, day) : undefined,
+          })),
+      )
+  ).sort((left, right) => left.date.localeCompare(right.date))
 
   const driverRangeEnd = laterDate(driverMarks.at(-1)?.date, selectedOrder ? orderRangeEnd : undefined, today) || today
 
@@ -720,7 +883,39 @@ export function DispatcherPage() {
       ? orders.flatMap((order) => order.days.map((day) => ({ order, day }))).find((item) => item.day.id === drag.dayId)
       : undefined
 
-  function orderStatus(order: Order) {
+  function renderOrderTile(order: Order, from: 'order' | 'driver' = 'order') {
+    const byDriver = !assignDesk || from === 'driver'
+    const assigned = byDriver ? assignedDayCount(order) : hasDispatcherAssignment(order) ? order.dayCount : 0
+    const split = byDriver ? isSplitOrder(order) : false
+    const live = isInProgress(order, today)
+    const fullyAssigned = byDriver ? assigned > 0 && !hasUnassignedDays(order) : hasDispatcherAssignment(order)
+    return (
+      <button
+        key={order.id}
+        type="button"
+        className={`dispatcher-tile${drag?.id === order.id ? ' dragging' : ''}${assigned > 0 ? ' assigned' : ''}${split ? ' split' : ''}${live ? ' live' : ''}${selectedOrderId === order.id ? ' open' : ''}`}
+        style={
+          split
+            ? { ['--assigned-color']: assignedColor } as CSSProperties
+            : fullyAssigned
+              ? { background: assignedColor, color: contrastText(assignedColor) }
+              : undefined
+        }
+        onPointerDown={(event) =>
+          beginPointer(event, { kind: 'order', id: order.id, from, x: event.clientX, y: event.clientY })
+        }
+      >
+        <strong>{orderDisplayLabel(order)}</strong>
+        <span>{formatMonthDay(order.startDate)}</span>
+        <em>{from === 'driver' ? `${order.dayCount} 天` : orderStatus(order, byDriver)}</em>
+      </button>
+    )
+  }
+
+  function orderStatus(order: Order, byDriver = false) {
+    if (assignDesk && !byDriver) {
+      return order.assignedDispatcherName || (hasDispatcherAssignment(order) ? '已分配' : `${order.dayCount} 天`)
+    }
     const assigned = assignedDayCount(order)
     if (assigned === 0) {
       return isInProgress(order, today) ? '进行中' : `${order.dayCount} 天`
@@ -731,33 +926,20 @@ export function DispatcherPage() {
     return isInProgress(order, today) ? '进行中' : '已分配'
   }
 
+  if (assignDesk && user && user.role !== 'company') {
+    return <Navigate to="/dispatcher" replace />
+  }
+
   return (
     <div className="dispatcher-page">
       <header className="dispatcher-header">
         <div>
-          {editingName ? (
-            <input
-              className="dispatcher-name-input"
-              autoFocus
-              value={profileName}
-              onChange={(event) => setProfileName(event.target.value)}
-              onBlur={() => {
-                persistName(profileName)
-                setEditingName(false)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  persistName(profileName)
-                  setEditingName(false)
-                }
-              }}
-            />
-          ) : (
-            <button type="button" className="dispatcher-name" onClick={() => setEditingName(true)}>
-              {profileName}
-            </button>
-          )}
-          <p>调度台</p>
+          <strong className="dispatcher-name">
+            {assignDesk
+              ? user.companies.find((item) => item.id === companyId)?.name || user.companyName || '公司'
+              : user.name.trim() || '调度员'}
+          </strong>
+          <p>{assignDesk ? '派给调度' : '调度台'}</p>
         </div>
         <div className="dispatcher-header-actions">
           <AccountMenu />
@@ -815,36 +997,13 @@ export function DispatcherPage() {
           </div>
         ) : null}
         <p className="dispatcher-hint">
-          创建订单与司导界面相同：在日历上按住并拖选起止日期。点击订单看日历，可改公司订单号和备注。点击某一天编辑行程，拖动某一天只派那天。拖动卡片整单派单。从司导卡片把一天拖回订单区可取消：拆单只取消那天，未拆单取消整单。已派完且结束的单不出现在这里，只在公司信息里查看。冲突会报错，卡片保持打开。
+          {assignDesk
+            ? '这里把本公司订单整单分给一位调度员。同一时间只能分给一个人。拖动订单或某一天到调度员都是整单分配；从调度员订单池拖回订单区即整单收回，已经派给司导的日期也会取消。未分配是还没派给调度员的单。点开订单看日历，日期上标的是司导。点开调度员可看他未完成和已完成的单，并写公司备注。'
+            : '创建订单与司导界面相同：在日历上按住并拖选起止日期。新建单不自动绑定所属公司，点开后搜索绑定。未分配是还有空日期的单，过期未派完也在这里。点击订单看日历，可改所属公司、公司订单号和备注。改绑后新公司能在派给调度里看到。点击某一天编辑行程，拖动某一天只派那天。拖动卡片整单派单。从司导卡片把自己分配的一天拖回订单区可取消：拆单只取消那天，未拆单取消整单。其他人分配的日期会显示在日历上，但不能移除。已派完且结束的单不出现在这里，只在公司信息里查看。'}
         </p>
         <div className="dispatcher-grid">
           {visibleOrders.length === 0 ? <p className="dispatcher-empty">暂无订单</p> : null}
-          {visibleOrders.map((order) => {
-            const assigned = assignedDayCount(order)
-            const split = isSplitOrder(order)
-            const live = isInProgress(order, today)
-            return (
-              <button
-                key={order.id}
-                type="button"
-                className={`dispatcher-tile${drag?.id === order.id ? ' dragging' : ''}${assigned > 0 ? ' assigned' : ''}${split ? ' split' : ''}${live ? ' live' : ''}${selectedOrderId === order.id ? ' open' : ''}`}
-                style={
-                  split
-                    ? { ['--assigned-color']: assignedColor } as CSSProperties
-                    : assigned > 0 && !hasUnassignedDays(order)
-                      ? { background: assignedColor, color: contrastText(assignedColor) }
-                      : undefined
-                }
-                onPointerDown={(event) =>
-                  beginPointer(event, { kind: 'order', id: order.id, x: event.clientX, y: event.clientY })
-                }
-              >
-                <strong>{order.orderNo}</strong>
-                <span>{formatMonthDay(order.startDate)}</span>
-                <em>{orderStatus(order)}</em>
-              </button>
-            )
-          })}
+          {visibleOrders.map((order) => renderOrderTile(order))}
         </div>
         {creatingOrder ? (
           <div className="dispatcher-overlay">
@@ -881,19 +1040,20 @@ export function DispatcherPage() {
           <div className="dispatcher-overlay">
             {orderEditorDay && selectedOrderDay ? (
               <DispatcherDayCard
-                title={`${selectedOrder.orderNo} · ${formatMonthDay(selectedOrderDay.serviceDate)}`}
+                title={[orderDisplayLabel(selectedOrder), formatMonthDay(selectedOrderDay.serviceDate)].filter(Boolean).join(' · ')}
                 subtitle={selectedOrderDay.driverName ? `${selectedOrderDay.driverName} · 当日行程` : '当日行程'}
                 onClose={() => setSelectedOrderDayId(null)}
+                closeLabel="返回日历"
               >
                 <DriverDayEditor key={orderEditorDay.items[0].itineraryDayId} day={orderEditorDay} onChanged={loadBoard} />
               </DispatcherDayCard>
             ) : (
               <DispatcherCalendarCard
-                title={selectedOrder.orderNo}
+                title={orderDisplayLabel(selectedOrder)}
                 bodyRef={orderCalBodyRef}
                 bodyKey="order"
                 onBodyScroll={syncDriverCalendarFromOrder}
-                subtitle={`${formatMonthDay(selectedOrder.startDate)} · ${selectedOrder.dayCount} 天 · ${assignedDayCount(selectedOrder) > 0 ? orderStatus(selectedOrder) : '未分配'}`}
+                subtitle={`${formatMonthDay(selectedOrder.startDate)} · ${selectedOrder.dayCount} 天 · ${assignDesk ? (selectedOrder.assignedDispatcherName || '未分配') : assignedDayCount(selectedOrder) > 0 ? orderStatus(selectedOrder) : '未分配'}`}
                 marks={orderMarks}
                 rangeStart={orderRangeStart}
                 rangeEnd={orderRangeEnd}
@@ -906,8 +1066,13 @@ export function DispatcherPage() {
                 }}
                 platformOrderNo={orderPlatformNo}
                 onPlatformOrderNoChange={changeOrderPlatformNo}
+                companyId={orderCompanyId}
+                companyName={orderCompanyName}
+                onCompanyChange={assignDesk ? undefined : changeOrderCompany}
                 notes={orderNotes}
                 onNotesChange={changeOrderNotes}
+                notesLabel={assignDesk ? '公司备注' : undefined}
+                notesPlaceholder={assignDesk ? '仅公司可见，调度和司导看不到' : undefined}
                 onNotesSave={() => {
                   void saveOrderInfo()
                 }}
@@ -923,7 +1088,7 @@ export function DispatcherPage() {
                   </label>
                 }
                 onRemove={deleteSelectedOrder}
-                removeLabel="删除订单"
+                removeLabel={user.role === 'dispatcher' && selectedOrder.companyId ? '退回公司' : '删除订单'}
                 onClose={() => setSelectedOrderId(null)}
                 onCardPointerDown={(event) =>
                   beginPointer(event, { kind: 'order', id: selectedOrder.id, x: event.clientX, y: event.clientY })
@@ -950,12 +1115,14 @@ export function DispatcherPage() {
         data-driver-pane="true"
       >
         <div className="dispatcher-pane-bar">
-          <h2>司导</h2>
-          <button type="button" className="dispatcher-chip" onClick={() => setShowHidden((current) => !current)}>
-            {showHidden ? '收起已隐藏' : `已隐藏 ${hiddenDrivers.length}`}
-          </button>
+          <h2>{assignDesk ? '调度员' : '司导'}</h2>
+          {assignDesk ? null : (
+            <button type="button" className="dispatcher-chip" onClick={() => setShowHidden((current) => !current)}>
+              {showHidden ? '收起已隐藏' : `已隐藏 ${hiddenDrivers.length}`}
+            </button>
+          )}
         </div>
-        {showHidden && hiddenDrivers.length > 0 ? (
+        {!assignDesk && showHidden && hiddenDrivers.length > 0 ? (
           <div className="dispatcher-hidden">
             {hiddenDrivers.map((driver) => (
               <button key={driver.id} type="button" className="dispatcher-chip" onClick={() => restoreDriver(driver.id)}>
@@ -964,9 +1131,13 @@ export function DispatcherPage() {
             ))}
           </div>
         ) : null}
-        <p className="dispatcher-hint">点击司导看未来行程。名字旁的笔记图标可改备注，右侧可移除。置顶在图标右上角。</p>
+        <p className="dispatcher-hint">
+          {assignDesk
+            ? '点击调度员看他接手的本公司订单。未完成和已完成用按钮切换。可排序、置顶，不能隐藏。名字旁可写公司给这位调度的备注，调度看不到。从订单池拖回订单区即整单收回，司导一并取消。'
+            : '点击司导看未来行程。名字旁的笔记图标可改备注，右侧可移除。置顶在图标右上角。'}
+        </p>
         <div className="dispatcher-grid">
-          {visibleDrivers.length === 0 ? <p className="dispatcher-empty">暂无司导</p> : null}
+          {visibleDrivers.length === 0 ? <p className="dispatcher-empty">{assignDesk ? '暂无调度员' : '暂无司导'}</p> : null}
           {visibleDrivers.map((driver) => {
             const pinned = layout.pinnedIds.includes(driver.id)
             return (
@@ -989,12 +1160,14 @@ export function DispatcherPage() {
                 <button
                   type="button"
                   className="dispatcher-avatar"
+                  aria-label={driver.name}
+                  title={driver.name}
                   onPointerDown={(event) =>
                     beginPointer(event, { kind: 'driver', id: driver.id, x: event.clientX, y: event.clientY })
                   }
                 >
                   <b>{driver.name.slice(0, 1)}</b>
-                  <span>{driver.name}</span>
+                  <span>{driverDisplayLabel(driver)}</span>
                 </button>
               </div>
             )
@@ -1002,34 +1175,75 @@ export function DispatcherPage() {
         </div>
         {selectedDriver ? (
           <div className="dispatcher-overlay">
-            <DispatcherCalendarCard
-              key={selectedDriver.id}
-              title={selectedDriver.name}
-              bodyRef={driverCalBodyRef}
-              bodyKey="driver"
-              subtitle={driverMarks.length > 0 ? `未来 ${driverMarks.length} 天有行程` : '暂无未来行程'}
-              marks={driverMarks}
-              rangeStart={today}
-              rangeEnd={driverRangeEnd}
-              notes={driverNotes}
-              onNotesChange={setDriverNotes}
-              onNotesSave={() => {
-                void saveDriverNotes()
-              }}
-              onClose={() => setSelectedDriverId(null)}
-              onRemove={() => hideDriver(selectedDriver.id)}
-              onDayPointerDown={(event, mark) =>
-                beginPointer(event, {
-                  kind: 'day',
-                  id: mark.dayId,
-                  orderId: mark.orderId,
-                  dayId: mark.dayId,
-                  from: 'driver',
-                  x: event.clientX,
-                  y: event.clientY,
-                })
-              }
-            />
+            {assignDesk ? (
+              <DispatcherDayCard
+                title={`${selectedDriver.name} 的订单`}
+                subtitle={dispatcherOrders.length > 0 ? `${dispatcherOrders.length} 单` : poolFilter === 'open' ? '没有未完成的单' : '没有已完成的单'}
+                notes={driverNotes}
+                onNotesChange={changeDriverNotes}
+                onNotesSave={() => {
+                  void saveDriverNotes()
+                }}
+                notesLabel="公司备注"
+                notesPlaceholder="仅公司可见，调度看不到"
+                onClose={() => setSelectedDriverId(null)}
+              >
+                <div className="dispatcher-filters">
+                  <button
+                    type="button"
+                    className={`dispatcher-chip${poolFilter === 'open' ? ' active' : ''}`}
+                    onClick={() => setPoolFilter('open')}
+                  >
+                    未完成订单
+                  </button>
+                  <button
+                    type="button"
+                    className={`dispatcher-chip${poolFilter === 'done' ? ' active' : ''}`}
+                    onClick={() => setPoolFilter('done')}
+                  >
+                    已完成订单
+                  </button>
+                </div>
+                <div className="dispatcher-grid">
+                  {dispatcherOrders.length === 0 ? <p className="dispatcher-empty">暂无订单</p> : null}
+                  {dispatcherOrders.map((order) => renderOrderTile(order, 'driver'))}
+                </div>
+              </DispatcherDayCard>
+            ) : (
+              <DispatcherCalendarCard
+                key={selectedDriver.id}
+                title={selectedDriver.name}
+                meta={selectedDriver.contact?.trim() ? `联系方式 ${selectedDriver.contact.trim()}` : '联系方式 暂未填写'}
+                bodyRef={driverCalBodyRef}
+                bodyKey="driver"
+                subtitle={driverMarks.length > 0 ? `未来 ${driverMarks.length} 天有行程` : '暂无未来行程'}
+                marks={driverMarks}
+                rangeStart={today}
+                rangeEnd={driverRangeEnd}
+                notes={driverNotes}
+                onNotesChange={changeDriverNotes}
+                onNotesSave={() => {
+                  void saveDriverNotes()
+                }}
+                onClose={() => setSelectedDriverId(null)}
+                onRemove={() => hideDriver(selectedDriver.id)}
+                onDayPointerDown={(event, mark) => {
+                  if (mark.owned === false) {
+                    message.warning('只能移除自己分配的订单')
+                    return
+                  }
+                  beginPointer(event, {
+                    kind: 'day',
+                    id: mark.dayId,
+                    orderId: mark.orderId,
+                    dayId: mark.dayId,
+                    from: 'driver',
+                    x: event.clientX,
+                    y: event.clientY,
+                  })
+                }}
+              />
+            )}
           </div>
         ) : null}
       </section>
@@ -1037,10 +1251,16 @@ export function DispatcherPage() {
       {drag && (draggingOrder || draggingDriver || draggingDay) ? (
         <div className="dispatcher-ghost" style={{ left: drag.x, top: drag.y }}>
           {draggingOrder
-            ? draggingOrder.orderNo
+            ? drag.from === 'driver'
+              ? orderDisplayLabel(draggingOrder)
+              : orderDisplayLabel(draggingOrder)
             : draggingDay
-              ? `${draggingDay.order.orderNo} ${formatMonthDay(draggingDay.day.serviceDate)}`
-              : draggingDriver?.name}
+              ? [orderDisplayLabel(draggingDay.order), formatMonthDay(draggingDay.day.serviceDate)].filter(Boolean).join(' ')
+              : draggingDriver
+                ? assignDesk
+                  ? draggingDriver.name
+                  : driverDisplayLabel(draggingDriver)
+                : null}
         </div>
       ) : null}
     </div>
@@ -1053,11 +1273,9 @@ function toOrderCalendarDay(order: Order, day: ItineraryDay): DriverCalendarDay 
     items: [
       {
         orderId: order.id,
-        orderNo: order.orderNo,
+        label: orderDisplayLabel(order),
         itineraryDayId: day.id,
         endLocation: day.endLocation,
-        description: day.description,
-        activities: [],
       },
     ],
   }

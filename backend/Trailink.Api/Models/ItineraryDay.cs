@@ -8,8 +8,10 @@ public class ItineraryDay
     public string? Description { get; set; }
     public string? EndLocation { get; set; }
     public Guid? DriverId { get; set; }
+    public Guid? AssignedByUserId { get; set; }
 
     public Order Order { get; set; } = null!;
     public Driver? Driver { get; set; }
+    public User? AssignedBy { get; set; }
     public ICollection<OrderActivity> Activities { get; set; } = [];
 }

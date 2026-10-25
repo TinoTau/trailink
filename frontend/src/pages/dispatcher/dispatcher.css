@@ -22,6 +22,7 @@
 }
 
 .dispatcher-name {
+  display: block;
   margin: 0;
   padding: 0;
   border: 0;
@@ -36,15 +37,6 @@
   margin: 4px 0 0;
   font-size: 12px;
   color: #8c8c8c;
-}
-
-.dispatcher-name-input {
-  height: 32px;
-  border: 1px solid #f0f0f0;
-  border-radius: 10px;
-  padding: 0 10px;
-  font-size: 20px;
-  font-weight: 650;
 }
 
 .dispatcher-pane {
@@ -171,6 +163,7 @@ a.dispatcher-chip {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
 }
 
@@ -265,7 +258,8 @@ a.dispatcher-chip {
   color: #8c8c8c;
 }
 
-.dispatcher-icon-btn.active {
+.dispatcher-icon-btn.active,
+.dispatcher-icon-btn.note {
   color: #1677ff;
 }
 
@@ -325,11 +319,40 @@ a.dispatcher-chip {
   color: #8c8c8c;
 }
 
+.dispatcher-card-head .dispatcher-card-meta {
+  color: #595959;
+  font-size: 13px;
+}
+
+.order-info-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.dispatcher-notes-preview {
+  margin: 8px 0 0;
+  color: #262626;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.order-info-main .dispatcher-notes {
+  margin: 8px 0 0;
+  padding: 8px 0 4px;
+  border-bottom: 0;
+}
+
 .dispatcher-card-body {
   min-height: 0;
   flex: 1;
   overflow: auto;
   padding: 0 12px 12px;
+}
+
+.dispatcher-card-body .dispatcher-filters {
+  margin: 4px 0 12px;
 }
 
 .dispatcher-card-body h3 {
@@ -384,19 +407,10 @@ a.dispatcher-chip {
   color: #d46b08;
 }
 
-.dispatcher-day b {
-  font-size: 13px;
-  font-weight: 600;
+.dispatcher-day.locked {
+  cursor: default;
 }
 
-.dispatcher-day em {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 9px;
-  font-style: normal;
-  line-height: 1.1;
-}
 
 .dispatcher-notes {
   display: flex;
@@ -422,6 +436,27 @@ a.dispatcher-chip {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.dispatcher-company-search {
+  display: flex;
+  gap: 8px;
+}
+
+.dispatcher-company-search input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid #f0f0f0;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.dispatcher-notes-sub {
+  margin: 0;
+  color: #8c8c8c;
+  font-size: 12px;
 }
 
 .dispatcher-files {

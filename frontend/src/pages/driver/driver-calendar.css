@@ -127,6 +127,7 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   -webkit-overflow-scrolling: touch;
   padding: 0 8px 16px;
 }
@@ -154,6 +155,7 @@
 
 .driver-day {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-width: 0;
@@ -183,6 +185,12 @@
   box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px rgba(0, 0, 0, 0.16);
 }
 
+.driver-day.release,
+.driver-day.release.selected,
+.driver-day.release.today {
+  box-shadow: inset 0 0 0 2px #ff4d4f;
+}
+
 .driver-day.in-range:not(.has-trip) {
   background: #eef3ff;
 }
@@ -206,6 +214,16 @@
   border-radius: 16px;
   background: #fff;
   overflow: hidden;
+}
+
+.driver-detail-card .dispatcher-card-head {
+  padding: 12px 14px 8px;
+}
+
+.driver-detail-card .dispatcher-notes {
+  margin: 8px 0 0;
+  padding: 8px 0 4px;
+  border-bottom: 0;
 }
 
 .driver-detail-trip {

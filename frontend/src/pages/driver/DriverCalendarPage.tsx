@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { message } from 'antd'
-import { useAuth } from '../../auth/AuthContext'
+import { useAuthenticatedAuth } from '../../auth/authState'
 import { AccountMenu } from '../AccountMenu'
-import { createOrderWithDays, ordersApi } from '../../api/orders'
+import { clearDayDriver, createOrderWithDays, ordersApi } from '../../api/orders'
 import { PRESET_COLORS, contrastText } from '../../calendarUi'
 import {
   WEEKDAYS,
@@ -12,9 +12,12 @@ import {
   monthCells,
   monthKey,
   orderedRange,
+  parseYmd,
   todayLocal,
+  toDateOnly,
 } from '../../localDate'
-import { isHistoricalOrder } from '../../orderFlags'
+import { CalendarDayCaption } from '../../calendarDay'
+import { driverAssignerCaption, orderDisplayLabel } from '../../orderFlags'
 import type { DriverCalendarDay, DriverCalendarTrip, Order } from '../../types'
 import { DriverDayEditor } from './DriverDayEditor'
 import './driver-calendar.css'
@@ -47,28 +50,37 @@ function readColors(): CalendarColors {
   }
 }
 
-function daysByDriver(orders: Order[], driverId: string | null, today: string): Record<string, DriverCalendarDay> {
+function monthsAroundDate(dateText: string) {
+  const center = addMonths(parseYmd(dateText), 0)
+  return [-2, -1, 0, 1, 2].map((offset) => addMonths(center, offset))
+}
+
+function firstOrderDate(order: Order) {
+  const dates = order.days.map((day) => day.serviceDate).sort()
+  return dates[0] || toDateOnly(order.startDate)
+}
+
+function daysByDriver(orders: Order[], driverId: string | null): Record<string, DriverCalendarDay> {
   if (!driverId) {
     return {}
   }
   const next: Record<string, DriverCalendarDay> = {}
   for (const order of orders) {
-    if (isHistoricalOrder(order, today)) {
-      continue
-    }
     for (const day of order.days) {
       if (day.driverId !== driverId) {
         continue
       }
       const bucket = next[day.serviceDate] ?? { date: day.serviceDate, items: [] }
+      const assignerName = driverAssignerCaption(order, day)
       bucket.items.push({
         orderId: order.id,
-        orderNo: order.orderNo,
+        label: orderDisplayLabel(order, 'driver'),
         itineraryDayId: day.id,
         endLocation: day.endLocation,
-        description: day.description,
-        activities: [],
       })
+      if (!bucket.assignerName) {
+        bucket.assignerName = assignerName
+      }
       next[day.serviceDate] = bucket
     }
   }
@@ -76,8 +88,8 @@ function daysByDriver(orders: Order[], driverId: string | null, today: string): 
 }
 
 export function DriverCalendarPage() {
-  const { user } = useAuth()
-  const driverId = user?.driverId ?? null
+  const { user } = useAuthenticatedAuth()
+  const driverId = user.driverId
   const today = useMemo(() => todayLocal(), [])
   const todayKey = formatLocalDate(today)
   const [months, setMonths] = useState(() => [-2, -1, 0, 1, 2].map((offset) => addMonths(today, offset)))
@@ -87,6 +99,7 @@ export function DriverCalendarPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [canceling, setCanceling] = useState(false)
+  const [armedRelease, setArmedRelease] = useState<{ date: string; orderId: string } | null>(null)
   const [pendingCancelTrips, setPendingCancelTrips] = useState<DriverCalendarTrip[]>([])
   const [orderNo, setOrderNo] = useState('')
   const [rangeStart, setRangeStart] = useState<string | null>(null)
@@ -95,11 +108,13 @@ export function DriverCalendarPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const expandingRef = useRef(false)
   const didScrollToToday = useRef(false)
+  const pendingRevealDate = useRef<string | null>(null)
   const rangeDragging = useRef(false)
   const unbindLock = useRef(false)
 
-  const daysByDate = useMemo(() => daysByDriver(orders, driverId, todayKey), [orders, driverId, todayKey])
-  const selectedDay = selectedDate ? daysByDate[selectedDate] : undefined
+  const daysByDate = useMemo(() => daysByDriver(orders, driverId), [orders, driverId])
+  const visibleSelectedDate = selectedDate && daysByDate[selectedDate] ? selectedDate : null
+  const selectedDay = visibleSelectedDate ? daysByDate[visibleSelectedDate] : undefined
   const [rangeFrom, rangeTo] = rangeStart ? orderedRange(rangeStart, rangeEnd) : [null, null]
   const addingTrip = menuOpen && !canceling
 
@@ -112,16 +127,21 @@ export function DriverCalendarPage() {
   }
 
   useEffect(() => {
+    // 初次挂载从服务端读取本人行程。
+    // oxlint-disable-next-line react/set-state-in-effect
     void loadBoard()
   }, [])
 
   useEffect(() => {
-    if (selectedDate && !daysByDate[selectedDate]) {
-      setSelectedDate(null)
+    const revealDate = pendingRevealDate.current
+    if (revealDate) {
+      const timer = window.setTimeout(() => {
+        document.getElementById(`driver-day-${revealDate}`)?.scrollIntoView({ block: 'center' })
+        pendingRevealDate.current = null
+        didScrollToToday.current = true
+      }, 80)
+      return () => window.clearTimeout(timer)
     }
-  }, [daysByDate, selectedDate])
-
-  useEffect(() => {
     if (didScrollToToday.current) {
       return
     }
@@ -130,7 +150,7 @@ export function DriverCalendarPage() {
       didScrollToToday.current = true
     }, 80)
     return () => window.clearTimeout(timer)
-  }, [todayKey])
+  }, [todayKey, months, orders, selectedDate])
 
   useEffect(() => {
     function stopDrag() {
@@ -192,6 +212,7 @@ export function DriverCalendarPage() {
   function resetMenu() {
     setMenuOpen(false)
     setCanceling(false)
+    setArmedRelease(null)
     setPendingCancelTrips([])
     setRangeStart(null)
     setRangeEnd(null)
@@ -231,6 +252,13 @@ export function DriverCalendarPage() {
     if (unbindLock.current) {
       return
     }
+    if (armedRelease?.date === dateText) {
+      void releaseArmedDay()
+      return
+    }
+    if (armedRelease) {
+      setArmedRelease(null)
+    }
     if (canceling) {
       void pickDayToCancel(dateText)
       return
@@ -269,10 +297,15 @@ export function DriverCalendarPage() {
       if (result.warnings.length > 0) {
         message.warning(result.warnings.join('；'))
       } else {
-        message.success(`已领取 ${order.orderNo}，共 ${result.updatedDayCount} 天`)
+        const label = orderDisplayLabel(order, 'driver')
+        message.success(label ? `已领取 ${label}，共 ${result.updatedDayCount} 天` : `已领取，共 ${result.updatedDayCount} 天`)
       }
+      const focusDate = firstOrderDate(order)
       resetMenu()
       await loadBoard()
+      pendingRevealDate.current = focusDate
+      setMonths(monthsAroundDate(focusDate))
+      setSelectedDate(focusDate)
     } catch (error) {
       message.error(error instanceof Error ? error.message : '领取行程失败')
     } finally {
@@ -329,12 +362,7 @@ export function DriverCalendarPage() {
     setBusy(true)
     try {
       for (const day of days) {
-        await ordersApi.updateDay(orderId, day.id, {
-          serviceDate: day.serviceDate,
-          description: day.description,
-          endLocation: day.endLocation,
-          driverId: null,
-        })
+        await ordersApi.updateDay(orderId, day.id, clearDayDriver(day))
       }
       message.success(`已取消 ${orderLabel} 中当前司导的 ${days.length} 天`)
       resetMenu()
@@ -346,6 +374,47 @@ export function DriverCalendarPage() {
       unbindLock.current = false
       setBusy(false)
     }
+  }
+
+  async function releaseArmedDay() {
+    const armed = armedRelease
+    if (unbindLock.current || !driverId || !armed) {
+      return
+    }
+    const order = orders.find((item) => item.id === armed.orderId)
+    const days = order?.days.filter((day) => day.driverId === driverId && day.serviceDate === armed.date) ?? []
+    if (!order || days.length === 0) {
+      message.warning('这一天没有可解除的行程')
+      setArmedRelease(null)
+      return
+    }
+    unbindLock.current = true
+    setBusy(true)
+    try {
+      for (const day of days) {
+        await ordersApi.updateDay(order.id, day.id, clearDayDriver(day))
+      }
+      message.success('已解除这一天')
+      setArmedRelease(null)
+      await loadBoard()
+      setSelectedDate(null)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '解除行程失败')
+    } finally {
+      unbindLock.current = false
+      setBusy(false)
+    }
+  }
+
+  function armDayRelease(date: string, orderId: string) {
+    if (unbindLock.current) {
+      return
+    }
+    setCanceling(false)
+    setPendingCancelTrips([])
+    setArmedRelease((current) =>
+      current?.date === date && current.orderId === orderId ? null : { date, orderId },
+    )
   }
 
   async function pickDayToCancel(dateText: string) {
@@ -362,7 +431,7 @@ export function DriverCalendarPage() {
     setSelectedDate(null)
     if (trips.length === 1) {
       setPendingCancelTrips([])
-      await unbindOrder(trips[0].orderId, trips[0].orderNo)
+      await unbindOrder(trips[0].orderId, trips[0].label)
       return
     }
 
@@ -392,6 +461,7 @@ export function DriverCalendarPage() {
             }
             setMenuOpen(true)
             setCanceling(false)
+            setArmedRelease(null)
             setPendingCancelTrips([])
             setRangeStart(null)
             setRangeEnd(null)
@@ -408,7 +478,7 @@ export function DriverCalendarPage() {
             订单号
             <input
               value={orderNo}
-              placeholder="系统订单号或平台订单号"
+              placeholder="公司订单号"
               onChange={(event) => setOrderNo(event.target.value)}
             />
           </label>
@@ -420,12 +490,19 @@ export function DriverCalendarPage() {
               ? `点击日历上已有行程的某一天，只取消${user?.name ? `「${user.name}」` : '当前司导'}在该单上的日期，其他司导不受影响。`
               : '不知道订单号时，在日历上按住并拖选起止日期。'}
           </p>
-          {rangeFrom && rangeTo && !canceling ? (
-            <button type="button" className="driver-primary-button" disabled={busy} onClick={() => void createRange()}>
-              添加 {formatMonthDay(rangeFrom)}
-              {rangeFrom !== rangeTo ? `–${formatMonthDay(rangeTo)}` : ''} 仅日期
+          {canceling ? null : (
+            <button
+              type="button"
+              className="driver-primary-button"
+              disabled={busy || !rangeFrom || !rangeTo}
+              style={{ visibility: rangeFrom && rangeTo ? 'visible' : 'hidden' }}
+              onClick={() => void createRange()}
+            >
+              {rangeFrom && rangeTo
+                ? `添加 ${formatMonthDay(rangeFrom)}${rangeFrom !== rangeTo ? `–${formatMonthDay(rangeTo)}` : ''} 仅日期`
+                : '添加 仅日期'}
             </button>
-          ) : null}
+          )}
           <button
             type="button"
             className={`driver-ghost-button${canceling ? ' danger' : ''}`}
@@ -435,6 +512,7 @@ export function DriverCalendarPage() {
                 return
               }
               setCanceling((current) => !current)
+              setArmedRelease(null)
               setPendingCancelTrips([])
               setRangeStart(null)
               setRangeEnd(null)
@@ -452,9 +530,9 @@ export function DriverCalendarPage() {
                   type="button"
                   className="driver-ghost-button"
                   disabled={busy}
-                  onClick={() => void unbindOrder(trip.orderId, trip.orderNo)}
+                  onClick={() => void unbindOrder(trip.orderId, trip.label)}
                 >
-                  {trip.orderNo}
+                  {trip.label || '未命名订单'}
                   {trip.endLocation ? ` · ${trip.endLocation}` : ''}
                 </button>
               ))}
@@ -468,21 +546,25 @@ export function DriverCalendarPage() {
             key={monthKey(month)}
             month={month}
             todayKey={todayKey}
-            selectedDate={selectedDate}
+            selectedDate={visibleSelectedDate}
             daysByDate={daysByDate}
             tripFill={tripFill}
             addingTrip={addingTrip}
             canceling={canceling}
+            releaseDate={armedRelease?.date ?? null}
             rangeFrom={rangeFrom}
             rangeTo={rangeTo}
             onDayPointerDown={onDayPointerDown}
             onDayPointerEnter={onDayPointerEnter}
             onDayClick={onDayClick}
           >
-            {selectedDay && selectedDate && selectedDate.startsWith(monthKey(month)) ? (
+            {selectedDay && visibleSelectedDate && visibleSelectedDate.startsWith(monthKey(month)) ? (
               <DriverDayEditor
-                key={selectedDate}
+                key={visibleSelectedDate}
                 day={selectedDay}
+                showOrderInfo
+                armedOrderId={armedRelease?.date === visibleSelectedDate ? armedRelease.orderId : null}
+                onArmDayRelease={(orderId) => armDayRelease(visibleSelectedDate, orderId)}
                 onChanged={loadBoard}
               />
             ) : null}
@@ -535,6 +617,7 @@ function MonthSection({
   tripFill,
   addingTrip,
   canceling,
+  releaseDate,
   rangeFrom,
   rangeTo,
   onDayPointerDown,
@@ -549,6 +632,7 @@ function MonthSection({
   tripFill: (dateText: string) => string
   addingTrip: boolean
   canceling: boolean
+  releaseDate: string | null
   rangeFrom: string | null
   rangeTo: string | null
   onDayPointerDown: (dateText: string) => void
@@ -582,32 +666,39 @@ function MonthSection({
             <button
               key={`${monthKey(month)}-${dateText}-${cell.inMonth ? 'in' : 'out'}`}
               type="button"
-              id={dateText === todayKey && cell.inMonth ? `driver-day-${todayKey}` : undefined}
+              id={cell.inMonth ? `driver-day-${dateText}` : undefined}
               className={[
                 'driver-day',
                 cell.inMonth ? '' : 'outside',
                 hasTrip ? 'has-trip' : '',
                 selected ? 'selected' : '',
+                releaseDate === dateText ? 'release' : '',
                 inRange ? 'in-range' : '',
                 rangeEdge ? 'range-edge' : '',
                 dateText === todayKey && cell.inMonth ? 'today' : '',
               ].join(' ')}
               aria-label={
-                canceling
-                  ? hasTrip
-                    ? `取消 ${dateText} 当前司导的绑定`
-                    : dateText
-                  : undefined
+                releaseDate === dateText
+                  ? `再点一次解除 ${dateText}`
+                  : canceling
+                    ? hasTrip
+                      ? `取消 ${dateText} 当前司导的绑定`
+                      : dateText
+                    : undefined
               }
               style={
                 fill
                   ? { background: fill, color: contrastText(fill) }
                   : undefined
               }
-              onPointerDown={() => {
-                if (cell.inMonth) {
-                  onDayPointerDown(dateText)
+              onPointerDown={(event) => {
+                if (!cell.inMonth) {
+                  return
                 }
+                if (addingTrip) {
+                  event.preventDefault()
+                }
+                onDayPointerDown(dateText)
               }}
               onPointerEnter={() => {
                 if (cell.inMonth) {
@@ -620,7 +711,15 @@ function MonthSection({
                 }
               }}
             >
-              {cell.inMonth ? cell.date.getDate() : ''}
+              {cell.inMonth ? (
+                hasTrip ? (
+                  <CalendarDayCaption day={cell.date.getDate()} label={daysByDate[dateText].assignerName} />
+                ) : (
+                  cell.date.getDate()
+                )
+              ) : (
+                ''
+              )}
             </button>
           )
         })}

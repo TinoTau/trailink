@@ -18,14 +18,36 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         [FromQuery] string? orderNo,
         CancellationToken cancellationToken)
     {
-        var query = db.Orders.Include(order => order.Days).Include(order => order.Files).AsQueryable();
+        var query = db.Orders
+            .Include(order => order.Days)
+            .ThenInclude(day => day.AssignedBy)
+            .Include(order => order.Days)
+            .ThenInclude(day => day.Driver)
+            .Include(order => order.Files)
+            .Include(order => order.CreatedBy)
+            .Include(order => order.Company)
+            .Include(order => order.AssignedDispatcher)
+            .AsQueryable();
 
+        var user = await session.GetUserAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(orderNo))
         {
             var key = orderNo.Trim();
             query = query.Where(order =>
                 order.OrderNo == key ||
                 order.PlatformOrderNo == key);
+        }
+        else if (user?.Role == UserRoles.Dispatcher)
+        {
+            query = query.Where(order => order.AssignedDispatcherUserId == user.Id);
+        }
+        else if (user?.Role == UserRoles.Company && user.CompanyId is Guid companyId)
+        {
+            query = query.Where(order => order.CompanyId == companyId);
+        }
+        else if (user?.DriverId is Guid driverId)
+        {
+            query = query.Where(order => order.Days.Any(day => day.DriverId == driverId));
         }
 
         if (startDate is not null && endDate is not null)
@@ -39,15 +61,23 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             .OrderBy(order => order.StartDate)
             .ThenBy(order => order.OrderNo)
             .ToListAsync(cancellationToken);
+        var notes = await ViewerNotesAsync(user, cancellationToken);
+        var companyNotes = await ViewerCompanyNotesAsync(user, orders, cancellationToken);
 
-        return Ok(orders.Select(ToSummary).ToList());
+        return Ok(orders.Select(order =>
+        {
+            var dto = VisibleNotes(ToSummary(order, notes.GetValueOrDefault(order.Id)), user?.Role);
+            ApplyCompanyNote(dto, companyNotes);
+            return dto;
+        }).ToList());
     }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<OrderReadDto>> Get(Guid id, CancellationToken cancellationToken)
     {
         var order = await LoadOrderAsync(id, cancellationToken);
-        return order is null ? NotFound() : Ok(ToDetail(order));
+        var user = await session.GetUserAsync(cancellationToken);
+        return order is null ? NotFound() : Ok(await PresentDetailAsync(order, user, cancellationToken));
     }
 
     [HttpPost]
@@ -60,24 +90,34 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         }
 
         var user = await session.GetUserAsync(cancellationToken);
+        var (companyId, companyError) = await ResolveCreateCompanyIdAsync(user, request.CompanyId, cancellationToken);
+        if (companyError is not null)
+        {
+            return Problem(title: "Validation error", detail: companyError, statusCode: StatusCodes.Status400BadRequest);
+        }
+
         var order = new Order
         {
             Id = Guid.NewGuid(),
             OrderNo = Order.NewOrderNo(),
             PlatformOrderNo = TrimToNull(request.PlatformOrderNo),
-            SourceCompany = TrimToNull(request.SourceCompany),
             StartDate = request.StartDate,
             GuestCount = request.GuestCount,
-            Notes = request.Notes,
+            DriverNotes = request.DriverNotes,
             CreatedByUserId = user?.Id,
-            CompanyId = ResolveCompanyId(user, request.CompanyId)
+            CompanyId = companyId,
+            AssignedDispatcherUserId = user?.Role == UserRoles.Dispatcher ? user.Id : null
         };
 
         db.Orders.Add(order);
         await db.SaveChangesAsync(cancellationToken);
+        if (user?.Role != UserRoles.Driver)
+        {
+            await UpsertNoteAsync(order.Id, request.Notes, cancellationToken);
+        }
 
         var created = await LoadOrderAsync(order.Id, cancellationToken);
-        return CreatedAtAction(nameof(Get), new { id = order.Id }, ToDetail(created!));
+        return CreatedAtAction(nameof(Get), new { id = order.Id }, await PresentDetailAsync(created!, user, cancellationToken));
     }
 
     [HttpPut("{id:guid}")]
@@ -95,20 +135,43 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             return NotFound();
         }
 
-        order.PlatformOrderNo = TrimToNull(request.PlatformOrderNo);
-        order.SourceCompany = TrimToNull(request.SourceCompany);
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user?.Role == UserRoles.Dispatcher)
+        {
+            if (request.CompanyId is Guid requestedCompany &&
+                !await db.Companies.AnyAsync(company => company.Id == requestedCompany, cancellationToken))
+            {
+                return Problem(title: "Validation error", detail: "找不到这家公司。", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            order.CompanyId = request.CompanyId;
+        }
+        else if (user?.Role == UserRoles.Company)
+        {
+            order.CompanyId ??= user.CompanyId;
+        }
+
+        if (user?.Role != UserRoles.Driver)
+        {
+            order.PlatformOrderNo = TrimToNull(request.PlatformOrderNo);
+        }
         order.StartDate = request.StartDate;
         order.GuestCount = request.GuestCount;
-        order.Notes = request.Notes;
+        order.DriverNotes = request.DriverNotes;
         await db.SaveChangesAsync(cancellationToken);
+        if (user?.Role != UserRoles.Driver)
+        {
+            await UpsertNoteAsync(order.Id, request.Notes, cancellationToken);
+        }
 
         var updated = await LoadOrderAsync(id, cancellationToken);
-        return Ok(ToDetail(updated!));
+        return Ok(await PresentDetailAsync(updated!, user, cancellationToken));
     }
 
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
+        var user = await session.GetUserAsync(cancellationToken);
         var order = await db.Orders
             .Include(item => item.Files)
             .Include(item => item.Days)
@@ -119,16 +182,32 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             return NotFound();
         }
 
-        foreach (var file in order.Files)
+        if (user?.Role == UserRoles.Dispatcher)
         {
-            files.Delete(file.FilePath);
+            if (order.AssignedDispatcherUserId != user.Id)
+            {
+                return Problem(title: "Forbidden", detail: "只能处理分给自己的订单。", statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            if (order.CompanyId is Guid)
+            {
+                ReturnToCompanyPool(order);
+                await db.SaveChangesAsync(cancellationToken);
+                return NoContent();
+            }
+
+            RemoveOrderFiles(order);
+            db.Orders.Remove(order);
+            await db.SaveChangesAsync(cancellationToken);
+            return NoContent();
         }
 
-        foreach (var activity in order.Days.SelectMany(day => day.Activities))
+        if (user?.Role != UserRoles.Company)
         {
-            files.Delete(activity.TicketPath);
+            return Problem(title: "Forbidden", detail: "只有公司账户能删除订单。", statusCode: StatusCodes.Status403Forbidden);
         }
 
+        RemoveOrderFiles(order);
         db.Orders.Remove(order);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -220,6 +299,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             return NotFound();
         }
 
+        var user = await session.GetUserAsync(cancellationToken);
         if (request.DriverId is Guid driverId)
         {
             var exists = await db.Drivers.AnyAsync(driver => driver.Id == driverId, cancellationToken);
@@ -228,12 +308,25 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
                 return Problem(title: "Validation error", detail: "指定的司机不存在。", statusCode: StatusCodes.Status400BadRequest);
             }
         }
+        else if (order.Days.Any(day => day.DriverId is not null))
+        {
+            if (!OrderDriverAssignment.CanClearAssignment(user, order, order.Days))
+            {
+                return Problem(
+                    title: "Forbidden",
+                    detail: OrderDriverAssignment.CannotClearOthers,
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+        }
 
         var result = await assignment.AssignAsync(
             order,
             request.DriverId,
+            OrderDriverAssignment.AssignerFor(user, order, request.DriverId),
             cancellationToken,
-            request.FailOnConflict);
+            request.FailOnConflict,
+            user?.Id,
+            user?.Role == UserRoles.Driver);
 
         if (!result.Applied)
         {
@@ -252,6 +345,55 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         });
     }
 
+    [HttpPut("{orderId:guid}/dispatcher")]
+    public async Task<ActionResult<OrderReadDto>> AssignDispatcher(
+        Guid orderId,
+        AssignDispatcherDto request,
+        CancellationToken cancellationToken)
+    {
+        var order = await LoadOrderAsync(orderId, cancellationToken);
+        if (order is null)
+        {
+            return NotFound();
+        }
+
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user?.Role != UserRoles.Company || user.CompanyId is not Guid companyId)
+        {
+            return Problem(title: "Forbidden", detail: "只有公司账户能把整单分配给调度员。", statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (order.CompanyId is Guid orderCompany && orderCompany != companyId)
+        {
+            return Problem(title: "Forbidden", detail: "只能分配本公司的订单。", statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (request.DispatcherUserId is Guid dispatcherId)
+        {
+            var isDispatcher = await db.CompanyMembers.AnyAsync(
+                member =>
+                    member.CompanyId == companyId &&
+                    member.UserId == dispatcherId &&
+                    member.Role == UserRoles.Dispatcher,
+                cancellationToken);
+            if (!isDispatcher)
+            {
+                return Problem(title: "Validation error", detail: "只能分配给本公司的调度员。", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            order.AssignedDispatcherUserId = dispatcherId;
+            order.CompanyId ??= companyId;
+        }
+        else
+        {
+            ReturnToCompanyPool(order);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        var updated = await LoadOrderAsync(orderId, cancellationToken);
+        return Ok(await PresentDetailAsync(updated!, user, cancellationToken));
+    }
+
     internal async Task<Order?> LoadOrderAsync(Guid id, CancellationToken cancellationToken)
     {
         return await db.Orders
@@ -259,11 +401,16 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             .ThenInclude(day => day.Driver)
             .Include(order => order.Days)
             .ThenInclude(day => day.Activities)
+            .Include(order => order.Days)
+            .ThenInclude(day => day.AssignedBy)
             .Include(order => order.Files)
+            .Include(order => order.CreatedBy)
+            .Include(order => order.Company)
+            .Include(order => order.AssignedDispatcher)
             .FirstOrDefaultAsync(order => order.Id == id, cancellationToken);
     }
 
-    internal static OrderReadDto ToSummary(Order order)
+    internal static OrderReadDto ToSummary(Order order, string? notes = null)
     {
         var endDate = order.Days.Count == 0
             ? (DateOnly?)null
@@ -275,25 +422,23 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             Id = order.Id,
             OrderNo = order.OrderNo,
             PlatformOrderNo = order.PlatformOrderNo,
-            SourceCompany = order.SourceCompany,
             StartDate = order.StartDate,
             EndDate = endDate,
             DayCount = order.Days.Count,
             GuestCount = order.GuestCount,
-            Notes = order.Notes,
-            AssignedDriverId = assignedDays.Select(day => day.DriverId).FirstOrDefault(),
+            Notes = notes,
+            DriverNotes = order.DriverNotes,
+            CompanyId = order.CompanyId,
+            CompanyName = order.Company?.Name,
+            CreatedByUserId = order.CreatedByUserId,
+            CreatedByName = order.CreatedBy?.Name,
+            AssignedDispatcherUserId = order.AssignedDispatcherUserId,
+            AssignedDispatcherName = order.AssignedDispatcher?.Name,
+            AssignedDispatcherContact = order.AssignedDispatcher?.Contact,
             AssignedDayCount = assignedDays.Count,
             Days = order.Days
                 .OrderBy(day => day.ServiceDate)
-                .Select(day => new ItineraryDayReadDto
-                {
-                    Id = day.Id,
-                    OrderId = day.OrderId,
-                    ServiceDate = day.ServiceDate,
-                    Description = day.Description,
-                    EndLocation = day.EndLocation,
-                    DriverId = day.DriverId
-                })
+                .Select(ItineraryDaysController.ToRead)
                 .ToList(),
             Files = order.Files
                 .OrderBy(file => file.FileName)
@@ -309,44 +454,42 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         FileName = file.FileName
     };
 
-    internal static OrderReadDto ToDetail(Order order)
+    private async Task<(Guid? CompanyId, string? Error)> ResolveCreateCompanyIdAsync(
+        User? user,
+        Guid? requested,
+        CancellationToken cancellationToken)
     {
-        var dto = ToSummary(order);
-        dto.Days = order.Days
-            .OrderBy(day => day.ServiceDate)
-            .Select(ItineraryDaysController.ToRead)
-            .ToList();
-        return dto;
-    }
-
-    private static Guid? ResolveCompanyId(User? user, Guid? requested)
-    {
-        if (user is null)
+        if (user?.Role == UserRoles.Company)
         {
-            return null;
+            return (user.CompanyId, null);
         }
 
         if (requested is Guid companyId)
         {
-            if (user.Role == UserRoles.Company && user.CompanyId == companyId)
+            if (!await db.Companies.AnyAsync(company => company.Id == companyId, cancellationToken))
             {
-                return companyId;
+                return (null, "找不到这家公司。");
             }
 
-            if (user.Memberships.Any(member => member.CompanyId == companyId))
+            if (user?.Role == UserRoles.Dispatcher)
             {
-                return companyId;
+                return (companyId, null);
             }
 
-            return null;
+            if (user?.Memberships.Any(member => member.CompanyId == companyId) == true)
+            {
+                return (companyId, null);
+            }
+
+            return (null, "只能绑定自己所属的公司。");
         }
 
-        if (user.Role == UserRoles.Company)
+        if (user?.Role is UserRoles.Dispatcher or UserRoles.Driver)
         {
-            return user.CompanyId;
+            return (null, null);
         }
 
-        return user.Memberships.Count == 1 ? user.Memberships.First().CompanyId : null;
+        return (user?.Memberships.Count == 1 ? user.Memberships.First().CompanyId : null, null);
     }
 
     private static string? Validate(OrderWriteDto request)
@@ -362,6 +505,107 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         }
 
         return null;
+    }
+
+    private async Task<OrderReadDto> PresentDetailAsync(Order order, User? user, CancellationToken cancellationToken)
+    {
+        var dto = VisibleNotes(ToSummary(order, await ViewerNoteAsync(order.Id, user, cancellationToken)), user?.Role);
+        ApplyCompanyNote(dto, await ViewerCompanyNotesAsync(user, [order], cancellationToken));
+        return dto;
+    }
+
+    private static void ApplyCompanyNote(OrderReadDto dto, IReadOnlyDictionary<Guid, string> companyNotes)
+    {
+        if (dto.CompanyId is Guid companyId && companyNotes.TryGetValue(companyId, out var note))
+        {
+            dto.CompanyNote = note;
+        }
+    }
+
+    private Task<Dictionary<Guid, string>> ViewerCompanyNotesAsync(
+        User? user,
+        IEnumerable<Order> orders,
+        CancellationToken cancellationToken)
+    {
+        if (user is null)
+        {
+            return Task.FromResult(new Dictionary<Guid, string>());
+        }
+
+        var companies = orders
+            .Where(order => order.CompanyId is not null && order.Company is not null)
+            .Select(order => (order.CompanyId!.Value, order.Company!.Name));
+        return Services.CompanyNotes.EnsureAsync(db, user.Id, companies, cancellationToken);
+    }
+
+    private async Task<Dictionary<Guid, string>> ViewerNotesAsync(User? user, CancellationToken cancellationToken)
+    {
+        if (user is null || user.Role == UserRoles.Driver)
+        {
+            return [];
+        }
+
+        return await db.OrderNotes
+            .Where(note => note.UserId == user.Id)
+            .ToDictionaryAsync(note => note.OrderId, note => note.Notes, cancellationToken);
+    }
+
+    private async Task<string?> ViewerNoteAsync(Guid orderId, User? user, CancellationToken cancellationToken)
+    {
+        if (user is null || user.Role == UserRoles.Driver)
+        {
+            return null;
+        }
+
+        return await db.OrderNotes
+            .Where(note => note.OrderId == orderId && note.UserId == user.Id)
+            .Select(note => note.Notes)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task UpsertNoteAsync(Guid orderId, string? notes, CancellationToken cancellationToken)
+    {
+        if (session.UserId is not Guid userId)
+        {
+            return;
+        }
+
+        var trimmed = notes?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            await db.OrderNotes
+                .Where(note => note.OrderId == orderId && note.UserId == userId)
+                .ExecuteDeleteAsync(cancellationToken);
+            return;
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO order_notes (id, order_id, user_id, notes)
+            VALUES ({Guid.NewGuid()}, {orderId}, {userId}, {trimmed})
+            ON CONFLICT (order_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
+            """, cancellationToken);
+    }
+
+    private void RemoveOrderFiles(Order order) => files.DeleteOrderAttachments(order);
+
+    private static void ReturnToCompanyPool(Order order)
+    {
+        order.AssignedDispatcherUserId = null;
+        foreach (var day in order.Days)
+        {
+            day.DriverId = null;
+            day.AssignedByUserId = null;
+        }
+    }
+
+    private static OrderReadDto VisibleNotes(OrderReadDto dto, string? role)
+    {
+        if (role == UserRoles.Driver)
+        {
+            dto.Notes = null;
+        }
+
+        return dto;
     }
 
     private static string? TrimToNull(string? value)

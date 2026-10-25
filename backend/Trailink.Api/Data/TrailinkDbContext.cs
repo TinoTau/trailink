@@ -6,6 +6,10 @@ namespace Trailink.Api.Data;
 public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : DbContext(options)
 {
     public DbSet<Driver> Drivers => Set<Driver>();
+    public DbSet<DriverNote> DriverNotes => Set<DriverNote>();
+    public DbSet<DispatcherNote> DispatcherNotes => Set<DispatcherNote>();
+    public DbSet<CompanyNote> CompanyNotes => Set<CompanyNote>();
+    public DbSet<OrderNote> OrderNotes => Set<OrderNote>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<ItineraryDay> ItineraryDays => Set<ItineraryDay>();
     public DbSet<OrderActivity> OrderActivities => Set<OrderActivity>();
@@ -25,7 +29,27 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.Id).HasColumnName("id");
             entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
             entity.Property(x => x.Phone).HasColumnName("phone").HasMaxLength(50);
-            entity.Property(x => x.Notes).HasColumnName("notes");
+        });
+
+        modelBuilder.Entity<DriverNote>(entity =>
+        {
+            entity.ToTable("driver_notes");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.DriverId).HasColumnName("driver_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.Notes).HasColumnName("notes").IsRequired();
+            entity.HasIndex(x => new { x.DriverId, x.UserId }).IsUnique();
+
+            entity.HasOne(x => x.Driver)
+                .WithMany(x => x.ViewerNotes)
+                .HasForeignKey(x => x.DriverId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.DriverNotes)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Company>(entity =>
@@ -68,10 +92,12 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.Username).HasColumnName("username").HasMaxLength(50).IsRequired();
             entity.Property(x => x.PasswordHash).HasColumnName("password_hash").HasMaxLength(200).IsRequired();
             entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Contact).HasColumnName("contact").HasMaxLength(200);
             entity.Property(x => x.Role).HasColumnName("role").HasMaxLength(20).IsRequired();
             entity.Property(x => x.CompanyId).HasColumnName("company_id");
             entity.Property(x => x.DriverId).HasColumnName("driver_id");
             entity.Property(x => x.AvatarPath).HasColumnName("avatar_path").HasMaxLength(500);
+            entity.Property(x => x.AssignedColor).HasColumnName("assigned_color").HasMaxLength(7);
             entity.HasIndex(x => x.Username).IsUnique();
 
             entity.HasOne(x => x.Company)
@@ -114,6 +140,7 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.UserId).HasColumnName("user_id");
             entity.Property(x => x.DispatcherUserId).HasColumnName("dispatcher_user_id");
             entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.ApprovedAt).HasColumnName("approved_at");
             entity.HasIndex(x => new { x.UserId, x.DispatcherUserId }).IsUnique();
 
             entity.HasOne(x => x.User)
@@ -134,12 +161,12 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.Id).HasColumnName("id");
             entity.Property(x => x.OrderNo).HasColumnName("order_no").HasMaxLength(40).IsRequired();
             entity.Property(x => x.PlatformOrderNo).HasColumnName("platform_order_no").HasMaxLength(100);
-            entity.Property(x => x.SourceCompany).HasColumnName("source_company").HasMaxLength(200);
             entity.Property(x => x.StartDate).HasColumnName("start_date");
             entity.Property(x => x.GuestCount).HasColumnName("guest_count");
-            entity.Property(x => x.Notes).HasColumnName("notes");
+            entity.Property(x => x.DriverNotes).HasColumnName("driver_notes");
             entity.Property(x => x.CompanyId).HasColumnName("company_id");
             entity.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
+            entity.Property(x => x.AssignedDispatcherUserId).HasColumnName("assigned_dispatcher_user_id");
             entity.HasIndex(x => x.OrderNo).IsUnique();
 
             entity.HasOne(x => x.Company)
@@ -151,6 +178,74 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
                 .WithMany()
                 .HasForeignKey(x => x.CreatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(x => x.AssignedDispatcher)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedDispatcherUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<DispatcherNote>(entity =>
+        {
+            entity.ToTable("dispatcher_notes");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.DispatcherUserId).HasColumnName("dispatcher_user_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.Notes).HasColumnName("notes").IsRequired();
+            entity.HasIndex(x => new { x.DispatcherUserId, x.UserId }).IsUnique();
+
+            entity.HasOne(x => x.Dispatcher)
+                .WithMany(x => x.IncomingDispatcherNotes)
+                .HasForeignKey(x => x.DispatcherUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.WrittenDispatcherNotes)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CompanyNote>(entity =>
+        {
+            entity.ToTable("company_notes");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.CompanyId).HasColumnName("company_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(20).IsRequired();
+            entity.HasIndex(x => new { x.CompanyId, x.UserId }).IsUnique();
+
+            entity.HasOne(x => x.Company)
+                .WithMany(x => x.Notes)
+                .HasForeignKey(x => x.CompanyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.CompanyNotes)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OrderNote>(entity =>
+        {
+            entity.ToTable("order_notes");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.OrderId).HasColumnName("order_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.Notes).HasColumnName("notes").IsRequired();
+            entity.HasIndex(x => new { x.OrderId, x.UserId }).IsUnique();
+
+            entity.HasOne(x => x.Order)
+                .WithMany(x => x.ViewerNotes)
+                .HasForeignKey(x => x.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.OrderNotes)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ItineraryDay>(entity =>
@@ -163,6 +258,7 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.Description).HasColumnName("description");
             entity.Property(x => x.EndLocation).HasColumnName("end_location").HasMaxLength(200);
             entity.Property(x => x.DriverId).HasColumnName("driver_id");
+            entity.Property(x => x.AssignedByUserId).HasColumnName("assigned_by_user_id");
             entity.HasIndex(x => new { x.OrderId, x.ServiceDate }).IsUnique();
 
             entity.HasOne(x => x.Order)
@@ -173,6 +269,11 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.HasOne(x => x.Driver)
                 .WithMany(x => x.ItineraryDays)
                 .HasForeignKey(x => x.DriverId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(x => x.AssignedBy)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 

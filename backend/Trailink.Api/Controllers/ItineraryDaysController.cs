@@ -9,7 +9,7 @@ namespace Trailink.Api.Controllers;
 
 [ApiController]
 [Route("api/orders/{orderId:guid}/days")]
-public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling scheduling) : ControllerBase
+public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling scheduling, OrderDriverAssignment assignment, AuthSession session) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<ItineraryDayReadDto>>> List(Guid orderId, CancellationToken cancellationToken)
@@ -22,6 +22,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         var days = await db.ItineraryDays
             .Include(day => day.Driver)
             .Include(day => day.Activities)
+            .Include(day => day.AssignedBy)
             .Where(day => day.OrderId == orderId)
             .OrderBy(day => day.ServiceDate)
             .ToListAsync(cancellationToken);
@@ -47,6 +48,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
         }
 
+        var user = await session.GetUserAsync(cancellationToken);
         var day = new ItineraryDay
         {
             Id = Guid.NewGuid(),
@@ -54,11 +56,17 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             ServiceDate = request.ServiceDate,
             Description = request.Description,
             EndLocation = request.EndLocation,
-            DriverId = request.DriverId
+            DriverId = request.DriverId,
+            AssignedByUserId = request.DriverId is null ? null : user?.Id
         };
 
         db.ItineraryDays.Add(day);
-        var warnings = await CollectWarningsAsync(orderId, request.DriverId, request.ServiceDate, cancellationToken);
+        var warnings = await CollectWarningsAsync(order, request.DriverId, request.ServiceDate, cancellationToken);
+        if (request.DriverId is Guid createdDriverId)
+        {
+            await assignment.RemoveDriverPlaceholdersAsync(order, createdDriverId, [request.ServiceDate], cancellationToken);
+            await assignment.LinkDriverToCompanyAsync(order, createdDriverId, day.AssignedByUserId, cancellationToken);
+        }
         await db.SaveChangesAsync(cancellationToken);
 
         var created = await LoadDayAsync(day.Id, cancellationToken);
@@ -89,7 +97,19 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
         }
 
-        var warnings = await CollectWarningsAsync(orderId, request.DriverId, request.ServiceDate, cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
+        if (request.DriverId is null && day.DriverId is not null)
+        {
+            if (!OrderDriverAssignment.CanClearAssignment(user, order, [day]))
+            {
+                return Problem(
+                    title: "Forbidden",
+                    detail: OrderDriverAssignment.CannotClearOthers,
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+        }
+
+        var warnings = await CollectWarningsAsync(order, request.DriverId, request.ServiceDate, cancellationToken);
         if (request.FailOnConflict && warnings.Count > 0)
         {
             return Problem(
@@ -98,10 +118,20 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
                 statusCode: StatusCodes.Status409Conflict);
         }
 
+        if (request.DriverId is Guid assignedDriverId)
+        {
+            await assignment.RemoveDriverPlaceholdersAsync(order, assignedDriverId, [request.ServiceDate], cancellationToken);
+        }
+
         day.ServiceDate = request.ServiceDate;
         day.Description = request.Description;
         day.EndLocation = request.EndLocation;
         day.DriverId = request.DriverId;
+        day.AssignedByUserId = request.DriverId is null ? null : user?.Id;
+        if (request.DriverId is Guid linkedDriverId)
+        {
+            await assignment.LinkDriverToCompanyAsync(order, linkedDriverId, day.AssignedByUserId, cancellationToken);
+        }
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -136,8 +166,10 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         EndLocation = day.EndLocation,
         DriverId = day.DriverId,
         DriverName = day.Driver?.Name,
-        ActivityCount = day.Activities.Count,
-        Activities = day.Activities
+        AssignedByUserId = day.AssignedByUserId,
+        AssignedByName = day.AssignedBy?.Name,
+        AssignedByContact = day.AssignedBy?.Contact,
+        Activities = (day.Activities ?? [])
             .OrderBy(activity => activity.SortOrder)
             .ThenBy(activity => activity.Id)
             .Select(OrderActivitiesController.ToRead)
@@ -149,6 +181,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         return await db.ItineraryDays
             .Include(day => day.Driver)
             .Include(day => day.Activities)
+            .Include(day => day.AssignedBy)
             .FirstOrDefaultAsync(day => day.Id == dayId, cancellationToken);
     }
 
@@ -181,7 +214,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
     }
 
     private async Task<List<string>> CollectWarningsAsync(
-        Guid orderId,
+        Order order,
         Guid? driverId,
         DateOnly serviceDate,
         CancellationToken cancellationToken)
@@ -191,6 +224,14 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return [];
         }
 
-        return await scheduling.FindDriverConflictsAsync(assignedId, [serviceDate], orderId, cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
+        return await scheduling.FindDriverConflictsAsync(
+            assignedId,
+            [serviceDate],
+            order.Id,
+            cancellationToken,
+            order.CompanyId,
+            user?.Id,
+            user?.Role == UserRoles.Driver);
     }
 }

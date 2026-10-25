@@ -6,6 +6,7 @@ public class DriverApplication
     public Guid UserId { get; set; }
     public Guid DispatcherUserId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ApprovedAt { get; set; }
 
     public User User { get; set; } = null!;
     public User Dispatcher { get; set; } = null!;

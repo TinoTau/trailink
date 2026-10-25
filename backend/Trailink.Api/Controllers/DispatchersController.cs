@@ -76,12 +76,13 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
             return Problem(title: "Validation error", detail: "这位调度员还没有所属公司。", statusCode: StatusCodes.Status400BadRequest);
         }
 
-        if (companyIds.All(companyId => user.Memberships.Any(member => member.CompanyId == companyId)))
+        var existing = user.DriverApplications.FirstOrDefault(item => item.DispatcherUserId == dispatcher.Id);
+        if (existing?.ApprovedAt is not null)
         {
-            return Problem(title: "Validation error", detail: "已经是这位调度员所在公司的成员。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: "已经是这位调度员的司导。", statusCode: StatusCodes.Status400BadRequest);
         }
 
-        if (user.DriverApplications.Any(item => item.DispatcherUserId == dispatcher.Id))
+        if (existing is not null)
         {
             return Problem(title: "Validation error", detail: "已经向这位调度员申请过。", statusCode: StatusCodes.Status400BadRequest);
         }
@@ -119,7 +120,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
 
         var incoming = await db.DriverApplications
             .Include(item => item.User)
-            .Where(item => item.DispatcherUserId == user.Id)
+            .Where(item => item.DispatcherUserId == user.Id && item.ApprovedAt == null)
             .OrderBy(item => item.CreatedAt)
             .Select(item => new DriverApplicantDto
             {
@@ -152,7 +153,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
             .Include(item => item.User)
             .ThenInclude(applicant => applicant.Memberships)
             .FirstOrDefaultAsync(
-                item => item.Id == applicationId && item.DispatcherUserId == user.Id,
+                item => item.Id == applicationId && item.DispatcherUserId == user.Id && item.ApprovedAt == null,
                 cancellationToken);
         if (application is null)
         {
@@ -182,7 +183,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
             });
         }
 
-        db.DriverApplications.Remove(application);
+        application.ApprovedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         return await Incoming(cancellationToken);
     }

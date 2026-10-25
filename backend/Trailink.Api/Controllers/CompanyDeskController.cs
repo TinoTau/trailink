@@ -24,6 +24,18 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
         }
 
         var companies = await ListCompaniesAsync(user, cancellationToken);
+        var notes = await Services.CompanyNotes.EnsureAsync(
+            db,
+            user.Id,
+            companies.Select(company => (company.Id, company.Name)),
+            cancellationToken);
+        foreach (var company in companies)
+        {
+            if (notes.TryGetValue(company.Id, out var note))
+            {
+                company.Notes = note;
+            }
+        }
         var selectedId = companyId
             ?? companies.FirstOrDefault()?.Id
             ?? user.CompanyId;
@@ -49,8 +61,31 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             return Forbid();
         }
 
-        var contact = request.Contact?.Trim();
-        company.Contact = string.IsNullOrWhiteSpace(contact) ? null : contact[..Math.Min(contact.Length, 200)];
+        if (request.Name is not null)
+        {
+            var name = request.Name.Trim();
+            if (name.Length is < 1 or > 200)
+            {
+                return Problem(title: "Validation error", detail: "请填写公司名称。", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var taken = await db.Companies.AnyAsync(
+                item => item.Id != company.Id && item.Name.ToLower() == name.ToLower(),
+                cancellationToken);
+            if (taken)
+            {
+                return Problem(title: "Validation error", detail: "公司名称已被使用。", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            company.Name = name;
+        }
+
+        if (request.Contact is not null)
+        {
+            var contact = request.Contact.Trim();
+            company.Contact = string.IsNullOrWhiteSpace(contact) ? null : contact[..Math.Min(contact.Length, 200)];
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         return await Get(company.Id, cancellationToken);
     }
@@ -192,6 +227,97 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
         return await Get(company.Id, cancellationToken);
     }
 
+    [HttpPut("notes")]
+    public async Task<ActionResult<CompanyHomeDto>> UpdateNotes(
+        CompanyNoteWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!await CanViewCompanyAsync(user, request.CompanyId, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        var trimmed = request.Notes?.Trim();
+        if (trimmed is { Length: > 20 })
+        {
+            return Problem(title: "Validation error", detail: "公司简称不能超过 20 个字。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            var companyName = await db.Companies
+                .Where(company => company.Id == request.CompanyId)
+                .Select(company => company.Name)
+                .FirstAsync(cancellationToken);
+            trimmed = await Services.CompanyNotes.DefaultForUserAsync(
+                db,
+                user.Id,
+                request.CompanyId,
+                companyName,
+                cancellationToken);
+        }
+
+        if (!string.IsNullOrEmpty(trimmed))
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO company_notes (id, company_id, user_id, notes)
+                VALUES ({Guid.NewGuid()}, {request.CompanyId}, {user.Id}, {trimmed})
+                ON CONFLICT (company_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
+                """, cancellationToken);
+        }
+
+        return await Get(request.CompanyId, cancellationToken);
+    }
+
+    [HttpPut("dispatchers/{userId:guid}/notes")]
+    public async Task<ActionResult<CompanyHomeDto>> UpdateDispatcherNotes(
+        Guid userId,
+        DispatcherNoteWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var company = await LoadOwnedCompanyAsync(cancellationToken);
+        if (company is null)
+        {
+            return Forbid();
+        }
+
+        var isDispatcher = await db.CompanyMembers.AnyAsync(
+            member =>
+                member.CompanyId == company.Id &&
+                member.UserId == userId &&
+                member.Role == UserRoles.Dispatcher,
+            cancellationToken);
+        if (!isDispatcher)
+        {
+            return Problem(title: "Validation error", detail: "只能给本公司的调度员写备注。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        await UpsertDispatcherNoteAsync(userId, request.Notes, cancellationToken);
+        return await Get(company.Id, cancellationToken);
+    }
+
+    private async Task<bool> CanViewCompanyAsync(User user, Guid companyId, CancellationToken cancellationToken)
+    {
+        if (user.Role == UserRoles.Company && user.CompanyId == companyId)
+        {
+            return true;
+        }
+
+        if (user.Memberships.Any(member => member.CompanyId == companyId))
+        {
+            return true;
+        }
+
+        return await HandledOrderQuery(user)
+            .AnyAsync(order => order.CompanyId == companyId, cancellationToken);
+    }
+
     private async Task<Company?> LoadOwnedCompanyAsync(CancellationToken cancellationToken)
     {
         var user = await session.GetUserAsync(cancellationToken);
@@ -206,24 +332,29 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
     private async Task<List<CompanyBriefDto>> ListCompaniesAsync(User user, CancellationToken cancellationToken)
     {
         var result = CompanyBriefDto.FromMemberships(user);
-
-        if (user.DriverId is Guid driverId)
+        var handled = await HandledOrderQuery(user)
+            .Select(order => new { order.CompanyId, order.Company!.Name })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        foreach (var item in handled.OrderBy(row => row.Name))
         {
-            var driven = await db.Orders
-                .Where(order => order.CompanyId != null && order.Days.Any(day => day.DriverId == driverId))
-                .Select(order => new { order.CompanyId, order.Company!.Name })
-                .Distinct()
-                .ToListAsync(cancellationToken);
-            foreach (var item in driven.OrderBy(row => row.Name))
+            if (item.CompanyId is Guid id && result.All(company => company.Id != id))
             {
-                if (item.CompanyId is Guid id && result.All(company => company.Id != id))
-                {
-                    result.Add(new CompanyBriefDto { Id = id, Name = item.Name });
-                }
+                result.Add(new CompanyBriefDto { Id = id, Name = item.Name });
             }
         }
 
         return result;
+    }
+
+    private IQueryable<Order> HandledOrderQuery(User user)
+    {
+        return db.Orders.Where(order =>
+            order.CompanyId != null &&
+            (order.CreatedByUserId == user.Id ||
+             order.AssignedDispatcherUserId == user.Id ||
+             order.Days.Any(day => day.AssignedByUserId == user.Id) ||
+             (user.DriverId != null && order.Days.Any(day => day.DriverId == user.DriverId))));
     }
 
     private async Task<CompanyDeskDto?> BuildDeskAsync(User user, Guid companyId, CancellationToken cancellationToken)
@@ -244,28 +375,36 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             cancellationToken);
         var isOwner = user.Role == UserRoles.Company && user.CompanyId == company.Id;
         var isMember = user.Memberships.Any(member => member.CompanyId == company.Id);
-        var drivenOrderIds = user.DriverId is Guid driverId
-            ? await db.Orders
-                .Where(order => order.CompanyId == company.Id && order.Days.Any(day => day.DriverId == driverId))
-                .Select(order => order.Id)
-                .ToListAsync(cancellationToken)
-            : [];
-        if (!isOwner && !isMember && drivenOrderIds.Count == 0)
+        var handled = await HandledOrderQuery(user).AnyAsync(order => order.CompanyId == company.Id, cancellationToken);
+        if (!isOwner && !isMember && !handled)
         {
             return null;
         }
 
+        var dispatcherNotes = isOwner
+            ? await db.DispatcherNotes
+                .Where(note => note.UserId == user.Id)
+                .ToDictionaryAsync(note => note.DispatcherUserId, note => note.Notes, cancellationToken)
+            : new Dictionary<Guid, string>();
+
         var today = DateOnly.FromDateTime(DateTime.Today);
         var ordersQuery = db.Orders.Where(order =>
             order.CompanyId == company.Id &&
-            order.Days.Count > 0 &&
-            order.Days.All(day => day.DriverId != null) &&
-            order.Days.Max(day => day.ServiceDate) < today);
-        if (!isOwner)
+            order.Days.Count > 0);
+        if (isOwner)
         {
             ordersQuery = ordersQuery.Where(order =>
-                order.CreatedByUserId == user.Id ||
-                (user.DriverId != null && order.Days.Any(day => day.DriverId == user.DriverId)));
+                order.Days.All(day => day.DriverId != null) &&
+                order.Days.Max(day => day.ServiceDate) < today);
+        }
+        else
+        {
+            var drove = user.DriverId != null;
+            var driverId = user.DriverId;
+            var assigns = user.Role == UserRoles.Dispatcher;
+            ordersQuery = ordersQuery.Where(order =>
+                (assigns && order.Days.Any(day => day.AssignedByUserId == user.Id)) ||
+                (drove && order.Days.Any(day => day.DriverId == driverId)));
         }
 
         var orders = await ordersQuery
@@ -274,6 +413,12 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             .ThenBy(order => order.OrderNo)
             .Take(80)
             .ToListAsync(cancellationToken);
+        var orderIds = orders.Select(order => order.Id).ToList();
+        var viewerNotes = user.Role == UserRoles.Driver
+            ? new Dictionary<Guid, string>()
+            : await db.OrderNotes
+                .Where(note => note.UserId == user.Id && orderIds.Contains(note.OrderId))
+                .ToDictionaryAsync(note => note.OrderId, note => note.Notes, cancellationToken);
 
         return new CompanyDeskDto
         {
@@ -281,6 +426,10 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             Name = company.Name,
             OwnerName = owner?.Name ?? "",
             Contact = company.Contact,
+            Notes = await db.CompanyNotes
+                .Where(note => note.CompanyId == company.Id && note.UserId == user.Id)
+                .Select(note => note.Notes)
+                .FirstOrDefaultAsync(cancellationToken),
             HasQr = !string.IsNullOrWhiteSpace(company.QrPath),
             CanEdit = isOwner,
             CanManage = isOwner,
@@ -304,7 +453,9 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
                     {
                         UserId = member.UserId,
                         Username = member.User.Username,
-                        Name = member.User.Name
+                        Name = member.User.Name,
+                        Contact = member.User.Contact,
+                        Notes = dispatcherNotes.GetValueOrDefault(member.UserId)
                     })
                     .ToList()
                 : [],
@@ -312,14 +463,41 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             {
                 Id = order.Id,
                 OrderNo = order.OrderNo,
+                PlatformOrderNo = order.PlatformOrderNo,
+                Notes = viewerNotes.GetValueOrDefault(order.Id),
+                DriverNotes = user.Role == UserRoles.Driver ? order.DriverNotes : null,
                 StartDate = order.StartDate,
                 DayCount = order.Days.Count,
                 Kind = isOwner
                     ? "company"
-                    : order.CreatedByUserId == user.Id
+                    : user.Role == UserRoles.Dispatcher &&
+                      order.Days.Any(day => day.AssignedByUserId == user.Id)
                         ? "assigned"
                         : "driven"
             }).ToList()
         };
+    }
+
+    private async Task UpsertDispatcherNoteAsync(Guid dispatcherUserId, string? notes, CancellationToken cancellationToken)
+    {
+        if (session.UserId is not Guid userId)
+        {
+            return;
+        }
+
+        var trimmed = notes?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            await db.DispatcherNotes
+                .Where(note => note.DispatcherUserId == dispatcherUserId && note.UserId == userId)
+                .ExecuteDeleteAsync(cancellationToken);
+            return;
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO dispatcher_notes (id, dispatcher_user_id, user_id, notes)
+            VALUES ({Guid.NewGuid()}, {dispatcherUserId}, {userId}, {trimmed})
+            ON CONFLICT (dispatcher_user_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
+            """, cancellationToken);
     }
 }
