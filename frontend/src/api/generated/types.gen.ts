@@ -35,8 +35,8 @@ export type AssignmentResultDto = {
 export type CompanyApplicationDto = {
     id?: string;
     userId?: string;
-    username?: string;
     name?: string;
+    contact?: null | string;
 };
 
 export type CompanyBriefDto = {
@@ -76,6 +76,7 @@ export type CompanyMemberDto = {
     name?: string;
     contact?: null | string;
     notes?: null | string;
+    hidden?: boolean;
 };
 
 export type CompanyNoteWriteDto = {
@@ -108,6 +109,11 @@ export type DriverApplicantDto = {
     userId?: string;
     username?: string;
     name?: string;
+    contact?: null | string;
+};
+
+export type DriverHiddenWriteDto = {
+    hidden?: boolean;
 };
 
 export type DriverNoteWriteDto = {
@@ -120,6 +126,7 @@ export type DriverReadDto = {
     phone?: null | string;
     contact?: null | string;
     notes?: null | string;
+    hidden?: boolean;
 };
 
 export type DriverWriteDto = {
@@ -686,6 +693,22 @@ export type PostApiDispatchersApplicationsByApplicationIdApproveResponses = {
 
 export type PostApiDispatchersApplicationsByApplicationIdApproveResponse = PostApiDispatchersApplicationsByApplicationIdApproveResponses[keyof PostApiDispatchersApplicationsByApplicationIdApproveResponses];
 
+export type DeleteApiDispatchersDriversByDriverIdData = {
+    body?: never;
+    path: {
+        driverId: string;
+    };
+    query?: never;
+    url: '/api/dispatchers/drivers/{driverId}';
+};
+
+export type DeleteApiDispatchersDriversByDriverIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetApiDriversData = {
     body?: never;
     path?: never;
@@ -787,6 +810,24 @@ export type PutApiDriversByIdNotesResponses = {
 };
 
 export type PutApiDriversByIdNotesResponse = PutApiDriversByIdNotesResponses[keyof PutApiDriversByIdNotesResponses];
+
+export type PutApiDriversByIdHiddenData = {
+    body: DriverHiddenWriteDto;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/drivers/{id}/hidden';
+};
+
+export type PutApiDriversByIdHiddenResponses = {
+    /**
+     * OK
+     */
+    200: DriverReadDto;
+};
+
+export type PutApiDriversByIdHiddenResponse = PutApiDriversByIdHiddenResponses[keyof PutApiDriversByIdHiddenResponses];
 
 export type GetApiHealthData = {
     body?: never;

@@ -28,6 +28,7 @@ id         UUID PRIMARY KEY
 driver_id  UUID NOT NULL
 user_id    UUID NOT NULL
 notes      TEXT NOT NULL
+hidden     BOOLEAN NOT NULL DEFAULT false
 ```
 
 外键：
@@ -35,7 +36,7 @@ notes      TEXT NOT NULL
 - `driver_id` → `drivers.id`（删除司导时级联删除）
 - `user_id` → `users.id`（删除用户时级联删除）
 
-唯一约束：`(driver_id, user_id)`。`GET /api/drivers` 返回当前登录用户自己的 `notes`；`PUT /api/drivers/{id}/notes` 是唯一写入口。不是派单表。
+唯一约束：`(driver_id, user_id)`。`GET /api/drivers` 返回当前登录用户自己的 `notes` 和 `hidden`。`PUT /api/drivers/{id}/notes` 只改备注；备注清空且未隐藏时删除这一行，已隐藏时保留空备注。`PUT /api/drivers/{id}/hidden` 只改 `hidden`。没有备注又取消隐藏时删除这一行。不是派单表。调度台隐藏司导写在这一列，换浏览器仍然有效。排序和置顶不写在这里。
 
 ---
 
@@ -46,6 +47,7 @@ id                   UUID PRIMARY KEY
 dispatcher_user_id   UUID NOT NULL
 user_id              UUID NOT NULL
 notes                TEXT NOT NULL
+hidden               BOOLEAN NOT NULL DEFAULT false
 ```
 
 外键：
@@ -53,7 +55,7 @@ notes                TEXT NOT NULL
 - `dispatcher_user_id` → `users.id`（删除该调度员账号时级联删除）
 - `user_id` → `users.id`（删除写备注的公司账户时级联删除）
 
-唯一约束：`(dispatcher_user_id, user_id)`。`GET /api/company` 的 `dispatchers[].notes` 与 `PUT /api/company/dispatchers/{userId}/notes` 只读写当前公司账户这一行。调度员读不到。不是派单表，也不复用 `driver_notes` / `order_notes`。
+唯一约束：`(dispatcher_user_id, user_id)`。`GET /api/company` 的 `dispatchers[].notes` 与 `PUT /api/company/dispatchers/{userId}/notes` 只读写当前公司账户这一行，不改 `hidden`。`hidden` 由 `PUT /api/company/dispatchers/{userId}/hidden` 写入。没有这一行时视为显示。清空备注且未隐藏则删除这一行。调度员读不到。不是派单表，也不复用 `driver_notes` / `order_notes`。
 
 ---
 
@@ -244,7 +246,7 @@ assigned_color VARCHAR(7) NULL
 - `avatar_path` 指向压缩后的 `files/avatars/{userId}.jpg`。再次上传时删除该用户旧头像文件。头像、二维码、电子票、订单截图都落在 `App_Data/files/` 下各自子目录，不进 `wwwroot`。
 - `assigned_color` 是该用户自己的已分配颜色（调度台 / 派给调度共用），每人一条。空则前端用默认浅绿。不另建颜色表。
 - 登录用户名和密码只由本人在个人信息修改。用户名仍是 `username`，密码只存 `password_hash`。改用户名不换 `id`，登录 Cookie 仍按用户 id。
-- `contact` 是该用户自己的联系方式，手机号或微信号，只由本人在个人信息修改。公司信息里调度员姓名后、调度台司导详情、以及我的行程点开日期后的调度员姓名旁，都读这一列。不读登录用户名，也不读 `companies.contact` 或 `drivers.phone`。
+- `contact` 是该用户自己的联系方式，手机号或微信号，只由本人在个人信息修改。公司信息里待批准申请和调度员姓名后、个人信息的司导申请、调度台司导详情、以及我的行程点开日期后的调度员姓名旁，都读这一列。不读登录用户名，也不读 `companies.contact` 或 `drivers.phone`。
 
 ---
 
@@ -257,7 +259,7 @@ company_id  UUID NOT NULL
 role        VARCHAR(20) NOT NULL
 ```
 
-唯一约束：`(user_id, company_id)`。公司批准调度员后 `role=dispatcher`，公司的调度员名单和「派给调度」只看这一行。调度员批准司导申请后写入 `role=driver`。公司账户或该公司的调度员把公司订单派给有账号的司导时，若还没有成员行，也写入 `role=driver`；已有行不改角色。公司调度台的司导名单只看 `role=driver`。批准前，以及尚未被这样派过单之前，公司名单里没有这位司导。
+唯一约束：`(user_id, company_id)`。公司批准调度员后 `role=dispatcher`，公司的调度员名单和「派给调度」只看这一行。公司账户注册时为自己写一条 `role=dispatcher`，登录或 `me` 会给旧账号补上，账号角色仍是公司。不能删除自己这一行。调度员批准司导申请后写入 `role=driver`。公司账户或该公司的调度员把公司订单派给有账号的司导时，若还没有成员行，也写入 `role=driver`；已有行不改角色。公司账户的调度台不看这一行，只看向该账户申请并已批准的 `driver_applications`。调度员批准时仍按他所属公司写入 `role=driver`，司导资源跟着调度员进公司；派单也可能补这一行。这两处都不等于公司账户自己的司导。
 
 ---
 
@@ -284,7 +286,7 @@ created_at           TIMESTAMPTZ NOT NULL
 approved_at          TIMESTAMPTZ NULL
 ```
 
-同一用户对同一调度员只能有一条。`approved_at` 为空表示待批准，调度台还看不到这位司导。批准后写入 `approved_at`，行保留，作为「这位调度员能看到这位司导」的依据，并按该调度员当前所属公司写入 `company_members`。同公司的另一位调度员看不到，除非司导也向他申请并被批准。
+同一用户对同一调度员或公司账户只能有一条。注册时每个账号都有一条已批准的自指行：`user_id` 与 `dispatcher_user_id` 都是本人。已有账号在登录或 `me` 时补上。这条不能被解除绑定。对外申请接口仍拒绝向自己申请。`dispatcher_user_id` 可以指向调度员，也可以指向公司账户。`approved_at` 为空表示待批准，对方调度台还看不到这位司导。批准后写入 `approved_at`，行保留，作为「这位调度员或公司账户能看到这位司导」的依据。向调度员申请时，再按该调度员当前所属公司写入 `company_members`。同公司的另一位调度员看不到，公司账户也看不到，除非司导也向对方申请并被批准。没有 `driver_notes` 行时隐藏为 false。调度员解除绑定即删除自己这一行。未完成订单里由他派出或挂在他名下、且分给这位司导的日期清空 `driver_id`，有几天清几天。最后一天早于今天的行程保留。公司成员不动。
 
 ---
 

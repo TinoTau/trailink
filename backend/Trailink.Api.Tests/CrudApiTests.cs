@@ -130,6 +130,59 @@ public class CrudApiTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Driver_hide_is_private_and_kept_when_notes_are_cleared()
+    {
+        var created = await PostAsync<DriverReadDto>("/api/drivers", new DriverWriteDto
+        {
+            Name = "可隐藏司机"
+        });
+        Assert.False(created.Hidden);
+
+        var hidden = await PutAsync<DriverReadDto>($"/api/drivers/{created.Id}/hidden", new DriverHiddenWriteDto
+        {
+            Hidden = true
+        });
+        Assert.True(hidden.Hidden);
+        Assert.Null(hidden.Notes);
+
+        var noted = await PutAsync<DriverReadDto>($"/api/drivers/{created.Id}/notes", new DriverNoteWriteDto
+        {
+            Notes = "仍隐藏"
+        });
+        Assert.True(noted.Hidden);
+        Assert.Equal("仍隐藏", noted.Notes);
+
+        var cleared = await PutAsync<DriverReadDto>($"/api/drivers/{created.Id}/notes", new DriverNoteWriteDto
+        {
+            Notes = ""
+        });
+        Assert.True(cleared.Hidden);
+        Assert.Null(cleared.Notes);
+
+        var other = _factory.CreateClient();
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        (await other.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"hide_{suffix}",
+            Password = "Passw0rd!",
+            Name = "另一查看者",
+            AccountType = "company",
+            CompanyName = $"隐藏公司{suffix}"
+        })).EnsureSuccessStatusCode();
+        var otherView = await other.GetFromJsonAsync<DriverReadDto>($"/api/drivers/{created.Id}", JsonOptions);
+        Assert.False(otherView!.Hidden);
+
+        var restored = await PutAsync<DriverReadDto>($"/api/drivers/{created.Id}/hidden", new DriverHiddenWriteDto
+        {
+            Hidden = false
+        });
+        Assert.False(restored.Hidden);
+        Assert.Null(restored.Notes);
+
+        await _client.DeleteAsync($"/api/drivers/{created.Id}");
+    }
+
+    [Fact]
     public async Task Order_days_activities_and_assignment_work()
     {
         var zhang = await PostAsync<DriverReadDto>("/api/drivers", new DriverWriteDto { Name = "张师傅-派单" });

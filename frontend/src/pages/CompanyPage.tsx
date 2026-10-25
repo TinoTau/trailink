@@ -1,5 +1,6 @@
 import { message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
+import { keepDraft, usePageLoad } from '../usePageLoad'
 import { companyApi } from '../api/auth'
 import { ordersApi } from '../api/orders'
 import { useAuthenticatedAuth } from '../auth/authState'
@@ -7,7 +8,8 @@ import { AccountMenu } from './AccountMenu'
 import { OrderFilesBlock } from './OrderFilesBlock'
 import { readCurrentCompanyId, writeCurrentCompanyId } from '../currentCompany'
 import { formatMonthDay } from '../localDate'
-import { dayActivityLine, orderDisplayLabel } from '../orderFlags'
+import { dayActivityLine, formatActivityLine, orderDisplayLabel, parseActivityLine } from '../orderFlags'
+import { contactLabel } from '../text'
 import type { CompanyDesk, CompanySearch, Order } from '../types'
 import './account.css'
 
@@ -24,6 +26,20 @@ export function CompanyPage() {
   const [qrKey, setQrKey] = useState(0)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [ready, setReady] = useState(false)
+  const selectedOrderRef = useRef<Order | null>(null)
+  const nameRef = useRef(companyName)
+  const contactRef = useRef(contact)
+  const noteRef = useRef(note)
+  const loadedName = useRef<string | undefined>(undefined)
+  const loadedContact = useRef<string | undefined>(undefined)
+  const loadedNote = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    selectedOrderRef.current = selectedOrder
+    nameRef.current = companyName
+    contactRef.current = contact
+    noteRef.current = note
+  })
 
   function applyHome(home: Awaited<ReturnType<typeof companyApi.desk>>) {
     setCompanies(home.companies)
@@ -33,9 +49,21 @@ export function CompanyPage() {
       writeCurrentCompanyId(selected)
     }
     setDesk(home.desk ?? null)
-    setCompanyName(home.desk?.name || '')
-    setContact(home.desk?.contact || '')
-    setNote(home.desk?.notes || '')
+    const nextName = home.desk?.name || ''
+    const nextContact = home.desk?.contact || ''
+    const nextNote = home.desk?.notes || ''
+    const name = keepDraft(nameRef.current, loadedName.current, nextName)
+    const nextContactValue = keepDraft(contactRef.current, loadedContact.current, nextContact)
+    const noteValue = keepDraft(noteRef.current, loadedNote.current, nextNote)
+    loadedName.current = nextName
+    loadedContact.current = nextContact
+    loadedNote.current = nextNote
+    nameRef.current = name
+    contactRef.current = nextContactValue
+    noteRef.current = noteValue
+    setCompanyName(name)
+    setContact(nextContactValue)
+    setNote(noteValue)
   }
 
   async function load(nextId?: string) {
@@ -45,6 +73,15 @@ export function CompanyPage() {
         home = await companyApi.desk(home.companies[0].id)
       }
       applyHome(home)
+      const openId = selectedOrderRef.current?.id
+      if (openId) {
+        try {
+          const fresh = await ordersApi.get(openId)
+          setSelectedOrder((current) => (current?.id === openId ? fresh : current))
+        } catch {
+          setSelectedOrder((current) => (current?.id === openId ? null : current))
+        }
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载公司信息失败')
     } finally {
@@ -52,11 +89,7 @@ export function CompanyPage() {
     }
   }
 
-  useEffect(() => {
-    // 初次挂载从服务端恢复当前公司桌面。
-    // oxlint-disable-next-line react/set-state-in-effect
-    void load(readCurrentCompanyId())
-  }, [])
+  usePageLoad(() => load(readCurrentCompanyId()))
 
   async function changeCompany(nextId: string) {
     setSelectedOrder(null)
@@ -164,9 +197,9 @@ export function CompanyPage() {
   }
 
   async function saveDayActivities(orderId: string, day: Order['days'][number], raw: string) {
-    const parts = raw.split('-').map((item) => item.trim()).filter(Boolean)
+    const parts = parseActivityLine(raw)
     const existing = [...day.activities].sort((left, right) => left.sortOrder - right.sortOrder)
-    if (dayActivityLine(existing) === parts.join('-')) {
+    if (dayActivityLine(existing) === formatActivityLine(parts)) {
       return
     }
     try {
@@ -300,7 +333,7 @@ export function CompanyPage() {
                   </div>
                 ) : (
                   <p>
-                    联系方式 <span>{desk.contact || '暂未填写'}</span>
+                    联系方式 <span>{contactLabel(desk.contact)}</span>
                   </p>
                 )}
                 <div className="account-search">
@@ -336,7 +369,7 @@ export function CompanyPage() {
                 {desk.applications.map((item) => (
                   <div className="account-row" key={item.id}>
                     <p>
-                      {item.name} <span>{item.username}</span>
+                      {item.name} <span>{contactLabel(item.contact)}</span>
                     </p>
                     <button
                       type="button"
@@ -355,8 +388,9 @@ export function CompanyPage() {
                 {desk.dispatchers.map((item) => (
                   <div className="account-row" key={item.userId}>
                     <p>
-                      {item.name} <span>{item.contact?.trim() || '暂未填写'}</span>
+                      {item.name} <span>{contactLabel(item.contact)}</span>
                     </p>
+                    {item.userId === user.id ? null : (
                     <button
                       type="button"
                       className="account-chip danger"
@@ -365,6 +399,7 @@ export function CompanyPage() {
                     >
                       移除
                     </button>
+                    )}
                   </div>
                 ))}
               </section>

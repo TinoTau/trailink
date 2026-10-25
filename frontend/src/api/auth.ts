@@ -28,11 +28,7 @@ export const authApi = {
   updateContact: (contact: string) => api.put<SessionUser>('/api/auth/contact', { contact }),
   updateAssignedColor: (assignedColor: string) =>
     api.put<SessionUser>('/api/auth/assigned-color', { assignedColor }),
-  uploadAvatar: (file: File) => {
-    const body = new FormData()
-    body.append('file', file)
-    return api.postForm<SessionUser>('/api/auth/avatar', body)
-  },
+  uploadAvatar: (file: File) => api.postFile<SessionUser>('/api/auth/avatar', file),
 }
 
 export const companyApi = {
@@ -44,18 +40,16 @@ export const companyApi = {
     api.put<CompanyHome>('/api/company', { companyId, contact }),
   updateName: (companyId: string, name: string) =>
     api.put<CompanyHome>('/api/company', { companyId, name }),
-  uploadQr: (companyId: string, file: File) => {
-    const body = new FormData()
-    body.append('companyId', companyId)
-    body.append('file', file)
-    return api.postForm<CompanyHome>('/api/company/qr', body)
-  },
+  uploadQr: (companyId: string, file: File) =>
+    api.postFile<CompanyHome>('/api/company/qr', file, { companyId }),
   approve: (applicationId: string, companyId?: string) =>
     api.post<CompanyHome>(`/api/company/applications/${applicationId}/approve`, {}).then((home) =>
       companyId ? companyApi.desk(companyId) : home,
     ),
   removeDispatcher: (userId: string, companyId?: string) =>
     api.delete(`/api/company/dispatchers/${userId}`).then(() => companyApi.desk(companyId)),
+  setDispatcherHidden: (userId: string, hidden: boolean) =>
+    api.put(`/api/company/dispatchers/${userId}/hidden`, { hidden }),
   updateDispatcherNotes: (userId: string, notes: string) =>
     api.put<CompanyHome>(`/api/company/dispatchers/${userId}/notes`, { notes }),
   updateNote: (companyId: string, notes: string) =>

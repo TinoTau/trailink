@@ -11,6 +11,20 @@ public class OrderScheduling(TrailinkDbContext db)
     public static bool IsDriverPlaceholder(Order order, Guid driverId) =>
         order.CompanyId is null && order.CreatedBy?.DriverId == driverId;
 
+    public static DateOnly? EndDate(IEnumerable<ItineraryDay> days)
+    {
+        DateOnly? end = null;
+        foreach (var day in days)
+        {
+            if (end is null || day.ServiceDate > end.Value)
+            {
+                end = day.ServiceDate;
+            }
+        }
+
+        return end;
+    }
+
     public async Task<List<string>> FindDriverConflictsAsync(
         Guid driverId,
         IEnumerable<DateOnly> dates,

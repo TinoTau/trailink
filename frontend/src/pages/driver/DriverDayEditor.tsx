@@ -5,6 +5,7 @@ import { FileField } from '../FileField'
 import { OrderInfoEditor, TrashIcon } from '../OrderInfoFields'
 import { formatLocalTime } from '../../localDate'
 import { splitOrderHint } from '../../orderFlags'
+import { contactLabel } from '../../text'
 import type { DriverCalendarDay, ItineraryDay, Order, OrderActivity, OrderActivityWrite } from '../../types'
 
 export function DriverDayEditor({
@@ -386,11 +387,11 @@ function fromTimeInput(date: string, time: string) {
 function dispatcherContactLine(order: Order, trip: ItineraryDay | undefined, viewerId?: string | null) {
   const dayName = trip?.assignedByName?.trim()
   if (trip?.assignedByUserId && dayName && trip.assignedByUserId !== viewerId) {
-    return `调度员 ${dayName} ${trip.assignedByContact?.trim() || '暂未填写'}`
+    return `调度员 ${dayName} ${contactLabel(trip.assignedByContact)}`
   }
   const orderName = order.assignedDispatcherName?.trim()
   if (order.assignedDispatcherUserId && orderName && order.assignedDispatcherUserId !== viewerId) {
-    return `调度员 ${orderName} ${order.assignedDispatcherContact?.trim() || '暂未填写'}`
+    return `调度员 ${orderName} ${contactLabel(order.assignedDispatcherContact)}`
   }
   return null
 }

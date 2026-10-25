@@ -9,7 +9,11 @@ namespace Trailink.Api.Controllers;
 
 [ApiController]
 [Route("api/company")]
-public class CompanyDeskController(TrailinkDbContext db, AuthSession session, AppFileStore files) : ControllerBase
+public class CompanyDeskController(
+    TrailinkDbContext db,
+    AuthSession session,
+    AppFileStore files,
+    OrderDriverAssignment assignment) : ControllerBase
 {
 
     [HttpGet]
@@ -64,17 +68,9 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
         if (request.Name is not null)
         {
             var name = request.Name.Trim();
-            if (name.Length is < 1 or > 200)
+            if (await AccountText.CompanyNameErrorAsync(db, name, company.Id, cancellationToken) is string companyError)
             {
-                return Problem(title: "Validation error", detail: "请填写公司名称。", statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            var taken = await db.Companies.AnyAsync(
-                item => item.Id != company.Id && item.Name.ToLower() == name.ToLower(),
-                cancellationToken);
-            if (taken)
-            {
-                return Problem(title: "Validation error", detail: "公司名称已被使用。", statusCode: StatusCodes.Status400BadRequest);
+                return Problem(title: "Validation error", detail: companyError, statusCode: StatusCodes.Status400BadRequest);
             }
 
             company.Name = name;
@@ -196,6 +192,12 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             return Forbid();
         }
 
+        var actor = await session.GetUserAsync(cancellationToken);
+        if (actor?.Id == userId)
+        {
+            return Problem(title: "Validation error", detail: "不能解除自己的调度员身份。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
         var member = await db.CompanyMembers
             .Include(item => item.User)
             .ThenInclude(user => user.Memberships)
@@ -223,8 +225,36 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             user.Role = UserRoles.Driver;
         }
 
+        await assignment.ReturnUnfinishedOrdersAsync(company.Id, userId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return await Get(company.Id, cancellationToken);
+    }
+
+    [HttpPut("dispatchers/{userId:guid}/hidden")]
+    public async Task<IActionResult> SetDispatcherHidden(
+        Guid userId,
+        DriverHiddenWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var company = await LoadOwnedCompanyAsync(cancellationToken);
+        if (company is null)
+        {
+            return Forbid();
+        }
+
+        var listed = await CompanyMembership.IsDispatcherAsync(db, company.Id, userId, cancellationToken);
+        if (!listed)
+        {
+            return NotFound();
+        }
+
+        if (session.UserId is not Guid actorId)
+        {
+            return Forbid();
+        }
+
+        await ViewerNotes.SetDispatcherHiddenAsync(db, userId, actorId, request.Hidden, cancellationToken);
+        return NoContent();
     }
 
     [HttpPut("notes")]
@@ -287,18 +317,18 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             return Forbid();
         }
 
-        var isDispatcher = await db.CompanyMembers.AnyAsync(
-            member =>
-                member.CompanyId == company.Id &&
-                member.UserId == userId &&
-                member.Role == UserRoles.Dispatcher,
-            cancellationToken);
+        var isDispatcher = await CompanyMembership.IsDispatcherAsync(db, company.Id, userId, cancellationToken);
         if (!isDispatcher)
         {
             return Problem(title: "Validation error", detail: "只能给本公司的调度员写备注。", statusCode: StatusCodes.Status400BadRequest);
         }
 
-        await UpsertDispatcherNoteAsync(userId, request.Notes, cancellationToken);
+        if (session.UserId is not Guid actorId)
+        {
+            return Forbid();
+        }
+
+        await ViewerNotes.UpsertDispatcherAsync(db, userId, actorId, request.Notes, cancellationToken);
         return await Get(company.Id, cancellationToken);
     }
 
@@ -381,11 +411,14 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
             return null;
         }
 
-        var dispatcherNotes = isOwner
+        var noteRows = isOwner
             ? await db.DispatcherNotes
                 .Where(note => note.UserId == user.Id)
-                .ToDictionaryAsync(note => note.DispatcherUserId, note => note.Notes, cancellationToken)
-            : new Dictionary<Guid, string>();
+                .Select(note => new { note.DispatcherUserId, note.Notes, note.Hidden })
+                .ToListAsync(cancellationToken)
+            : [];
+        var dispatcherNotes = noteRows.ToDictionary(note => note.DispatcherUserId, note => note.Notes);
+        var dispatcherHidden = noteRows.ToDictionary(note => note.DispatcherUserId, note => note.Hidden);
 
         var today = DateOnly.FromDateTime(DateTime.Today);
         var ordersQuery = db.Orders.Where(order =>
@@ -440,8 +473,8 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
                     {
                         Id = application.Id,
                         UserId = application.UserId,
-                        Username = application.User.Username,
-                        Name = application.User.Name
+                        Name = application.User.Name,
+                        Contact = application.User.Contact
                     })
                     .ToList()
                 : [],
@@ -455,7 +488,8 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
                         Username = member.User.Username,
                         Name = member.User.Name,
                         Contact = member.User.Contact,
-                        Notes = dispatcherNotes.GetValueOrDefault(member.UserId)
+                        Notes = dispatcherNotes.GetValueOrDefault(member.UserId),
+                        Hidden = dispatcherHidden.GetValueOrDefault(member.UserId)
                     })
                     .ToList()
                 : [],
@@ -476,28 +510,5 @@ public class CompanyDeskController(TrailinkDbContext db, AuthSession session, Ap
                         : "driven"
             }).ToList()
         };
-    }
-
-    private async Task UpsertDispatcherNoteAsync(Guid dispatcherUserId, string? notes, CancellationToken cancellationToken)
-    {
-        if (session.UserId is not Guid userId)
-        {
-            return;
-        }
-
-        var trimmed = notes?.Trim();
-        if (string.IsNullOrEmpty(trimmed))
-        {
-            await db.DispatcherNotes
-                .Where(note => note.DispatcherUserId == dispatcherUserId && note.UserId == userId)
-                .ExecuteDeleteAsync(cancellationToken);
-            return;
-        }
-
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO dispatcher_notes (id, dispatcher_user_id, user_id, notes)
-            VALUES ({Guid.NewGuid()}, {dispatcherUserId}, {userId}, {trimmed})
-            ON CONFLICT (dispatcher_user_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
-            """, cancellationToken);
     }
 }

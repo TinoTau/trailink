@@ -87,7 +87,7 @@ ASP.NET Core Web API → Amazon S3
 - LLM
 - GraphQL
 
-调度台 `/dispatcher` 与司机日历一样是独立前端页，读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。公司把整单交给调度员写 `orders.assigned_dispatcher_user_id`，页面复用 `/company/assign` 的同一套调度台，不另开订单系统。订单所属公司只写 `orders.company_id`：公司建单即本公司，调度员和司导建单都不默认绑所属公司，即使只属于一家；调度员须搜索点选后立即绑定、改绑，或明确传 `null` 解绑。调度员给司导的备注写 `driver_notes`（`user_id` + `driver_id`），由 `/api/drivers/{id}/notes` 独立于司导档案写入。公司给调度员的备注写 `dispatcher_notes`（`user_id` + `dispatcher_user_id`），只在派给调度里读写，调度员看不到。两个页面都从订单列表取行程日；调度台「所有订单」排除已派完且已结束的历史单，本人日历保留这些日期并显示为已完成。`/company` 的订单：公司账户只看已派完且已结束的历史单；司导看自己当前接的单，调度员看自己当前接的和分配的单，已结束和尚未结束都在内。分配以当前行程日为准，改派后原经手人不再看到。日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`；多分配人也按拆单处理。司导取消本人行程不看分配人。已绑定 `company_id` 的真实订单派给司导时，现有 `OrderScheduling` / `OrderDriverAssignment` 覆盖并删除该司导自建且未绑公司的占位单；未绑定公司的单仍走原冲突规则。不另建占位表或覆盖接口。
+调度台 `/dispatcher` 与司机日历一样是独立前端页。进入页面或从其他窗口回到当前页时，重新读取该页数据，未保存的输入保留。读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。公司把整单交给调度员写 `orders.assigned_dispatcher_user_id`，页面复用 `/company/assign` 的同一套调度台，不另开订单系统。订单所属公司只写 `orders.company_id`：公司建单即本公司，调度员和司导建单都不默认绑所属公司，即使只属于一家；调度员须搜索点选后立即绑定、改绑，或明确传 `null` 解绑。调度员给司导的备注写 `driver_notes`（`user_id` + `driver_id`），由 `/api/drivers/{id}/notes` 独立于司导档案写入。同一行的 `hidden` 表示当前用户在调度台隐藏了这位司导。公司给调度员的备注写 `dispatcher_notes`（`user_id` + `dispatcher_user_id`），只在派给调度里读写，调度员看不到。两个页面都从订单列表取行程日。调度台点开司导时，同一 `GET /api/orders` 带上这位司导的 `driverId`，画出他的全部行程，不限本公司，别人的日期不写公司名或调度员姓名；订单区仍不带这个参数。调度台「所有订单」排除已派完且已结束的历史单，本人日历保留这些日期并显示为已完成。`/company` 的订单：公司账户只看已派完且已结束的历史单；司导看自己当前接的单，调度员看自己当前接的和分配的单，已结束和尚未结束都在内。分配以当前行程日为准，改派后原经手人不再看到。日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`；多分配人也按拆单处理。司导取消本人行程不看分配人。已绑定 `company_id` 的真实订单派给司导时，现有 `OrderScheduling` / `OrderDriverAssignment` 覆盖并删除该司导自建且未绑公司的占位单；未绑定公司的单仍走原冲突规则。不另建占位表或覆盖接口。
 
 后端采用简单分层：
 
@@ -142,7 +142,7 @@ Trailink/
 - 使用 EF Core Migrations 管理数据库结构。
 - 第一阶段核心表：`drivers`、`driver_notes`、`dispatcher_notes`、`orders`、`order_notes`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`company_notes`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`。
 - 每人给公司的缩写只写 `company_notes`（`company_id` + `user_id`）。还没有记录时默认写入公司账户已保存的简称，没有则写入公司名前两个字。个人简称写好后不会被公司后来的修改覆盖。公司信息页下拉包含所属公司，以及创建过、被指派、派出或跑过的订单所属公司。司导日历在「公司名+调度员名」超过 6 个字时使用这条缩写。
-- 人员名单不跨公司共享。调度台司导只来自当前调度员已批准的 `driver_applications`（`approved_at` 非空）。公司的调度员名单和派给调度只来自本公司 `company_members.role=dispatcher`。公司账户或该公司调度员把公司订单派给有账号的司导时，写入 `company_members.role=driver`，不再单独批准。批准前双方都看不到对方。
+- 人员名单不跨公司共享。调度台司导只来自当前登录账户已批准的 `driver_applications`（`approved_at` 非空），其中包含注册时自动批准的自指行，公司和调度员可以给自己派单。公司账户和调度员用同一张表：公司只看到向本公司账户申请并批准的司导，看不到调度员带来的司导。调度员解除绑定即删除自己这一行，不另建关系表。未完成订单中由他派出或挂在他名下的日期清空这位司导的 `driver_id`，已结束的行程保留。公司的调度员名单和派给调度只来自本公司 `company_members.role=dispatcher`，其中包含公司账户自己的那一行。注册时写入，旧账号在登录或 `me` 时补上。不能解除自己。派给调度可以隐藏调度员，隐藏写在 `dispatcher_notes.hidden`。解除别人时，未完成且分给他的本公司订单退回公司池。调度员批准司导，或公司订单派给有账号的司导时，可以写入 `company_members.role=driver`，表示司导跟着调度员进了这家公司。这不把司导放进公司账户的调度台。批准前双方都看不到对方。隐藏只读 `driver_notes.hidden`，没有记录就是显示。
 - 四种上传（公司二维码、用户头像、电子票、订单截图）共用 `AppFileStore`，根目录 `App_Data/files/{qr,avatars,tickets,orders}/`。库里只存相对路径：`companies.qr_path`、`users.avatar_path`、`order_activities.ticket_path`、`order_files.file_path`。不进 `wwwroot`，不另开第二套存储。旧二维码路径 `company-qr/` 仍可读取。头像在写入前经 `AvatarImage`（SkiaSharp）缩到最长边 256 并压成 JPEG，覆盖时删掉该用户旧文件。二维码 / 电子票 / 订单截图保持原图。
 - 订单起始日期和行程日期使用 PostgreSQL `DATE` / `DateOnly`。活动预订与签到时间使用 `TIMESTAMP WITHOUT TIME ZONE` / `DateTime`（`Kind=Unspecified`），表示当地钟表时间。
 - 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`。领取与调度台派单共用 `PUT /api/orders/{id}/driver` 和同一套占位单覆盖。不提供 `claim` / `range` / preview 日历接口。分配只更新 `driver_id`。公司、调度员、司导登录后都只看自己的 `driver_id`。
@@ -157,7 +157,7 @@ Trailink/
 - 使用环境变量或本地未入库配置文件。
 - 需要基本错误处理、输入校验和基础日志。
 - 暂不实现业务审计日志。
-- Cookie 登录。`users.role` 为 `company` / `dispatcher` / `driver`。不建角色表或权限表。角色变化以数据库为准，不依赖 Cookie 里的角色声明。本人可在个人信息修改 `users.username`、`password_hash` 和 `users.contact`，不另建账号表。公司调度员名单、调度台司导详情，以及我的行程点开日期后的调度员姓名旁，都读 `users.contact`。调度台已分配颜色写 `users.assigned_color`，每人一条，不另建颜色表。
+- Cookie 登录。`users.role` 为 `company` / `dispatcher` / `driver`。不建角色表或权限表。角色变化以数据库为准，不依赖 Cookie 里的角色声明。本人可在个人信息修改 `users.username`、`password_hash` 和 `users.contact`，不另建账号表。公司信息的待批准申请、公司调度员名单、个人信息的司导申请、调度台司导详情，以及我的行程点开日期后的调度员姓名旁，都读 `users.contact`。调度台已分配颜色写 `users.assigned_color`，每人一条，不另建颜色表。
 
 ---
 

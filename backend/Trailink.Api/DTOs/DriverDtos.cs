@@ -11,6 +11,11 @@ public class DriverNoteWriteDto
     public string? Notes { get; set; }
 }
 
+public class DriverHiddenWriteDto
+{
+    public bool Hidden { get; set; }
+}
+
 public class DriverReadDto
 {
     public Guid Id { get; set; }
@@ -18,4 +23,5 @@ public class DriverReadDto
     public string? Phone { get; set; }
     public string? Contact { get; set; }
     public string? Notes { get; set; }
+    public bool Hidden { get; set; }
 }

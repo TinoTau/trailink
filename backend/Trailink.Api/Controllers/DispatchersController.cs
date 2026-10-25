@@ -9,7 +9,7 @@ namespace Trailink.Api.Controllers;
 
 [ApiController]
 [Route("api/dispatchers")]
-public class DispatchersController(TrailinkDbContext db, AuthSession session) : ControllerBase
+public class DispatchersController(TrailinkDbContext db, AuthSession session, OrderDriverAssignment assignment) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<DispatcherSearchDto>>> Search(
@@ -30,7 +30,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
 
         var dispatchers = await db.Users
             .Where(item =>
-                item.Role == UserRoles.Dispatcher &&
+                (item.Role == UserRoles.Dispatcher || item.Role == UserRoles.Company) &&
                 item.Id != user.Id &&
                 item.Name.ToLower().Contains(keyword.ToLower()))
             .OrderBy(item => item.Name)
@@ -65,12 +65,12 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
             .Include(item => item.Memberships)
             .ThenInclude(member => member.Company)
             .FirstOrDefaultAsync(item => item.Id == request.DispatcherUserId, cancellationToken);
-        if (dispatcher is null || dispatcher.Role != UserRoles.Dispatcher)
+        if (dispatcher is null || dispatcher.Role is not (UserRoles.Dispatcher or UserRoles.Company))
         {
-            return Problem(title: "Validation error", detail: "没有找到这位调度员。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: "没有找到这位调度员或公司账户。", statusCode: StatusCodes.Status400BadRequest);
         }
 
-        var companyIds = DispatcherCompanyIds(dispatcher);
+        var companyIds = HostCompanyIds(dispatcher);
         if (companyIds.Count == 0)
         {
             return Problem(title: "Validation error", detail: "这位调度员还没有所属公司。", statusCode: StatusCodes.Status400BadRequest);
@@ -113,7 +113,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
             return Unauthorized();
         }
 
-        if (user.Role != UserRoles.Dispatcher)
+        if (user.Role is not (UserRoles.Dispatcher or UserRoles.Company))
         {
             return Forbid();
         }
@@ -127,7 +127,8 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
                 Id = item.Id,
                 UserId = item.UserId,
                 Username = item.User.Username,
-                Name = item.User.Name
+                Name = item.User.Name,
+                Contact = item.User.Contact
             })
             .ToListAsync(cancellationToken);
         return Ok(incoming);
@@ -144,7 +145,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
             return Unauthorized();
         }
 
-        if (user.Role != UserRoles.Dispatcher)
+        if (user.Role is not (UserRoles.Dispatcher or UserRoles.Company))
         {
             return Forbid();
         }
@@ -160,7 +161,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
             return NotFound();
         }
 
-        var companyIds = DispatcherCompanyIds(user);
+        var companyIds = HostCompanyIds(user);
         if (companyIds.Count == 0)
         {
             return Problem(title: "Validation error", detail: "还没有所属公司，无法批准司导。", statusCode: StatusCodes.Status400BadRequest);
@@ -188,9 +189,50 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session) : 
         return await Incoming(cancellationToken);
     }
 
-    private static List<Guid> DispatcherCompanyIds(User dispatcher)
+    [HttpDelete("drivers/{driverId:guid}")]
+    public async Task<IActionResult> UnbindDriver(Guid driverId, CancellationToken cancellationToken)
     {
-        return dispatcher.Memberships
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        if (user.Role != UserRoles.Dispatcher)
+        {
+            return Forbid();
+        }
+
+        var application = await db.DriverApplications
+            .FirstOrDefaultAsync(
+                item => item.DispatcherUserId == user.Id
+                    && item.ApprovedAt != null
+                    && item.User.DriverId == driverId,
+                cancellationToken);
+        if (application is null)
+        {
+            return NotFound();
+        }
+
+        if (user.DriverId == driverId)
+        {
+            return Problem(title: "Validation error", detail: "不能解除自己的司导身份。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        await assignment.ReclaimUnfinishedDaysAsync(user, driverId, cancellationToken);
+        db.DriverApplications.Remove(application);
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    private static List<Guid> HostCompanyIds(User user)
+    {
+        if (user.Role == UserRoles.Company && user.CompanyId is Guid companyId)
+        {
+            return [companyId];
+        }
+
+        return user.Memberships
             .Where(member => member.Role == UserRoles.Dispatcher)
             .Select(member => member.CompanyId)
             .Distinct()

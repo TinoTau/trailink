@@ -716,14 +716,18 @@ public class OrderLifecycleTests : IClassFixture<ApiFactory>
             DriverId = driverUser.DriverId
         });
         assigned.EnsureSuccessStatusCode();
-        Assert.Contains(driverUser.DriverId.Value, await DriverIdsAsync(company));
+        var driverMe = await driver.GetFromJsonAsync<SessionUserDto>("/api/auth/me", JsonOptions);
+        Assert.Contains(driverMe!.Companies, item => item.Id == companyUser.CompanyId);
+        Assert.DoesNotContain(driverUser.DriverId.Value, await DriverIdsAsync(company));
 
         assigned = await dispatcher.PutAsJsonAsync($"/api/orders/{order.Id}/driver", new AssignDriverDto
         {
             DriverId = driverUser.DriverId
         });
         assigned.EnsureSuccessStatusCode();
-        Assert.Equal(1, (await DriverIdsAsync(company)).Count(id => id == driverUser.DriverId));
+        driverMe = await driver.GetFromJsonAsync<SessionUserDto>("/api/auth/me", JsonOptions);
+        Assert.Equal(1, driverMe!.Companies.Count(item => item.Id == companyUser.CompanyId));
+        Assert.DoesNotContain(driverUser.DriverId.Value, await DriverIdsAsync(company));
 
         var unbound = await PostAsync<OrderReadDto>(dispatcher, "/api/orders", new OrderWriteDto
         {
@@ -761,7 +765,7 @@ public class OrderLifecycleTests : IClassFixture<ApiFactory>
         {
             DriverId = claimerUser.DriverId
         })).EnsureSuccessStatusCode();
-        Assert.Contains(claimerUser.DriverId!.Value, await DriverIdsAsync(company));
+        Assert.DoesNotContain(claimerUser.DriverId!.Value, await DriverIdsAsync(company));
 
         var dayDriver = await TestAuth.RegisterAsync(_factory.CreateClient(), $"mbday_{suffix}", "按天司导", "driver");
         var dayOrder = await PostAsync<OrderReadDto>(dispatcher, "/api/orders", new OrderWriteDto
@@ -779,7 +783,100 @@ public class OrderLifecycleTests : IClassFixture<ApiFactory>
             ServiceDate = date.AddDays(12),
             DriverId = dayDriver.DriverId
         })).EnsureSuccessStatusCode();
-        Assert.Contains(dayDriver.DriverId!.Value, await DriverIdsAsync(company));
+        Assert.DoesNotContain(dayDriver.DriverId!.Value, await DriverIdsAsync(company));
+    }
+
+    [Fact]
+    public async Task Dispatcher_desk_lists_a_drivers_orders_from_every_company()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var date = new DateOnly(2038, 4, 6);
+
+        var company = _factory.CreateClient();
+        var companyUser = await TestAuth.RegisterAsync(company, $"dsk_{suffix}", "看全部公司", "company", $"看全部公司{suffix}");
+        var other = _factory.CreateClient();
+        var otherUser = await TestAuth.RegisterAsync(other, $"dso_{suffix}", "别家公司", "company", $"别家公司{suffix}");
+        var dispatcher = _factory.CreateClient();
+        var dispatcherUser = await TestAuth.RegisterAsync(dispatcher, $"dsd_{suffix}", "看全部调度", "driver");
+        await TestAuth.PromoteDispatcherAsync(_factory.Services, dispatcherUser.Id, companyUser.CompanyId!.Value);
+        var driver = _factory.CreateClient();
+        var driverUser = await TestAuth.RegisterAsync(driver, $"dsg_{suffix}", "跨公司司导", "driver");
+        var stranger = await TestAuth.RegisterAsync(_factory.CreateClient(), $"dss_{suffix}", "未申请司导", "driver");
+
+        await driver.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto { DispatcherUserId = companyUser.Id });
+        var companyIncoming = (await company.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications", JsonOptions))!;
+        (await company.PostAsJsonAsync($"/api/dispatchers/applications/{companyIncoming.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+        await driver.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto { DispatcherUserId = dispatcherUser.Id });
+        var dispatcherIncoming = (await dispatcher.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications", JsonOptions))!;
+        (await dispatcher.PostAsJsonAsync($"/api/dispatchers/applications/{dispatcherIncoming.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+
+        var own = await PostAsync<OrderReadDto>(company, "/api/orders", new OrderWriteDto
+        {
+            PlatformOrderNo = $"P-OWN-{suffix}",
+            StartDate = date,
+            GuestCount = 2
+        });
+        var foreign = await PostAsync<OrderReadDto>(other, "/api/orders", new OrderWriteDto
+        {
+            PlatformOrderNo = $"P-OUT-{suffix}",
+            StartDate = date,
+            GuestCount = 4,
+            DriverNotes = "别家备注"
+        });
+        await PostAsync<ItineraryDayReadDto>(other, $"/api/orders/{foreign.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = date,
+            Description = "别家行程",
+            EndLocation = "别家终点"
+        });
+        (await other.PutAsJsonAsync($"/api/orders/{foreign.Id}/driver", new AssignDriverDto
+        {
+            DriverId = driverUser.DriverId
+        })).EnsureSuccessStatusCode();
+        await PostAsync<ItineraryDayReadDto>(company, $"/api/orders/{own.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = date.AddDays(1)
+        });
+        (await company.PutAsJsonAsync($"/api/orders/{own.Id}/driver", new AssignDriverDto
+        {
+            DriverId = driverUser.DriverId
+        })).EnsureSuccessStatusCode();
+
+        var companyOrders = await company.GetFromJsonAsync<List<OrderReadDto>>("/api/orders", JsonOptions);
+        Assert.Contains(companyOrders!, item => item.Id == own.Id);
+        Assert.DoesNotContain(companyOrders!, item => item.Id == foreign.Id);
+
+        var onDesk = (await company.GetFromJsonAsync<List<OrderReadDto>>(
+            $"/api/orders?driverId={driverUser.DriverId}", JsonOptions))!;
+        var listed = Assert.Single(onDesk, item => item.Id == foreign.Id);
+        var ownListed = Assert.Single(onDesk, item => item.Id == own.Id);
+        Assert.Equal($"P-OWN-{suffix}", ownListed.PlatformOrderNo);
+        Assert.Equal($"看全部公司{suffix}", ownListed.CompanyName);
+        Assert.Equal("看全部公司", Assert.Single(ownListed.Days).AssignedByName);
+        Assert.Equal(foreign.Id, listed.Id);
+        Assert.Null(listed.PlatformOrderNo);
+        Assert.Null(listed.CompanyName);
+        Assert.Null(listed.AssignedDispatcherName);
+        Assert.Null(listed.CreatedByName);
+        Assert.Null(listed.DriverNotes);
+        Assert.Null(listed.Notes);
+        Assert.Empty(listed.Files);
+        Assert.Equal(0, listed.GuestCount);
+        var day = Assert.Single(listed.Days);
+        Assert.Equal(date, day.ServiceDate);
+        Assert.Null(day.Description);
+        Assert.Null(day.EndLocation);
+        Assert.Null(day.AssignedByName);
+        Assert.Null(day.AssignedByContact);
+
+        var dispatcherDesk = await dispatcher.GetFromJsonAsync<List<OrderReadDto>>(
+            $"/api/orders?driverId={driverUser.DriverId}", JsonOptions);
+        Assert.Contains(dispatcherDesk!, item => item.Id == foreign.Id);
+        Assert.Empty((await other.GetFromJsonAsync<List<OrderReadDto>>(
+            $"/api/orders?driverId={driverUser.DriverId}", JsonOptions))!);
+        Assert.Empty((await company.GetFromJsonAsync<List<OrderReadDto>>(
+            $"/api/orders?driverId={stranger.DriverId}", JsonOptions))!);
+        Assert.Contains((await company.GetFromJsonAsync<List<OrderReadDto>>("/api/orders", JsonOptions))!, item => item.Id == own.Id);
     }
 
     private async Task<List<Guid>> DriverIdsAsync(HttpClient client)

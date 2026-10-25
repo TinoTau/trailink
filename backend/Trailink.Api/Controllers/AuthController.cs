@@ -19,19 +19,19 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         var username = request.Username.Trim();
         var name = request.Name.Trim();
         var accountType = request.AccountType.Trim().ToLowerInvariant();
-        if (username.Length is < 3 or > 50)
+        if (AccountText.UsernameError(username) is string usernameError)
         {
-            return Problem(title: "Validation error", detail: "用户名需要 3 到 50 个字符。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: usernameError, statusCode: StatusCodes.Status400BadRequest);
         }
 
-        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
+        if (AccountText.PasswordError(request.Password) is string passwordError)
         {
-            return Problem(title: "Validation error", detail: "密码至少 8 位。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: passwordError, statusCode: StatusCodes.Status400BadRequest);
         }
 
-        if (name.Length is < 1 or > 100)
+        if (AccountText.NameError(name) is string nameError)
         {
-            return Problem(title: "Validation error", detail: "请填写姓名。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: nameError, statusCode: StatusCodes.Status400BadRequest);
         }
 
         if (accountType is not ("driver" or "company"))
@@ -39,7 +39,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
             return Problem(title: "Validation error", detail: "只能注册司导或公司账户。", statusCode: StatusCodes.Status400BadRequest);
         }
 
-        if (await db.Users.AnyAsync(user => user.Username.ToLower() == username.ToLower(), cancellationToken))
+        if (await AccountText.UsernameTakenAsync(db, username, null, cancellationToken))
         {
             return Problem(title: "Validation error", detail: "用户名已被使用。", statusCode: StatusCodes.Status400BadRequest);
         }
@@ -56,14 +56,9 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         if (accountType == "company")
         {
             var companyName = request.CompanyName?.Trim() ?? "";
-            if (companyName.Length is < 1 or > 200)
+            if (await AccountText.CompanyNameErrorAsync(db, companyName, null, cancellationToken) is string companyError)
             {
-                return Problem(title: "Validation error", detail: "请填写公司名称。", statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            if (await db.Companies.AnyAsync(company => company.Name.ToLower() == companyName.ToLower(), cancellationToken))
-            {
-                return Problem(title: "Validation error", detail: "公司名称已被使用。", statusCode: StatusCodes.Status400BadRequest);
+                return Problem(title: "Validation error", detail: companyError, statusCode: StatusCodes.Status400BadRequest);
             }
 
             var company = new Company { Id = Guid.NewGuid(), Name = companyName };
@@ -74,6 +69,8 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
 
         db.Users.Add(user);
         DriverIdentity.Attach(db, user);
+        DriverIdentity.AttachSelf(db, user);
+        DriverIdentity.AttachOwnDispatcher(db, user);
         await db.SaveChangesAsync(cancellationToken);
         await session.SignInAsync(user);
         return Ok(ToSession(user));
@@ -157,9 +154,9 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         }
 
         var name = request.Name?.Trim() ?? "";
-        if (name.Length is < 1 or > 100)
+        if (AccountText.NameError(name) is string nameError)
         {
-            return Problem(title: "Validation error", detail: "请填写姓名。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: nameError, statusCode: StatusCodes.Status400BadRequest);
         }
 
         user.Name = name;
@@ -187,17 +184,14 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         }
 
         var username = request.Username?.Trim() ?? "";
-        if (username.Length is < 3 or > 50)
+        if (AccountText.UsernameError(username) is string usernameError)
         {
-            return Problem(title: "Validation error", detail: "用户名需要 3 到 50 个字符。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: usernameError, statusCode: StatusCodes.Status400BadRequest);
         }
 
         if (!string.Equals(user.Username, username, StringComparison.Ordinal))
         {
-            var taken = await db.Users.AnyAsync(
-                item => item.Id != user.Id && item.Username.ToLower() == username.ToLower(),
-                cancellationToken);
-            if (taken)
+            if (await AccountText.UsernameTakenAsync(db, username, user.Id, cancellationToken))
             {
                 return Problem(title: "Validation error", detail: "用户名已被使用。", statusCode: StatusCodes.Status400BadRequest);
             }
@@ -226,9 +220,9 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
             return Problem(title: "Validation error", detail: "当前密码不正确。", statusCode: StatusCodes.Status400BadRequest);
         }
 
-        if (string.IsNullOrEmpty(request.Password) || request.Password.Length < 8)
+        if (AccountText.ReplacementPasswordError(request.Password) is string passwordError)
         {
-            return Problem(title: "Validation error", detail: "密码至少 8 位。", statusCode: StatusCodes.Status400BadRequest);
+            return Problem(title: "Validation error", detail: passwordError, statusCode: StatusCodes.Status400BadRequest);
         }
 
         user.PasswordHash = PasswordHashing.Hash(request.Password);

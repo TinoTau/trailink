@@ -113,19 +113,7 @@ export function DispatcherCalendarCard({
         editable={showEditIcon}
         editLabel={canEditOrder ? '编辑订单' : '备注'}
         onHeadPointerDown={onCardPointerDown}
-        extraActions={
-          onRemove ? (
-            <button
-              type="button"
-              className="dispatcher-icon-btn danger dispatcher-card-remove"
-              aria-label={removeLabel}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={onRemove}
-            >
-              <TrashIcon />
-            </button>
-          ) : null
-        }
+        extraActions={cardRemoveButton(onRemove, removeLabel)}
         trailing={
           <button
             type="button"
@@ -230,6 +218,8 @@ export function DispatcherDayCard({
   onNotesSave,
   notesLabel,
   notesPlaceholder,
+  onRemove,
+  removeLabel = '移除',
   children,
 }: {
   title: string
@@ -241,6 +231,8 @@ export function DispatcherDayCard({
   onNotesSave?: () => void
   notesLabel?: string
   notesPlaceholder?: string
+  onRemove?: () => void
+  removeLabel?: string
   children: ReactNode
 }) {
   const [notesOpen, setNotesOpen] = useState(false)
@@ -256,6 +248,7 @@ export function DispatcherDayCard({
         onOpenChange={setNotesOpen}
         editable={canEditNotes}
         editLabel="备注"
+        extraActions={cardRemoveButton(onRemove, removeLabel)}
         trailing={
           <button type="button" className="dispatcher-icon-btn" aria-label={closeLabel} onClick={onClose}>
             <CloseIcon />
@@ -278,6 +271,23 @@ export function DispatcherDayCard({
         {children}
       </div>
     </article>
+  )
+}
+
+function cardRemoveButton(onRemove: (() => void) | undefined, removeLabel: string) {
+  if (!onRemove) {
+    return null
+  }
+  return (
+    <button
+      type="button"
+      className="dispatcher-icon-btn danger dispatcher-card-remove"
+      aria-label={removeLabel}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={onRemove}
+    >
+      <TrashIcon />
+    </button>
   )
 }
 

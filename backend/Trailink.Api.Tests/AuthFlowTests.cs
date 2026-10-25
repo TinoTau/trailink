@@ -170,7 +170,8 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         approved.EnsureSuccessStatusCode();
         var afterApprove = await approved.Content.ReadFromJsonAsync<CompanyHomeDto>();
         Assert.Empty(afterApprove!.Desk!.Applications);
-        Assert.Single(afterApprove.Desk.Dispatchers);
+        Assert.Contains(afterApprove.Desk.Dispatchers, item => item.UserId == companyUser.Id);
+        Assert.Contains(afterApprove.Desk.Dispatchers, item => item.UserId == driverUser.Id);
 
         var driverMe = await driverClient.GetFromJsonAsync<SessionUserDto>("/api/auth/me");
         Assert.Equal("dispatcher", driverMe!.Role);
@@ -334,6 +335,109 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
             DispatcherUserId = dispatcherUser.Id
         });
         Assert.Equal(HttpStatusCode.BadRequest, again.StatusCode);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await companyClient.DeleteAsync($"/api/dispatchers/drivers/{applicantMe.DriverId}")).StatusCode);
+        (await dispatcherClient.DeleteAsync($"/api/dispatchers/drivers/{applicantMe.DriverId}")).EnsureSuccessStatusCode();
+        var roster = await dispatcherClient.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.DoesNotContain(roster!, item => item.Id == applicantMe.DriverId);
+        var companyRoster = await companyClient.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.DoesNotContain(companyRoster!, item => item.Id == applicantMe.DriverId);
+        var reapply = await applicantClient.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = dispatcherUser.Id
+        });
+        reapply.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task Dispatcher_unbind_reclaims_unfinished_days_only()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var companyClient = _factory.CreateClient();
+        await companyClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"firm_{suffix}",
+            Password = "Passw0rd!",
+            Name = "回收公司",
+            AccountType = "company",
+            CompanyName = $"回收公司{suffix}"
+        });
+        var companyUser = await (await companyClient.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<SessionUserDto>();
+
+        var dispatcherClient = _factory.CreateClient();
+        await dispatcherClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"disp_{suffix}",
+            Password = "Passw0rd!",
+            Name = "回收调度",
+            AccountType = "driver"
+        });
+        var dispatcherUser = await (await dispatcherClient.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<SessionUserDto>();
+        await dispatcherClient.PostAsJsonAsync("/api/companies/applications", new ApplyDispatcherDto
+        {
+            CompanyId = companyUser!.CompanyId!.Value
+        });
+        var home = await companyClient.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        await companyClient.PostAsJsonAsync($"/api/company/applications/{home!.Desk!.Applications[0].Id}/approve", new { });
+
+        var driverClient = _factory.CreateClient();
+        await driverClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"guide_{suffix}",
+            Password = "Passw0rd!",
+            Name = "回收司导",
+            AccountType = "driver"
+        });
+        var driverUser = await (await driverClient.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<SessionUserDto>();
+        await driverClient.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = dispatcherUser!.Id
+        });
+        var incoming = await dispatcherClient.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications");
+        await dispatcherClient.PostAsJsonAsync($"/api/dispatchers/applications/{incoming![0].Id}/approve", new { });
+
+        async Task<OrderReadDto> AddOrderAsync(HttpClient client, params (DateOnly Date, Guid? DriverId)[] days)
+        {
+            var created = await client.PostAsJsonAsync("/api/orders", new OrderWriteDto
+            {
+                StartDate = days[0].Date,
+                CompanyId = client == driverClient ? null : companyUser.CompanyId
+            });
+            created.EnsureSuccessStatusCode();
+            var order = await created.Content.ReadFromJsonAsync<OrderReadDto>();
+            foreach (var day in days)
+            {
+                var added = await client.PostAsJsonAsync($"/api/orders/{order!.Id}/days", new ItineraryDayWriteDto
+                {
+                    ServiceDate = day.Date,
+                    DriverId = day.DriverId
+                });
+                added.EnsureSuccessStatusCode();
+            }
+
+            return (await client.GetFromJsonAsync<OrderReadDto>($"/api/orders/{order!.Id}"))!;
+        }
+
+        var open = await AddOrderAsync(
+            dispatcherClient,
+            (today.AddDays(2), driverUser!.DriverId),
+            (today.AddDays(3), dispatcherUser!.DriverId));
+        var finished = await AddOrderAsync(dispatcherClient, (today.AddDays(-5), driverUser.DriverId));
+        var ownTrip = await AddOrderAsync(driverClient, (today.AddDays(4), driverUser.DriverId));
+
+        (await dispatcherClient.DeleteAsync($"/api/dispatchers/drivers/{driverUser.DriverId}")).EnsureSuccessStatusCode();
+
+        var openAfter = await dispatcherClient.GetFromJsonAsync<OrderReadDto>($"/api/orders/{open.Id}");
+        Assert.Null(openAfter!.Days.Single(day => day.ServiceDate == today.AddDays(2)).DriverId);
+        Assert.Equal(dispatcherUser.DriverId, openAfter.Days.Single(day => day.ServiceDate == today.AddDays(3)).DriverId);
+        var finishedAfter = await dispatcherClient.GetFromJsonAsync<OrderReadDto>($"/api/orders/{finished.Id}");
+        Assert.Equal(driverUser.DriverId, finishedAfter!.Days.Single().DriverId);
+        var ownAfter = await driverClient.GetFromJsonAsync<OrderReadDto>($"/api/orders/{ownTrip.Id}");
+        Assert.Equal(driverUser.DriverId, ownAfter!.Days.Single().DriverId);
+
+        var roster = await dispatcherClient.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.DoesNotContain(roster!, item => item.Id == driverUser.DriverId);
     }
 
     [Fact]
@@ -707,16 +811,18 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         })).EnsureSuccessStatusCode();
         var home = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
         var application = home!.Desk!.Applications.Single();
+        Assert.Equal("联系调度", application.Name);
+        Assert.Equal("微信-甲", application.Contact);
         (await company.PostAsJsonAsync($"/api/company/applications/{application.Id}/approve", new { })).EnsureSuccessStatusCode();
         var desk = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
-        var member = desk!.Desk!.Dispatchers.Single();
+        var member = desk!.Desk!.Dispatchers.Single(item => item.Name == "联系调度");
         Assert.Equal("联系调度", member.Name);
         Assert.Equal("微信-甲", member.Contact);
 
         (await dispatcher.PutAsJsonAsync("/api/auth/contact", new ProfileContactWriteDto { Contact = "  " })).EnsureSuccessStatusCode();
         Assert.Null((await dispatcher.GetFromJsonAsync<SessionUserDto>("/api/auth/me"))!.Contact);
         var cleared = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
-        Assert.Null(cleared!.Desk!.Dispatchers.Single().Contact);
+        Assert.Null(cleared!.Desk!.Dispatchers.Single(item => item.Name == "联系调度").Contact);
         Assert.Null((await other.GetFromJsonAsync<SessionUserDto>("/api/auth/me"))!.Contact);
     }
 
@@ -767,7 +873,10 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
             DispatcherUserId = dispatcherUser!.Id
         })).EnsureSuccessStatusCode();
         var incoming = await dispatcher.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications");
-        (await dispatcher.PostAsJsonAsync($"/api/dispatchers/applications/{incoming!.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+        var applicant = incoming!.Single();
+        Assert.Equal("联系司导", applicant.Name);
+        Assert.Equal("司导微信", applicant.Contact);
+        (await dispatcher.PostAsJsonAsync($"/api/dispatchers/applications/{applicant.Id}/approve", new { })).EnsureSuccessStatusCode();
 
         var listed = await dispatcher.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
         var card = listed!.Single(item => item.Id == driverUser!.DriverId);
@@ -910,7 +1019,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         var otherDispatcher = await second.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
         Assert.DoesNotContain(otherDispatcher!, item => item.Id == driverUser.DriverId);
         var companyAfter = await companyA.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
-        Assert.Contains(companyAfter!, item => item.Id == driverUser.DriverId);
+        Assert.DoesNotContain(companyAfter!, item => item.Id == driverUser.DriverId);
         var otherCompany = await companyB.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
         Assert.DoesNotContain(otherCompany!, item => item.Id == driverUser.DriverId);
 
@@ -922,5 +1031,217 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         (await second.PostAsJsonAsync($"/api/dispatchers/applications/{secondIncoming!.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
         var shared = await second.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
         Assert.Contains(shared!, item => item.Id == driverUser.DriverId);
+    }
+
+    [Fact]
+    public async Task Company_desk_lists_only_drivers_who_applied_to_the_company_account()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var company = _factory.CreateClient();
+        (await company.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"firm_{suffix}",
+            Password = "Passw0rd!",
+            Name = "人事公司",
+            AccountType = "company",
+            CompanyName = $"人事公司{suffix}"
+        })).EnsureSuccessStatusCode();
+        var companyUser = await company.GetFromJsonAsync<SessionUserDto>("/api/auth/me");
+
+        var dispatcher = _factory.CreateClient();
+        (await dispatcher.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"disp_{suffix}",
+            Password = "Passw0rd!",
+            Name = "带队调度",
+            AccountType = "driver"
+        })).EnsureSuccessStatusCode();
+        var dispatcherUser = await dispatcher.GetFromJsonAsync<SessionUserDto>("/api/auth/me");
+        (await dispatcher.PostAsJsonAsync("/api/companies/applications", new ApplyDispatcherDto
+        {
+            CompanyId = companyUser!.CompanyId!.Value
+        })).EnsureSuccessStatusCode();
+        var home = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        (await company.PostAsJsonAsync($"/api/company/applications/{home!.Desk!.Applications[0].Id}/approve", new { })).EnsureSuccessStatusCode();
+
+        var driver = _factory.CreateClient();
+        (await driver.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"guide_{suffix}",
+            Password = "Passw0rd!",
+            Name = "跟调度的司导",
+            AccountType = "driver"
+        })).EnsureSuccessStatusCode();
+        var driverUser = await driver.GetFromJsonAsync<SessionUserDto>("/api/auth/me");
+        (await driver.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = dispatcherUser!.Id
+        })).EnsureSuccessStatusCode();
+        var dispatcherIncoming = await dispatcher.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications");
+        (await dispatcher.PostAsJsonAsync($"/api/dispatchers/applications/{dispatcherIncoming!.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+
+        var companyRoster = await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.DoesNotContain(companyRoster!, item => item.Id == driverUser!.DriverId);
+
+        var found = await driver.GetFromJsonAsync<List<DispatcherSearchDto>>("/api/dispatchers?name=人事公司");
+        Assert.Contains(found!, item => item.Id == companyUser.Id);
+        (await driver.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = companyUser.Id
+        })).EnsureSuccessStatusCode();
+        var beforeApprove = await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.DoesNotContain(beforeApprove!, item => item.Id == driverUser!.DriverId);
+
+        var incoming = (await company.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications"))!;
+        Assert.Equal("跟调度的司导", incoming.Single().Name);
+        (await company.PostAsJsonAsync($"/api/dispatchers/applications/{incoming.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+
+        var after = (await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers"))!;
+        var listed = Assert.Single(after, item => item.Id == driverUser!.DriverId);
+        Assert.False(listed.Hidden);
+    }
+
+    [Fact]
+    public async Task Every_account_starts_as_its_own_approved_driver()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var company = _factory.CreateClient();
+        (await company.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"selfco_{suffix}",
+            Password = "Passw0rd!",
+            Name = "自派公司",
+            AccountType = "company",
+            CompanyName = $"自派公司全称{suffix}"
+        })).EnsureSuccessStatusCode();
+        var companyUser = (await company.GetFromJsonAsync<SessionUserDto>("/api/auth/me"))!;
+        Assert.Empty(companyUser.PendingDriverApplications);
+        var companyRoster = (await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers"))!;
+        var companySelf = Assert.Single(companyRoster);
+        Assert.Equal(companyUser.DriverId, companySelf.Id);
+        Assert.Equal("自派公司", companySelf.Name);
+        Assert.False(companySelf.Hidden);
+
+        var dispatcher = _factory.CreateClient();
+        (await dispatcher.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"selfdd_{suffix}",
+            Password = "Passw0rd!",
+            Name = "自派调度",
+            AccountType = "driver"
+        })).EnsureSuccessStatusCode();
+        var dispatcherUser = (await dispatcher.GetFromJsonAsync<SessionUserDto>("/api/auth/me"))!;
+        var selfApply = await dispatcher.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = dispatcherUser.Id
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, selfApply.StatusCode);
+
+        (await dispatcher.PostAsJsonAsync("/api/companies/applications", new ApplyDispatcherDto
+        {
+            CompanyId = companyUser.CompanyId!.Value
+        })).EnsureSuccessStatusCode();
+        var home = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        (await company.PostAsJsonAsync($"/api/company/applications/{home!.Desk!.Applications.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+
+        var desk = (await dispatcher.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers"))!;
+        var dispatcherSelf = Assert.Single(desk);
+        Assert.Equal(dispatcherUser.DriverId, dispatcherSelf.Id);
+        Assert.False(dispatcherSelf.Hidden);
+
+        (await dispatcher.PutAsJsonAsync($"/api/drivers/{dispatcherUser.DriverId}/hidden", new DriverHiddenWriteDto
+        {
+            Hidden = true
+        })).EnsureSuccessStatusCode();
+        var unbind = await dispatcher.DeleteAsync($"/api/dispatchers/drivers/{dispatcherUser.DriverId}");
+        Assert.Equal(HttpStatusCode.BadRequest, unbind.StatusCode);
+        var stillThere = (await dispatcher.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers"))!;
+        Assert.Contains(stillThere, item => item.Id == dispatcherUser.DriverId && item.Hidden);
+    }
+
+    [Fact]
+    public async Task Company_is_its_own_dispatcher_and_can_hide_or_remove_others()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var date = new DateOnly(2038, 6, 2);
+        var company = _factory.CreateClient();
+        var companyUser = await TestAuth.RegisterAsync(company, $"owndd_{suffix}", "自派调度公司", "company", $"自派调度公司{suffix}");
+        var home = (await company.GetFromJsonAsync<CompanyHomeDto>("/api/company"))!;
+        var self = Assert.Single(home.Desk!.Dispatchers);
+        Assert.Equal(companyUser.Id, self.UserId);
+        Assert.False(self.Hidden);
+        Assert.Equal(UserRoles.Company, (await company.GetFromJsonAsync<SessionUserDto>("/api/auth/me"))!.Role);
+
+        var plain = _factory.CreateClient();
+        var plainUser = await TestAuth.RegisterAsync(plain, $"ownplain_{suffix}", "普通司导", "driver");
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<TrailinkDbContext>();
+            Assert.False(db.CompanyMembers.Any(item => item.UserId == plainUser.Id && item.Role == UserRoles.Dispatcher));
+        }
+
+        var denied = await company.DeleteAsync($"/api/company/dispatchers/{companyUser.Id}");
+        Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+        Assert.Contains((await company.GetFromJsonAsync<CompanyHomeDto>("/api/company"))!.Desk!.Dispatchers, item => item.UserId == companyUser.Id);
+
+        var dispatcher = _factory.CreateClient();
+        var dispatcherUser = await TestAuth.RegisterAsync(dispatcher, $"owndisp_{suffix}", "可移除调度", "driver");
+        (await dispatcher.PostAsJsonAsync("/api/companies/applications", new ApplyDispatcherDto
+        {
+            CompanyId = companyUser.CompanyId!.Value
+        })).EnsureSuccessStatusCode();
+        var pending = (await company.GetFromJsonAsync<CompanyHomeDto>("/api/company"))!;
+        (await company.PostAsJsonAsync($"/api/company/applications/{pending.Desk!.Applications.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+
+        var order = await company.PostAsJsonAsync("/api/orders", new OrderWriteDto
+        {
+            PlatformOrderNo = $"P-DD-{suffix}",
+            StartDate = date,
+            GuestCount = 1
+        });
+        order.EnsureSuccessStatusCode();
+        var created = (await order.Content.ReadFromJsonAsync<OrderReadDto>())!;
+        (await company.PostAsJsonAsync($"/api/orders/{created.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = date
+        })).EnsureSuccessStatusCode();
+        (await company.PutAsJsonAsync($"/api/orders/{created.Id}/dispatcher", new AssignDispatcherDto
+        {
+            DispatcherUserId = dispatcherUser.Id
+        })).EnsureSuccessStatusCode();
+
+        var finishedResponse = await company.PostAsJsonAsync("/api/orders", new OrderWriteDto
+        {
+            PlatformOrderNo = $"P-DONE-{suffix}",
+            StartDate = new DateOnly(2020, 1, 2),
+            GuestCount = 1
+        });
+        finishedResponse.EnsureSuccessStatusCode();
+        var finished = (await finishedResponse.Content.ReadFromJsonAsync<OrderReadDto>())!;
+        (await company.PostAsJsonAsync($"/api/orders/{finished.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2020, 1, 2)
+        })).EnsureSuccessStatusCode();
+        (await company.PutAsJsonAsync($"/api/orders/{finished.Id}/dispatcher", new AssignDispatcherDto
+        {
+            DispatcherUserId = dispatcherUser.Id
+        })).EnsureSuccessStatusCode();
+
+        (await company.PutAsJsonAsync($"/api/company/dispatchers/{dispatcherUser.Id}/hidden", new DriverHiddenWriteDto
+        {
+            Hidden = true
+        })).EnsureSuccessStatusCode();
+        var hidden = (await company.GetFromJsonAsync<CompanyHomeDto>("/api/company"))!;
+        Assert.True(hidden.Desk!.Dispatchers.Single(item => item.UserId == dispatcherUser.Id).Hidden);
+        Assert.False(hidden.Desk.Dispatchers.Single(item => item.UserId == companyUser.Id).Hidden);
+
+        (await company.DeleteAsync($"/api/company/dispatchers/{dispatcherUser.Id}")).EnsureSuccessStatusCode();
+        var after = (await company.GetFromJsonAsync<CompanyHomeDto>("/api/company"))!;
+        Assert.DoesNotContain(after.Desk!.Dispatchers, item => item.UserId == dispatcherUser.Id);
+        var reclaimed = (await company.GetFromJsonAsync<OrderReadDto>($"/api/orders/{created.Id}"))!;
+        Assert.Null(reclaimed.AssignedDispatcherUserId);
+        Assert.All(reclaimed.Days, day => Assert.Null(day.DriverId));
+        var kept = (await company.GetFromJsonAsync<OrderReadDto>($"/api/orders/{finished.Id}"))!;
+        Assert.Equal(dispatcherUser.Id, kept.AssignedDispatcherUserId);
     }
 }

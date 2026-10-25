@@ -155,6 +155,12 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("dispatcher_user_id");
 
+                    b.Property<bool>("Hidden")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("hidden");
+
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("text")
@@ -240,6 +246,12 @@ namespace Trailink.Api.Data.Migrations
                     b.Property<Guid>("DriverId")
                         .HasColumnType("uuid")
                         .HasColumnName("driver_id");
+
+                    b.Property<bool>("Hidden")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("hidden");
 
                     b.Property<string>("Notes")
                         .IsRequired()

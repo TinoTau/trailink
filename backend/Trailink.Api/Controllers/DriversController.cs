@@ -20,17 +20,22 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
             .ToListAsync(cancellationToken);
         var driverIds = drivers.Select(driver => driver.Id).ToList();
         var userId = user?.Id;
-        var notes = userId is Guid id
+        var noteRows = userId is Guid id
             ? await db.DriverNotes
                 .Where(note => note.UserId == id && driverIds.Contains(note.DriverId))
-                .ToDictionaryAsync(note => note.DriverId, note => note.Notes, cancellationToken)
+                .Select(note => new { note.DriverId, note.Notes, note.Hidden })
+                .ToListAsync(cancellationToken)
             : [];
+        var notes = noteRows.ToDictionary(
+            note => note.DriverId,
+            note => new ViewerNote(note.Notes, note.Hidden));
         var accounts = await AccountProfilesAsync(driverIds, cancellationToken);
 
         return Ok(drivers.Select(driver =>
         {
             accounts.TryGetValue(driver.Id, out var account);
-            return ToRead(driver, notes.GetValueOrDefault(driver.Id), account?.Name, account?.Contact);
+            notes.TryGetValue(driver.Id, out var note);
+            return ToRead(driver, note?.Notes, account?.Name, account?.Contact, note?.Hidden ?? false);
         }).ToList());
     }
 
@@ -104,7 +109,29 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
             return NotFound();
         }
 
-        await UpsertNoteAsync(driver.Id, request.Notes, cancellationToken);
+        if (session.UserId is Guid userId)
+        {
+            await ViewerNotes.UpsertDriverAsync(db, driver.Id, userId, request.Notes, cancellationToken);
+        }
+        return Ok(await ToReadAsync(driver, cancellationToken));
+    }
+
+    [HttpPut("{id:guid}/hidden")]
+    public async Task<ActionResult<DriverReadDto>> UpdateHidden(
+        Guid id,
+        DriverHiddenWriteDto request,
+        CancellationToken cancellationToken)
+    {
+        var driver = await db.Drivers.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (driver is null || !await CanReadAsync(driver.Id, cancellationToken))
+        {
+            return NotFound();
+        }
+
+        if (session.UserId is Guid userId)
+        {
+            await ViewerNotes.SetDriverHiddenAsync(db, driver.Id, userId, request.Hidden, cancellationToken);
+        }
         return Ok(await ToReadAsync(driver, cancellationToken));
     }
 
@@ -144,44 +171,23 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
 
     private async Task<DriverReadDto> ToReadAsync(Driver driver, CancellationToken cancellationToken)
     {
-        var notes = session.UserId is Guid userId
-            ? await db.DriverNotes
-                .Where(note => note.DriverId == driver.Id && note.UserId == userId)
-                .Select(note => note.Notes)
-                .FirstOrDefaultAsync(cancellationToken)
-            : null;
+        ViewerNote? note = null;
+        if (session.UserId is Guid userId)
+        {
+            var row = await db.DriverNotes
+                .Where(item => item.DriverId == driver.Id && item.UserId == userId)
+                .Select(item => new { item.Notes, item.Hidden })
+                .FirstOrDefaultAsync(cancellationToken);
+            note = row is null ? null : new ViewerNote(row.Notes, row.Hidden);
+        }
         var account = await db.Users
             .Where(item => item.DriverId == driver.Id)
             .Select(item => new { item.Name, item.Contact })
             .FirstOrDefaultAsync(cancellationToken);
-        return ToRead(driver, notes, account?.Name, account?.Contact);
+        return ToRead(driver, note?.Notes, account?.Name, account?.Contact, note?.Hidden ?? false);
     }
 
-    private IQueryable<Driver> VisibleDrivers(User? user)
-    {
-        if (user?.Role == UserRoles.Dispatcher)
-        {
-            return db.Drivers.Where(driver => db.DriverApplications.Any(application =>
-                application.DispatcherUserId == user.Id &&
-                application.ApprovedAt != null &&
-                application.User.DriverId == driver.Id));
-        }
-
-        if (user?.Role == UserRoles.Company && user.CompanyId is Guid companyId)
-        {
-            return db.Drivers.Where(driver => db.CompanyMembers.Any(member =>
-                member.CompanyId == companyId &&
-                member.Role == UserRoles.Driver &&
-                member.User.DriverId == driver.Id));
-        }
-
-        if (user?.Role == UserRoles.Driver && user.DriverId is Guid ownId)
-        {
-            return db.Drivers.Where(driver => driver.Id == ownId);
-        }
-
-        return db.Drivers.Where(driver => false);
-    }
+    private IQueryable<Driver> VisibleDrivers(User? user) => DriverRoster.Visible(db, user);
 
     private async Task<bool> CanReadAsync(Guid driverId, CancellationToken cancellationToken)
     {
@@ -208,38 +214,21 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
             .ToDictionary(group => group.Key, group => new AccountProfile(group.First().Name, group.First().Contact));
     }
 
-    private static DriverReadDto ToRead(Driver driver, string? notes, string? accountName = null, string? accountContact = null) => new()
+    private static DriverReadDto ToRead(
+        Driver driver,
+        string? notes,
+        string? accountName = null,
+        string? accountContact = null,
+        bool hidden = false) => new()
     {
         Id = driver.Id,
         Name = string.IsNullOrWhiteSpace(accountName) ? driver.Name : accountName,
         Phone = driver.Phone,
         Contact = string.IsNullOrWhiteSpace(accountContact) ? null : accountContact,
-        Notes = notes
+        Notes = string.IsNullOrWhiteSpace(notes) ? null : notes,
+        Hidden = hidden
     };
 
     private sealed record AccountProfile(string Name, string? Contact);
-
-    private async Task UpsertNoteAsync(Guid driverId, string? notes, CancellationToken cancellationToken)
-    {
-        if (session.UserId is not Guid userId)
-        {
-            return;
-        }
-
-        var trimmed = notes?.Trim();
-        if (string.IsNullOrEmpty(trimmed))
-        {
-            await db.DriverNotes
-                .Where(note => note.DriverId == driverId && note.UserId == userId)
-                .ExecuteDeleteAsync(cancellationToken);
-            return;
-        }
-
-        // 失焦和点保存可能同时插入同一行，用冲突更新而不是先查再插。
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO driver_notes (id, driver_id, user_id, notes)
-            VALUES ({Guid.NewGuid()}, {driverId}, {userId}, {trimmed})
-            ON CONFLICT (driver_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
-            """, cancellationToken);
-    }
+    private sealed record ViewerNote(string? Notes, bool Hidden);
 }

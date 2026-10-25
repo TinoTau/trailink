@@ -80,6 +80,17 @@
   gap: 8px;
 }
 
+.dispatcher-hidden-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dispatcher-icon-btn.danger.release {
+  color: #ff4d4f;
+  box-shadow: 0 0 0 2px #ff4d4f;
+}
+
 a.dispatcher-chip {
   text-decoration: none;
 }

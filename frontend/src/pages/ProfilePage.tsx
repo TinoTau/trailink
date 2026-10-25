@@ -1,17 +1,13 @@
 import { message } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { keepDraft, usePageLoad } from '../usePageLoad'
 import { authApi, companyApi, dispatcherApi } from '../api/auth'
 import { useAuthenticatedAuth } from '../auth/authState'
 import { AccountMenu } from './AccountMenu'
 import { FileField } from './FileField'
 import type { CompanySearch, DispatcherSearch, DriverApplicant } from '../types'
+import { contactLabel } from '../text'
 import './account.css'
-
-const roleLabel = {
-  company: '公司',
-  dispatcher: '调度员',
-  driver: '司导',
-} as const
 
 export function ProfilePage() {
   const { user, refresh, setUser } = useAuthenticatedAuth()
@@ -30,31 +26,47 @@ export function ProfilePage() {
   const [username, setUsername] = useState(user.username)
   const [currentPassword, setCurrentPassword] = useState('')
   const [nextPassword, setNextPassword] = useState('')
+  const nameRef = useRef(name)
+  const contactRef = useRef(contact)
+  const usernameRef = useRef(username)
+  const loadedName = useRef<string | undefined>(undefined)
+  const loadedContact = useRef<string | undefined>(undefined)
+  const loadedUsername = useRef<string | undefined>(undefined)
 
   useEffect(() => {
-    if (user.role !== 'dispatcher') {
-      return
-    }
+    nameRef.current = name
+    contactRef.current = contact
+    usernameRef.current = username
+  })
 
-    let active = true
-    dispatcherApi
-      .incoming()
-      .then((items) => {
-        if (active) {
-          setApplicants(items)
-          setApplicantsReady(true)
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          setApplicantsReady(true)
+  usePageLoad(async () => {
+    try {
+      const next = await authApi.me()
+      setUser(next)
+      const nextName = keepDraft(nameRef.current, loadedName.current, next.name)
+      const nextContact = keepDraft(contactRef.current, loadedContact.current, next.contact ?? '')
+      const nextUsername = keepDraft(usernameRef.current, loadedUsername.current, next.username)
+      loadedName.current = next.name
+      loadedContact.current = next.contact ?? ''
+      loadedUsername.current = next.username
+      nameRef.current = nextName
+      contactRef.current = nextContact
+      usernameRef.current = nextUsername
+      setName(nextName)
+      setContact(nextContact)
+      setUsername(nextUsername)
+      if (next.role === 'dispatcher' || next.role === 'company') {
+        try {
+          setApplicants(await dispatcherApi.incoming())
+        } catch (error) {
           message.error(error instanceof Error ? error.message : '加载司导申请失败')
         }
-      })
-    return () => {
-      active = false
+      }
+      setApplicantsReady(true)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '加载个人信息失败')
     }
-  }, [user.role])
+  })
 
   async function searchCompanies() {
     setBusy(true)
@@ -280,9 +292,6 @@ export function ProfilePage() {
           </div>
           <p className="account-hint">上传头像后会自动压缩，页面只加载小图。</p>
           <div className="profile-meta">
-            <p>
-              角色 <span>{roleLabel[user.role]}</span>
-            </p>
             {user.companies?.length ? (
               <p>
                 所属公司 <span>{user.companies.map((company) => company.name).join('、')}</span>
@@ -331,10 +340,11 @@ export function ProfilePage() {
               </label>
               <input
                 id="profile-current-password"
-                type="password"
+                type="text"
                 value={currentPassword}
-                autoComplete="current-password"
+                autoComplete="off"
                 aria-label="当前密码"
+                spellCheck={false}
                 onChange={(event) => setCurrentPassword(event.target.value)}
               />
             </div>
@@ -344,10 +354,11 @@ export function ProfilePage() {
               </label>
               <input
                 id="profile-new-password"
-                type="password"
+                type="text"
                 value={nextPassword}
-                autoComplete="new-password"
+                autoComplete="off"
                 aria-label="新密码"
+                spellCheck={false}
                 onChange={(event) => setNextPassword(event.target.value)}
               />
               <button
@@ -362,15 +373,19 @@ export function ProfilePage() {
           </div>
         </section>
 
-        {user.role === 'dispatcher' ? (
+        {user.role === 'dispatcher' || user.role === 'company' ? (
           <section className="account-section profile-block">
             <h2>司导申请</h2>
-            <p className="account-hint">搜索你名字并提交申请的人会出现在这里，批准后加入你所在的公司。</p>
+            <p className="account-hint">
+              {user.role === 'company'
+                ? '搜索你的姓名并提交申请的人会出现在这里，批准后出现在你的调度台。'
+                : '搜索你名字并提交申请的人会出现在这里，批准后加入你所在的公司。'}
+            </p>
             {applicantsReady && applicants.length === 0 ? <p className="account-empty">暂无申请</p> : null}
             {applicants.map((item) => (
               <div className="account-row" key={item.id}>
                 <p>
-                  {item.name} <span>{item.username}</span>
+                  {item.name} <span>{contactLabel(item.contact)}</span>
                 </p>
                 <button
                   type="button"
@@ -389,11 +404,11 @@ export function ProfilePage() {
           <>
             <section className="account-section profile-block">
               <h2>申请成为司导</h2>
-              <p className="account-hint">搜索调度员姓名，提交申请后等待对方批准。</p>
+              <p className="account-hint">搜索调度员或公司账户的姓名，提交申请后等待对方批准。</p>
               <div className="account-search">
                 <input
                   value={dispatcherKeyword}
-                  placeholder="调度员姓名"
+                  placeholder="姓名"
                   onChange={(event) => {
                     setDispatcherKeyword(event.target.value)
                     setDispatcherSearched(false)

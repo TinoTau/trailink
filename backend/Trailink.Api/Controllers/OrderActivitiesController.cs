@@ -59,7 +59,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
             Id = Guid.NewGuid(),
             ItineraryDayId = dayId,
             Content = request.Content.Trim(),
-            Provider = TrimToNull(request.Provider),
+            Provider = TextValue.NullIfBlank(request.Provider),
             BookingTime = AsUnspecified(request.BookingTime),
             CheckinTime = AsUnspecified(request.CheckinTime),
             SortOrder = nextOrder + 1
@@ -93,7 +93,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
         }
 
         activity.Content = request.Content.Trim();
-        activity.Provider = TrimToNull(request.Provider);
+        activity.Provider = TextValue.NullIfBlank(request.Provider);
         activity.BookingTime = AsUnspecified(request.BookingTime);
         activity.CheckinTime = AsUnspecified(request.CheckinTime);
         await db.SaveChangesAsync(cancellationToken);
@@ -255,11 +255,6 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
     private static string? Validate(OrderActivityWriteDto request)
     {
         return string.IsNullOrWhiteSpace(request.Content) ? "活动内容不能为空。" : null;
-    }
-
-    private static string? TrimToNull(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private static DateTime? AsUnspecified(DateTime? value)

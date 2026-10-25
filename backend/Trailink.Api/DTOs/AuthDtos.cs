@@ -117,6 +117,7 @@ public class DriverApplicantDto
     public Guid UserId { get; set; }
     public string Username { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? Contact { get; set; }
 }
 
 public class ApplyDispatcherDto
@@ -168,8 +169,8 @@ public class CompanyApplicationDto
 {
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
-    public string Username { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? Contact { get; set; }
 }
 
 public class CompanyMemberDto
@@ -179,6 +180,7 @@ public class CompanyMemberDto
     public string Name { get; set; } = string.Empty;
     public string? Contact { get; set; }
     public string? Notes { get; set; }
+    public bool Hidden { get; set; }
 }
 
 public class DispatcherNoteWriteDto

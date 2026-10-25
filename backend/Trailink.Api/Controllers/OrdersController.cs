@@ -16,6 +16,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         [FromQuery] DateOnly? startDate,
         [FromQuery] DateOnly? endDate,
         [FromQuery] string? orderNo,
+        [FromQuery] Guid? driverId,
         CancellationToken cancellationToken)
     {
         var query = db.Orders
@@ -30,12 +31,24 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             .AsQueryable();
 
         var user = await session.GetUserAsync(cancellationToken);
+        var deskTrips = false;
         if (!string.IsNullOrWhiteSpace(orderNo))
         {
             var key = orderNo.Trim();
             query = query.Where(order =>
                 order.OrderNo == key ||
                 order.PlatformOrderNo == key);
+        }
+        else if (driverId is Guid requestedDriver)
+        {
+            if (user is not { Role: UserRoles.Dispatcher or UserRoles.Company }
+                || !await DriverRoster.Visible(db, user).AnyAsync(driver => driver.Id == requestedDriver, cancellationToken))
+            {
+                return Ok(new List<OrderReadDto>());
+            }
+
+            deskTrips = true;
+            query = query.Where(order => order.Days.Any(day => day.DriverId == requestedDriver));
         }
         else if (user?.Role == UserRoles.Dispatcher)
         {
@@ -45,9 +58,9 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         {
             query = query.Where(order => order.CompanyId == companyId);
         }
-        else if (user?.DriverId is Guid driverId)
+        else if (user?.DriverId is Guid ownDriverId)
         {
-            query = query.Where(order => order.Days.Any(day => day.DriverId == driverId));
+            query = query.Where(order => order.Days.Any(day => day.DriverId == ownDriverId));
         }
 
         if (startDate is not null && endDate is not null)
@@ -62,12 +75,21 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             .ThenBy(order => order.OrderNo)
             .ToListAsync(cancellationToken);
         var notes = await ViewerNotesAsync(user, cancellationToken);
-        var companyNotes = await ViewerCompanyNotesAsync(user, orders, cancellationToken);
+        var notedOrders = deskTrips ? orders.Where(order => InDeskScope(user, order)) : orders;
+        var companyNotes = await ViewerCompanyNotesAsync(user, notedOrders, cancellationToken);
 
         return Ok(orders.Select(order =>
         {
             var dto = VisibleNotes(ToSummary(order, notes.GetValueOrDefault(order.Id)), user?.Role);
-            ApplyCompanyNote(dto, companyNotes);
+            if (deskTrips && !InDeskScope(user, order))
+            {
+                HideOutsideDesk(dto);
+            }
+            else
+            {
+                ApplyCompanyNote(dto, companyNotes);
+            }
+
             return dto;
         }).ToList());
     }
@@ -100,7 +122,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         {
             Id = Guid.NewGuid(),
             OrderNo = Order.NewOrderNo(),
-            PlatformOrderNo = TrimToNull(request.PlatformOrderNo),
+            PlatformOrderNo = TextValue.NullIfBlank(request.PlatformOrderNo),
             StartDate = request.StartDate,
             GuestCount = request.GuestCount,
             DriverNotes = request.DriverNotes,
@@ -153,7 +175,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
 
         if (user?.Role != UserRoles.Driver)
         {
-            order.PlatformOrderNo = TrimToNull(request.PlatformOrderNo);
+            order.PlatformOrderNo = TextValue.NullIfBlank(request.PlatformOrderNo);
         }
         order.StartDate = request.StartDate;
         order.GuestCount = request.GuestCount;
@@ -191,7 +213,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
 
             if (order.CompanyId is Guid)
             {
-                ReturnToCompanyPool(order);
+                OrderDriverAssignment.ReturnToCompanyPool(order);
                 await db.SaveChangesAsync(cancellationToken);
                 return NoContent();
             }
@@ -370,13 +392,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
 
         if (request.DispatcherUserId is Guid dispatcherId)
         {
-            var isDispatcher = await db.CompanyMembers.AnyAsync(
-                member =>
-                    member.CompanyId == companyId &&
-                    member.UserId == dispatcherId &&
-                    member.Role == UserRoles.Dispatcher,
-                cancellationToken);
-            if (!isDispatcher)
+            if (!await CompanyMembership.IsDispatcherAsync(db, companyId, dispatcherId, cancellationToken))
             {
                 return Problem(title: "Validation error", detail: "只能分配给本公司的调度员。", statusCode: StatusCodes.Status400BadRequest);
             }
@@ -386,7 +402,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         }
         else
         {
-            ReturnToCompanyPool(order);
+            OrderDriverAssignment.ReturnToCompanyPool(order);
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -412,9 +428,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
 
     internal static OrderReadDto ToSummary(Order order, string? notes = null)
     {
-        var endDate = order.Days.Count == 0
-            ? (DateOnly?)null
-            : order.Days.Max(day => day.ServiceDate);
+        var endDate = OrderScheduling.EndDate(order.Days);
         var assignedDays = order.Days.Where(day => day.DriverId is not null).ToList();
 
         return new OrderReadDto
@@ -588,13 +602,35 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
 
     private void RemoveOrderFiles(Order order) => files.DeleteOrderAttachments(order);
 
-    private static void ReturnToCompanyPool(Order order)
+    private static bool InDeskScope(User? user, Order order)
     {
-        order.AssignedDispatcherUserId = null;
-        foreach (var day in order.Days)
+        if (user?.Role == UserRoles.Company)
         {
-            day.DriverId = null;
-            day.AssignedByUserId = null;
+            return order.CompanyId == user.CompanyId;
+        }
+
+        return user?.Role == UserRoles.Dispatcher && order.AssignedDispatcherUserId == user.Id;
+    }
+
+    private static void HideOutsideDesk(OrderReadDto dto)
+    {
+        dto.PlatformOrderNo = null;
+        dto.CompanyName = null;
+        dto.CompanyNote = null;
+        dto.CreatedByName = null;
+        dto.AssignedDispatcherName = null;
+        dto.AssignedDispatcherContact = null;
+        dto.Notes = null;
+        dto.DriverNotes = null;
+        dto.GuestCount = 0;
+        dto.Files = [];
+        foreach (var day in dto.Days)
+        {
+            day.Description = null;
+            day.EndLocation = null;
+            day.AssignedByName = null;
+            day.AssignedByContact = null;
+            day.Activities = [];
         }
     }
 
@@ -606,10 +642,5 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         }
 
         return dto;
-    }
-
-    private static string? TrimToNull(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }

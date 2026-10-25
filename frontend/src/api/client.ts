@@ -45,7 +45,14 @@ export const api = {
   get: <T>(url: string) => request<T>(url),
   post: <T>(url: string, body: unknown) =>
     request<T>(url, { method: 'POST', body: JSON.stringify(body) }),
-  postForm: <T>(url: string, body: FormData) => requestForm<T>(url, body),
+  postFile: <T>(url: string, file: File, fields?: Record<string, string>) => {
+    const body = new FormData()
+    for (const [key, value] of Object.entries(fields ?? {})) {
+      body.append(key, value)
+    }
+    body.append('file', file)
+    return requestForm<T>(url, body)
+  },
   put: <T>(url: string, body: unknown) =>
     request<T>(url, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (url: string) => request<void>(url, { method: 'DELETE' }),

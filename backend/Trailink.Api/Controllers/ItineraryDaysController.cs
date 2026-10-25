@@ -55,10 +55,9 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             OrderId = orderId,
             ServiceDate = request.ServiceDate,
             Description = request.Description,
-            EndLocation = request.EndLocation,
-            DriverId = request.DriverId,
-            AssignedByUserId = request.DriverId is null ? null : user?.Id
+            EndLocation = request.EndLocation
         };
+        OrderDriverAssignment.SetDayDriver(day, request.DriverId, user?.Id);
 
         db.ItineraryDays.Add(day);
         var warnings = await CollectWarningsAsync(order, request.DriverId, request.ServiceDate, cancellationToken);
@@ -126,8 +125,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         day.ServiceDate = request.ServiceDate;
         day.Description = request.Description;
         day.EndLocation = request.EndLocation;
-        day.DriverId = request.DriverId;
-        day.AssignedByUserId = request.DriverId is null ? null : user?.Id;
+        OrderDriverAssignment.SetDayDriver(day, request.DriverId, user?.Id);
         if (request.DriverId is Guid linkedDriverId)
         {
             await assignment.LinkDriverToCompanyAsync(order, linkedDriverId, day.AssignedByUserId, cancellationToken);

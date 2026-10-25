@@ -11,6 +11,42 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
     public static Guid? AssignerId(Order order, ItineraryDay day) =>
         day.AssignedByUserId ?? order.CreatedByUserId;
 
+    public static void SetDayDriver(ItineraryDay day, Guid? driverId, Guid? assignedByUserId)
+    {
+        day.DriverId = driverId;
+        day.AssignedByUserId = driverId is null ? null : assignedByUserId;
+    }
+
+    public static void ReturnToCompanyPool(Order order)
+    {
+        order.AssignedDispatcherUserId = null;
+        foreach (var day in order.Days)
+        {
+            SetDayDriver(day, null, null);
+        }
+    }
+
+    public async Task ReturnUnfinishedOrdersAsync(
+        Guid companyId,
+        Guid dispatcherUserId,
+        CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var orders = await db.Orders
+            .Include(order => order.Days)
+            .Where(order => order.CompanyId == companyId && order.AssignedDispatcherUserId == dispatcherUserId)
+            .ToListAsync(cancellationToken);
+        foreach (var order in orders)
+        {
+            if (OrderScheduling.EndDate(order.Days) is DateOnly end && end < today)
+            {
+                continue;
+            }
+
+            ReturnToCompanyPool(order);
+        }
+    }
+
     public static Guid? AssignerFor(User? user, Order order, Guid? driverId)
     {
         if (driverId is Guid claimedDriverId &&
@@ -104,8 +140,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
 
         foreach (var day in order.Days)
         {
-            day.DriverId = driverId;
-            day.AssignedByUserId = driverId is null ? null : assignedByUserId;
+            SetDayDriver(day, driverId, assignedByUserId);
         }
 
         if (driverId is Guid linkedDriverId)
@@ -160,6 +195,47 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
         });
     }
 
+    public async Task ReclaimUnfinishedDaysAsync(User dispatcher, Guid driverId, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var orderIds = await db.ItineraryDays
+            .Where(day => day.DriverId == driverId)
+            .Select(day => day.OrderId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (orderIds.Count == 0)
+        {
+            return;
+        }
+
+        var orders = await db.Orders
+            .Include(order => order.Days)
+            .Where(order => orderIds.Contains(order.Id))
+            .ToListAsync(cancellationToken);
+        foreach (var order in orders)
+        {
+            if (OrderScheduling.EndDate(order.Days) is not DateOnly end || end < today)
+            {
+                continue;
+            }
+
+            foreach (var day in order.Days)
+            {
+                if (day.DriverId != driverId)
+                {
+                    continue;
+                }
+
+                if (order.AssignedDispatcherUserId != dispatcher.Id && AssignerId(order, day) != dispatcher.Id)
+                {
+                    continue;
+                }
+
+                SetDayDriver(day, null, null);
+            }
+        }
+    }
+
     private async Task<bool> AssignerRepresentsCompanyAsync(
         Guid companyId,
         Guid assignerUserId,
@@ -176,12 +252,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
             return true;
         }
 
-        return await db.CompanyMembers.AnyAsync(
-            member =>
-                member.UserId == assignerUserId &&
-                member.CompanyId == companyId &&
-                member.Role == UserRoles.Dispatcher,
-            cancellationToken);
+        return await CompanyMembership.IsDispatcherAsync(db, companyId, assignerUserId, cancellationToken);
     }
 }
 

@@ -78,10 +78,13 @@ export function updateOrderInfo(
 }
 
 export const ordersApi = {
-  list: (params?: { orderNo?: string }) => {
+  list: (params?: { orderNo?: string; driverId?: string }) => {
     const search = new URLSearchParams()
     if (params?.orderNo) {
       search.set('orderNo', params.orderNo)
+    }
+    if (params?.driverId) {
+      search.set('driverId', params.driverId)
     }
     const query = search.toString()
     return api.get<Order[]>(query ? `/api/orders?${query}` : '/api/orders')
@@ -109,18 +112,11 @@ export const ordersApi = {
     api.delete(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}`),
   reorderActivities: (orderId: string, dayId: string, activityIds: string[]) =>
     api.put<OrderActivity[]>(`/api/orders/${orderId}/days/${dayId}/activities/reorder`, { activityIds }),
-  uploadFile: (orderId: string, file: File) => {
-    const body = new FormData()
-    body.append('file', file)
-    return api.postForm<OrderFile>(`/api/orders/${orderId}/files`, body)
-  },
+  uploadFile: (orderId: string, file: File) => api.postFile<OrderFile>(`/api/orders/${orderId}/files`, file),
   removeFile: (orderId: string, fileId: string) => api.delete(`/api/orders/${orderId}/files/${fileId}`),
   fileUrl: (orderId: string, fileId: string) => `/api/orders/${orderId}/files/${fileId}`,
-  uploadTicket: (orderId: string, dayId: string, activityId: string, file: File) => {
-    const body = new FormData()
-    body.append('file', file)
-    return api.postForm<OrderActivity>(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`, body)
-  },
+  uploadTicket: (orderId: string, dayId: string, activityId: string, file: File) =>
+    api.postFile<OrderActivity>(`/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`, file),
   ticketUrl: (orderId: string, dayId: string, activityId: string) =>
     `/api/orders/${orderId}/days/${dayId}/activities/${activityId}/ticket`,
 }

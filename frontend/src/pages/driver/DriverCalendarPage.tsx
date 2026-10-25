@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { usePageLoad } from '../../usePageLoad'
 import { message } from 'antd'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { AccountMenu } from '../AccountMenu'
@@ -126,11 +127,7 @@ export function DriverCalendarPage() {
     }
   }
 
-  useEffect(() => {
-    // 初次挂载从服务端读取本人行程。
-    // oxlint-disable-next-line react/set-state-in-effect
-    void loadBoard()
-  }, [])
+  usePageLoad(loadBoard)
 
   useEffect(() => {
     const revealDate = pendingRevealDate.current

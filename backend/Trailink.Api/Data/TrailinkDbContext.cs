@@ -39,6 +39,7 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.DriverId).HasColumnName("driver_id");
             entity.Property(x => x.UserId).HasColumnName("user_id");
             entity.Property(x => x.Notes).HasColumnName("notes").IsRequired();
+            entity.Property(x => x.Hidden).HasColumnName("hidden").HasDefaultValue(false);
             entity.HasIndex(x => new { x.DriverId, x.UserId }).IsUnique();
 
             entity.HasOne(x => x.Driver)
@@ -193,6 +194,7 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.DispatcherUserId).HasColumnName("dispatcher_user_id");
             entity.Property(x => x.UserId).HasColumnName("user_id");
             entity.Property(x => x.Notes).HasColumnName("notes").IsRequired();
+            entity.Property(x => x.Hidden).HasColumnName("hidden").HasDefaultValue(false);
             entity.HasIndex(x => new { x.DispatcherUserId, x.UserId }).IsUnique();
 
             entity.HasOne(x => x.Dispatcher)

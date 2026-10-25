@@ -15,12 +15,23 @@ export function orderDisplayLabel(order: {
   return clipTileLabel(raw)
 }
 
+const ACTIVITY_JOIN = '-'
+
+export function formatActivityLine(parts: string[]) {
+  return parts.join(ACTIVITY_JOIN)
+}
+
+export function parseActivityLine(raw: string) {
+  return raw.split(ACTIVITY_JOIN).map((item) => item.trim()).filter(Boolean)
+}
+
 export function dayActivityLine(activities: { content?: string | null; sortOrder?: number }[]) {
-  return [...activities]
-    .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
-    .map((item) => (item.content ?? '').trim())
-    .filter(Boolean)
-    .join('-')
+  return formatActivityLine(
+    [...activities]
+      .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
+      .map((item) => (item.content ?? '').trim())
+      .filter(Boolean),
+  )
 }
 
 export function driverDisplayLabel(driver: { name?: string | null; notes?: string | null }) {
@@ -74,10 +85,6 @@ export function driverAssignerCaption(
   return abbreviation ? `${abbreviation}-${name}` : full
 }
 
-export function assignedDayCount(order: Order) {
-  return order.assignedDayCount
-}
-
 export function assignedDriverIds(order: Order) {
   return new Set(order.days.filter((day) => day.driverId).map((day) => day.driverId))
 }
@@ -92,7 +99,7 @@ export function assignedAssignerIds(order: Order) {
 }
 
 export function isPartiallyAssigned(order: Order) {
-  const assigned = assignedDayCount(order)
+  const assigned = order.assignedDayCount
   return assigned > 0 && assigned < order.dayCount
 }
 
@@ -101,7 +108,7 @@ export function isSplitOrder(order: Order) {
 }
 
 export function hasUnassignedDays(order: Order) {
-  return assignedDayCount(order) < order.dayCount
+  return order.assignedDayCount < order.dayCount
 }
 
 export function hasDispatcherAssignment(order: Order) {
