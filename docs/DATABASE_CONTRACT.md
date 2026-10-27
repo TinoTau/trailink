@@ -170,7 +170,7 @@ sort_order         INTEGER NOT NULL DEFAULT 0
 - 删除行程日或订单时级联删除活动。
 - `booking_time`、`checkin_time` 是活动所在地的当地钟表时间，不是系统操作的 UTC 时间戳。
 - 不实现实际签到打卡。
-- `ticket_path` 存统一本地存储的相对路径，格式 `files/tickets/{activityId}{ext}`，允许 NULL。不存绝对路径或二进制。
+- `ticket_path` 存统一本地存储的相对路径，格式 `files/tickets/{activityId}{ext}`，允许 NULL。不存绝对路径或二进制。订单最后一天起满 7 天后清成 NULL，并删除磁盘上的电子票。活动行保留。
 
 ---
 
@@ -187,7 +187,7 @@ file_path   TEXT NOT NULL
 
 - `order_id` → `orders.id`
 
-文件实际存储在 `App_Data/files/orders/`。`file_path` 为相对路径 `files/orders/{fileId}{ext}`。删除订单时同时删除磁盘文件。
+文件实际存储在 `App_Data/files/orders/`。`file_path` 为相对路径 `files/orders/{fileId}{ext}`。删除订单时同时删除磁盘文件。订单最后一天起满 7 天后删除这些行和磁盘文件。头像和公司二维码不在此列。
 
 ---
 

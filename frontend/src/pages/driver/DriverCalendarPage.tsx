@@ -24,6 +24,7 @@ import { DriverDayEditor } from './DriverDayEditor'
 import './driver-calendar.css'
 
 const COLOR_STORAGE_KEY = 'trailink.driverCalendar.colors.v2'
+const CALENDAR_MONTH_SPAN = 6
 
 interface CalendarColors {
   past: string
@@ -51,9 +52,21 @@ function readColors(): CalendarColors {
   }
 }
 
-function monthsAroundDate(dateText: string) {
-  const center = addMonths(parseYmd(dateText), 0)
-  return [-2, -1, 0, 1, 2].map((offset) => addMonths(center, offset))
+function monthsAroundDate(dateText: string, today: Date) {
+  const earliest = monthKey(addMonths(today, -CALENDAR_MONTH_SPAN))
+  const latest = monthKey(addMonths(today, CALENDAR_MONTH_SPAN))
+  let center = addMonths(parseYmd(dateText), 0)
+  if (monthKey(center) < earliest) {
+    center = addMonths(today, -CALENDAR_MONTH_SPAN)
+  } else if (monthKey(center) > latest) {
+    center = addMonths(today, CALENDAR_MONTH_SPAN)
+  }
+  return [-2, -1, 0, 1, 2]
+    .map((offset) => addMonths(center, offset))
+    .filter((month) => {
+      const key = monthKey(month)
+      return key >= earliest && key <= latest
+    })
 }
 
 function firstOrderDate(order: Order) {
@@ -93,6 +106,8 @@ export function DriverCalendarPage() {
   const driverId = user.driverId
   const today = useMemo(() => todayLocal(), [])
   const todayKey = formatLocalDate(today)
+  const earliestMonth = monthKey(addMonths(today, -CALENDAR_MONTH_SPAN))
+  const latestMonth = monthKey(addMonths(today, CALENDAR_MONTH_SPAN))
   const [months, setMonths] = useState(() => [-2, -1, 0, 1, 2].map((offset) => addMonths(today, offset)))
   const [orders, setOrders] = useState<Order[]>([])
   const [colors, setColors] = useState<CalendarColors>(readColors)
@@ -163,13 +178,19 @@ export function DriverCalendarPage() {
   }
 
   function prependMonth() {
-    if (expandingRef.current) {
+    if (expandingRef.current || months.length === 0 || monthKey(months[0]) <= earliestMonth) {
       return
     }
     expandingRef.current = true
     const scroller = scrollRef.current
     const previousHeight = scroller?.scrollHeight ?? 0
-    setMonths((current) => [addMonths(current[0], -1), ...current])
+    setMonths((current) => {
+      const next = addMonths(current[0], -1)
+      if (monthKey(next) < earliestMonth) {
+        return current
+      }
+      return [next, ...current]
+    })
     requestAnimationFrame(() => {
       if (scroller) {
         scroller.scrollTop += scroller.scrollHeight - previousHeight
@@ -179,11 +200,17 @@ export function DriverCalendarPage() {
   }
 
   function appendMonth() {
-    if (expandingRef.current) {
+    if (expandingRef.current || months.length === 0 || monthKey(months[months.length - 1]) >= latestMonth) {
       return
     }
     expandingRef.current = true
-    setMonths((current) => [...current, addMonths(current[current.length - 1], 1)])
+    setMonths((current) => {
+      const next = addMonths(current[current.length - 1], 1)
+      if (monthKey(next) > latestMonth) {
+        return current
+      }
+      return [...current, next]
+    })
     requestAnimationFrame(() => {
       expandingRef.current = false
     })
@@ -300,9 +327,12 @@ export function DriverCalendarPage() {
       const focusDate = firstOrderDate(order)
       resetMenu()
       await loadBoard()
-      pendingRevealDate.current = focusDate
-      setMonths(monthsAroundDate(focusDate))
-      setSelectedDate(focusDate)
+      const focusMonth = monthKey(addMonths(parseYmd(focusDate), 0))
+      setMonths(monthsAroundDate(focusDate, today))
+      if (focusMonth >= earliestMonth && focusMonth <= latestMonth) {
+        pendingRevealDate.current = focusDate
+        setSelectedDate(focusDate)
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : '领取行程失败')
     } finally {

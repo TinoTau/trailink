@@ -141,7 +141,7 @@
 - 本地演示数据：`dotnet run -- --seed-demo`（密码均为 `Passw0rd!`）
 - 清空业务表：`dotnet run -- --wipe-data`（含 `driver_notes`，不写入演示数据）
 - 只清空订单、行程、活动和订单附件记录：`dotnet run -- --wipe-orders`，用户和公司保留
-- 统一本地文件存储：二维码、头像、电子票、订单截图，根目录 `App_Data/files/`
+- 统一本地文件存储：二维码、头像、电子票、订单截图，根目录 `App_Data/files/`。订单最后一天起满 7 天后删除电子票和订单截图
 - 公司建单绑定本公司；调度员和司导建单都不默认绑所属公司，即使只属于一家；调度员须搜索并点选后立即绑定或改绑 `orders.company_id`；公司 `GET /api/orders` 只看绑到自己的单
 
 未完成：

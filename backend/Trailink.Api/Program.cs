@@ -19,6 +19,7 @@ builder.Services.AddScoped<OrderScheduling>();
 builder.Services.AddScoped<OrderDriverAssignment>();
 builder.Services.AddScoped<AuthSession>();
 builder.Services.AddSingleton<AppFileStore>();
+builder.Services.AddHostedService<ExpiredAttachmentCleanup>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {

@@ -273,7 +273,7 @@ PUT  /api/orders/{orderId}/driver
 领取整单时调用 `PUT /api/orders/{orderId}/driver`，与调度台派单共用 `OrderDriverAssignment`。已绑定公司的真实订单领取成功时，同样覆盖并删除该司导自建、未绑公司、日期有重叠的占位单，天数不符也整单删除，不报「当日已有行程」。未绑定公司的订单领取仍按普通冲突处理。订单已经分给调度员时，领取把各天分配人记成该调度员，调度台可以解除这次绑定。取消当前司导在该单上的日期时，对该司导名下的每一天 `PUT` `driverId: null`，不覆盖其他司导的行程日，也不看出是谁派的。调度台从司导日历拖一天到订单区：拆单（多司导、多分配人、或未派完）只清空当天，未拆单则整单 `driverId: null`。整单解绑要求这些已派天都是当前用户派出的。不另建取消接口。
 调度台订单卡片和司导点日期展开的订单信息都走 `PUT /api/orders/{id}` 与共用的 `updateOrderInfo` / `OrderInfoFields`。调度台写入 `notes`，我的行程写入 `driverNotes`，互不可见。我的行程不改公司订单号；司导即使在请求里带上公司订单号，也保持原值。`DELETE /api/orders/{id}` 按角色分叉：调度员把已绑公司、分给自己的单退回公司池（清空 `assigned_dispatcher_user_id` 和各行程日 `driver_id` / `assigned_by_user_id`，与公司 `PUT /dispatcher` 传 `null` 同一套收回）；未绑公司则真正删除该单和附件。公司账户删除订单和附件。司导 403。点某一天编辑行程复用现有活动接口，与司导日历同一套 `DriverDayEditor`。不另建退回接口。
 
-电子票上传写入 `App_Data/files/tickets/`，`order_activities.ticket_path` 存相对路径。活动内容更新不再改写 `ticketPath`。只接受 8MB 以内的 jpg / png / webp / pdf。
+电子票上传写入 `App_Data/files/tickets/`，`order_activities.ticket_path` 存相对路径。活动内容更新不再改写 `ticketPath`。只接受 8MB 以内的 jpg / png / webp / pdf。订单最后一天起满 7 天后删除电子票文件并清空 `ticketPath`，活动内容仍在。
 
 ---
 
@@ -286,7 +286,7 @@ GET    /api/orders/{orderId}/files/{fileId}
 DELETE /api/orders/{orderId}/files/{fileId}
 ```
 
-上传采用 `multipart/form-data`，字段名 `file`。订单截图写入 `App_Data/files/orders/`，`order_files` 存文件名和相对路径。只接受 8MB 以内的 jpg / png / webp。四种上传（二维码、头像、电子票、订单截图）共用 `AppFileStore`，不另开存储路径。
+上传采用 `multipart/form-data`，字段名 `file`。订单截图写入 `App_Data/files/orders/`，`order_files` 存文件名和相对路径。只接受 8MB 以内的 jpg / png / webp。四种上传（二维码、头像、电子票、订单截图）共用 `AppFileStore`，不另开存储路径。订单最后一天起满 7 天后删除该单截图的文件和 `order_files` 行。头像和公司二维码不删。
 
 ---
 

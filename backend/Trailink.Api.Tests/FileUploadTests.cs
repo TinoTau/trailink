@@ -205,6 +205,109 @@ public class FileUploadTests : IClassFixture<ApiFactory>
         Assert.Equal(".jpg", Path.GetExtension(kept[0]), ignoreCase: true);
     }
 
+    [Fact]
+    public async Task Tickets_and_screenshots_leave_one_week_after_the_order_ends()
+    {
+        var client = _factory.CreateClient();
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var registered = await client.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"keep_{suffix}",
+            Password = "Passw0rd!",
+            Name = "过期附件",
+            AccountType = "company",
+            CompanyName = $"过期公司{suffix}"
+        });
+        registered.EnsureSuccessStatusCode();
+        (await client.PostAsync("/api/auth/avatar", ImageForm("avatar.png"))).EnsureSuccessStatusCode();
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var expired = await CreateOrderWithFiles(client, today.AddDays(-OrderScheduling.AttachmentKeepDays));
+        var recent = await CreateOrderWithFiles(client, today.AddDays(1 - OrderScheduling.AttachmentKeepDays));
+        var extended = await CreateOrderWithFiles(client, today.AddDays(-30));
+        (await client.PostAsJsonAsync($"/api/orders/{extended.OrderId}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = today
+        })).EnsureSuccessStatusCode();
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var scheduling = scope.ServiceProvider.GetRequiredService<OrderScheduling>();
+        await scheduling.PurgeExpiredAttachmentsAsync(today, CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(expired.TicketUrl)).StatusCode);
+        Assert.Empty((await client.GetFromJsonAsync<List<OrderFileReadDto>>($"/api/orders/{expired.OrderId}/files"))!);
+        var expiredActivities = await client.GetFromJsonAsync<List<OrderActivityReadDto>>(
+            $"/api/orders/{expired.OrderId}/days/{expired.DayId}/activities");
+        var expiredActivity = Assert.Single(expiredActivities!);
+        Assert.Equal("缆车", expiredActivity.Content);
+        Assert.Null(expiredActivity.TicketPath);
+        Assert.False(File.Exists(expired.TicketFile));
+        Assert.False(File.Exists(expired.ScreenshotFile));
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(recent.TicketUrl)).StatusCode);
+        Assert.Single((await client.GetFromJsonAsync<List<OrderFileReadDto>>($"/api/orders/{recent.OrderId}/files"))!);
+        Assert.True(File.Exists(recent.TicketFile));
+        Assert.True(File.Exists(recent.ScreenshotFile));
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(extended.TicketUrl)).StatusCode);
+        Assert.Single((await client.GetFromJsonAsync<List<OrderFileReadDto>>($"/api/orders/{extended.OrderId}/files"))!);
+
+        (await client.GetAsync("/api/auth/avatar")).EnsureSuccessStatusCode();
+
+        foreach (var id in new[] { expired.OrderId, recent.OrderId, extended.OrderId })
+        {
+            (await client.DeleteAsync($"/api/orders/{id}")).EnsureSuccessStatusCode();
+        }
+    }
+
+    private async Task<KeptFiles> CreateOrderWithFiles(HttpClient client, DateOnly day)
+    {
+        var order = await client.PostAsJsonAsync("/api/orders", new OrderWriteDto
+        {
+            StartDate = day,
+            GuestCount = 1
+        });
+        order.EnsureSuccessStatusCode();
+        var createdOrder = await order.Content.ReadFromJsonAsync<OrderReadDto>();
+
+        var screenshot = await client.PostAsync($"/api/orders/{createdOrder!.Id}/files", ImageForm("shot.png"));
+        screenshot.EnsureSuccessStatusCode();
+        var stored = await screenshot.Content.ReadFromJsonAsync<OrderFileReadDto>();
+
+        var dayResponse = await client.PostAsJsonAsync(
+            $"/api/orders/{createdOrder.Id}/days",
+            new ItineraryDayWriteDto { ServiceDate = day });
+        dayResponse.EnsureSuccessStatusCode();
+        var createdDay = await dayResponse.Content.ReadFromJsonAsync<ItineraryDayReadDto>();
+
+        var activity = await client.PostAsJsonAsync(
+            $"/api/orders/{createdOrder.Id}/days/{createdDay!.Id}/activities",
+            new OrderActivityWriteDto { Content = "缆车" });
+        activity.EnsureSuccessStatusCode();
+        var createdActivity = await activity.Content.ReadFromJsonAsync<OrderActivityReadDto>();
+
+        var ticket = await client.PostAsync(
+            $"/api/orders/{createdOrder.Id}/days/{createdDay.Id}/activities/{createdActivity!.Id}/ticket",
+            ImageForm("ticket.png"));
+        ticket.EnsureSuccessStatusCode();
+        var withTicket = await ticket.Content.ReadFromJsonAsync<OrderActivityReadDto>();
+
+        var env = _factory.Services.GetRequiredService<IWebHostEnvironment>();
+        string Full(string relative) => Path.Combine(
+            env.ContentRootPath,
+            "App_Data",
+            relative.Replace('/', Path.DirectorySeparatorChar));
+
+        return new KeptFiles(
+            createdOrder.Id,
+            createdDay.Id,
+            $"/api/orders/{createdOrder.Id}/days/{createdDay.Id}/activities/{createdActivity.Id}/ticket",
+            Full(withTicket!.TicketPath!),
+            Full($"files/orders/{stored!.Id:D}.png"));
+    }
+
+    private sealed record KeptFiles(Guid OrderId, Guid DayId, string TicketUrl, string TicketFile, string ScreenshotFile);
+
     private static MultipartFormDataContent ImageForm(string fileName, Guid? companyId = null) =>
         ImageForm(fileName, PngBytes, companyId);
 
