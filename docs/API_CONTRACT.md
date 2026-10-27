@@ -162,7 +162,7 @@ DELETE /api/orders/{orderId}/days/{dayId}
 
 按天派单直接使用更新接口修改 `driverId`。  
 `driverId` 可以为 `null`，表示取消分配。调度员或公司账户把已派日期置空时，仅该日 `assignedByUserId`（旧数据回退订单 `createdByUserId`）是本人，或该日 `driverId` 就是本人司导身份，才允许；否则 403。司导取消自己名下行程不受此限。派单成功时写入 `assignedByUserId`。
-`failOnConflict` 仅更新接口使用，默认 `false`：冲突只进 `warnings`，仍保存。调度台按天拖拽传 `true`：该司机当日已被其他订单占用时返回 409，不保存。  
+`failOnConflict` 仅更新接口使用，默认 `false`：冲突只进 `warnings`，仍保存。调度台按天拖拽不传 `true`，重叠日期仍保存，由日历标红。传 `true` 时该司机当日已被其他订单占用则返回 409，不保存。  
 已绑定公司的真实订单派给司导时，不把该司导自己创建且未绑公司的占位单算作冲突；重叠的占位单整单删除，即使天数与真实订单不一致。未绑定公司的调度员自建单不能覆盖占位单，仍按普通冲突处理。  
 `serviceDate` 为当地日期 `YYYY-MM-DD`，不做时区换算。  
 同一订单不同行程日可以绑定不同司机，不另建订单。
@@ -188,7 +188,7 @@ PUT /api/orders/{orderId}/driver
 
 语义：覆盖该订单所有行程日的司机。  
 `driverId` 可以为 `null`，表示取消整单分配。调度员或公司账户整单解绑时，仅各天 `assignedByUserId`（旧数据回退 `createdByUserId`）都是本人，或全部已派日期都属于本人司导身份，才允许；否则 403。司导取消自己名下行程不受此限。派单成功时各天写入 `assignedByUserId`。司导用本人 `driverId` 领取已分给调度员的订单时，`assignedByUserId` 写成该订单的 `assignedDispatcherUserId`，调度台按自己分配的单解除绑定。
-`failOnConflict` 默认为 `false`：冲突只进 `warnings`，仍保存。调度台拖拽传 `true`：存在其他订单同日占用该司机时返回 409，不保存。  
+`failOnConflict` 默认为 `false`：冲突只进 `warnings`，仍保存。调度台整单拖拽不传 `true`，重叠日期仍保存。传 `true` 时存在其他订单同日占用该司机则返回 409，不保存。  
 已绑定 `companyId` 的真实订单整单派给司导时，覆盖并删除该司导自己创建、未绑公司、且日期有重叠的占位单；天数不符也整单删除。未绑定公司的订单不能这样做。  
 公司账户，或该公司 `company_members.role=dispatcher` 的调度员，把这家公司的订单派给已有账号的司导时，若司导还不是该公司成员，写入 `company_members`，`role=driver`。整单派发和单日派发都写这一行。司导领取已分给该调度员的公司订单同样写入。已有成员行（含调度员）不改角色，也不另建批准步骤。未绑定公司的订单、派出人不是该公司或其调度员、以及没有账号的司导档案，都不写成员。
 

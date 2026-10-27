@@ -1,9 +1,10 @@
 .driver-calendar-page {
   display: flex;
   flex-direction: column;
-  max-width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100dvh;
-  overflow-x: hidden;
+  overflow: hidden;
   background: #fff;
   color: #1f1f1f;
 }
@@ -51,8 +52,31 @@
 .driver-add-panel {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 4px;
+}
+
+.driver-add-panel .driver-edit-field {
+  flex-direction: row;
+  align-items: center;
   gap: 8px;
-  padding: 0 16px 12px;
+}
+
+.driver-add-panel .driver-edit-field input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.driver-add-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.driver-add-actions > button {
+  flex: 1;
+  justify-content: center;
+  text-align: center;
 }
 
 .driver-add-hint {
@@ -181,6 +205,11 @@
   cursor: pointer;
 }
 
+.driver-day.conflict {
+  background: #ff4d4f;
+  color: #fff;
+}
+
 .driver-day.has-trip.selected {
   box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px rgba(0, 0, 0, 0.16);
 }
@@ -201,7 +230,13 @@
 
 .driver-month-grid.selecting {
   user-select: none;
-  touch-action: none;
+}
+
+.driver-month-grid.selecting .driver-day {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .driver-month-grid.canceling {
@@ -328,12 +363,22 @@
 .driver-edit-field textarea,
 .driver-activity-form input {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid #f0f0f0;
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 14px;
   color: #262626;
   box-sizing: border-box;
+}
+
+@media (pointer: coarse), (max-width: 800px) {
+  .driver-edit-field input,
+  .driver-edit-field textarea,
+  .driver-activity-form input {
+    font-size: 16px;
+  }
 }
 
 .driver-edit-error {

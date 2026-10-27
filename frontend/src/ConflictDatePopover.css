@@ -1,0 +1,52 @@
+.conflict-date-popover {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  gap: 4px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  border: 1px solid #f0f0f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 31, 31, 0.16);
+}
+
+.conflict-date-copy {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 78px;
+  height: 66px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+}
+
+.conflict-date-copy.release {
+  box-shadow: inset 0 0 0 2px #ff4d4f;
+}
+
+.conflict-date-copy b,
+.conflict-date-copy em {
+  position: relative;
+  z-index: 1;
+}
+
+.conflict-date-copy b {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.conflict-date-copy em {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

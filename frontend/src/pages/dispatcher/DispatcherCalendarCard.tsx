@@ -1,5 +1,5 @@
-import { useState, type PointerEvent, type ReactNode, type Ref } from 'react'
-import { CalendarDayCaption } from '../../calendarDay'
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from 'react'
+import { CALENDAR_DATE_ATTR, CalendarDayCaption, captureCalendarPointer } from '../../calendarDay'
 import { WEEKDAYS, formatLocalDate, monthCells, monthsBetween, orderedRange, pad, todayLocal } from '../../localDate'
 import { OrderInfoFields, OrderInfoPanel, TrashIcon } from '../OrderInfoFields'
 
@@ -12,6 +12,7 @@ export interface CalendarMark {
   owned?: boolean
   color?: string
   textColor?: string
+  conflict?: boolean
 }
 
 interface DispatcherCalendarCardProps {
@@ -24,11 +25,13 @@ interface DispatcherCalendarCardProps {
   onClose: () => void
   onCardPointerDown?: (event: PointerEvent<HTMLElement>) => void
   onDayPointerDown?: (event: PointerEvent<HTMLButtonElement>, mark: CalendarMark) => void
+  onDayClick?: (mark: CalendarMark, anchor: HTMLButtonElement) => void
   selectable?: boolean
   pickFrom?: string | null
   pickTo?: string | null
   onDatePointerDown?: (date: string) => void
   onDatePointerEnter?: (date: string) => void
+  onDateTouchHold?: (date: string, x: number, y: number, target: HTMLElement, pointerId: number) => void
   footer?: ReactNode
   infoOpen?: boolean
   onInfoOpenChange?: (open: boolean) => void
@@ -60,11 +63,13 @@ export function DispatcherCalendarCard({
   onClose,
   onCardPointerDown,
   onDayPointerDown,
+  onDayClick,
   selectable,
   pickFrom,
   pickTo,
   onDatePointerDown,
   onDatePointerEnter,
+  onDateTouchHold,
   footer,
   infoOpen,
   onInfoOpenChange,
@@ -94,6 +99,22 @@ export function DispatcherCalendarCard({
   const canEditOrder = Boolean(onPlatformOrderNoChange)
   const canEditNotes = Boolean(onNotesChange)
   const showEditIcon = canEditNotes || canEditOrder
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (notesOpen) {
+      scrollRef.current?.scrollTo({ top: 0 })
+    }
+  }, [notesOpen])
+
+  function setBody(node: HTMLDivElement | null) {
+    scrollRef.current = node
+    if (typeof bodyRef === 'function') {
+      bodyRef(node)
+    } else if (bodyRef) {
+      bodyRef.current = node
+    }
+  }
 
   return (
     <article className="dispatcher-card">
@@ -125,29 +146,30 @@ export function DispatcherCalendarCard({
             <CloseIcon />
           </button>
         }
-      >
-        <OrderInfoFields
-          heading={canEditOrder ? '订单信息' : '备注'}
-          platformOrderNo={platformOrderNo}
-          onPlatformOrderNoChange={onPlatformOrderNoChange}
-          companyId={companyId}
-          companyName={companyName}
-          onCompanyChange={onCompanyChange}
-          notes={notes}
-          onNotesChange={onNotesChange}
-          notesLabel={notesLabel ?? (canEditOrder ? '调度备注' : '备注')}
-          notesPlaceholder={notesPlaceholder ?? (canEditOrder ? '仅调度可见，司导看不到' : '给这个司导写备注')}
-          onSave={onNotesSave}
-          extra={notesExtra}
-          autoFocus
-        />
-      </OrderInfoPanel>
+      />
       <div
-        ref={bodyRef}
+        ref={setBody}
         className="dispatcher-card-body"
         data-calendar={bodyKey}
         onScroll={onBodyScroll}
       >
+        {notesOpen ? (
+          <OrderInfoFields
+            heading={canEditOrder ? '订单信息' : '备注'}
+            platformOrderNo={platformOrderNo}
+            onPlatformOrderNoChange={onPlatformOrderNoChange}
+            companyId={companyId}
+            companyName={companyName}
+            onCompanyChange={onCompanyChange}
+            notes={notes}
+            onNotesChange={onNotesChange}
+            notesLabel={notesLabel ?? (canEditOrder ? '调度备注' : '备注')}
+            notesPlaceholder={notesPlaceholder ?? (canEditOrder ? '仅调度可见，司导看不到' : '给这个司导写备注')}
+            onSave={onNotesSave}
+            extra={notesExtra}
+            autoFocus
+          />
+        ) : null}
         {months.map((month) => (
           <section
             key={`${month.getFullYear()}-${month.getMonth()}`}
@@ -179,17 +201,55 @@ export function DispatcherCalendarCard({
                         ? { background: mark.color, color: mark.textColor || undefined }
                         : undefined
                     }
+                    {...(cell.inMonth ? { 'data-service-date': date } : {})}
+                    {...(selectableDay ? { [CALENDAR_DATE_ATTR]: date } : {})}
+                    onClick={
+                      mark?.conflict
+                        ? (event) => {
+                            event.stopPropagation()
+                            onDayClick?.(mark, event.currentTarget)
+                          }
+                        : undefined
+                    }
                     onPointerDown={
                       mark || selectableDay
                         ? (event) => {
                             event.stopPropagation()
+                            if (mark?.conflict) {
+                              return
+                            }
                             if (selectableDay) {
+                              if (event.pointerType === 'touch') {
+                                onDateTouchHold?.(date, event.clientX, event.clientY, event.currentTarget, event.pointerId)
+                                return
+                              }
+                              event.preventDefault()
+                              captureCalendarPointer(event.currentTarget, event.pointerId)
                               onDatePointerDown?.(date)
                               return
                             }
                             if (mark) {
                               onDayPointerDown?.(event, mark)
                             }
+                          }
+                        : undefined
+                    }
+                    onTouchStart={
+                      selectableDay
+                        ? (event) => {
+                            const touch = event.touches[0]
+                            if (!touch) {
+                              return
+                            }
+                            event.stopPropagation()
+                            onDateTouchHold?.(date, touch.clientX, touch.clientY, event.currentTarget, -1)
+                          }
+                        : undefined
+                    }
+                    onContextMenu={
+                      selectableDay
+                        ? (event) => {
+                            event.preventDefault()
                           }
                         : undefined
                     }
@@ -254,8 +314,9 @@ export function DispatcherDayCard({
             <CloseIcon />
           </button>
         }
-      >
-        {canEditNotes ? (
+      />
+      <div className="dispatcher-card-body" onPointerDown={(event) => event.stopPropagation()}>
+        {notesOpen && canEditNotes ? (
           <OrderInfoFields
             heading="备注"
             notes={notes}
@@ -266,8 +327,6 @@ export function DispatcherDayCard({
             autoFocus
           />
         ) : null}
-      </OrderInfoPanel>
-      <div className="dispatcher-card-body" onPointerDown={(event) => event.stopPropagation()}>
         {children}
       </div>
     </article>

@@ -4,6 +4,15 @@ import { Navigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuth } from '../auth/authState'
 import { homeFor } from '../navigation'
+import './login.css'
+
+function settleMobilePage() {
+  const active = document.activeElement
+  if (active instanceof HTMLElement) {
+    active.blur()
+  }
+  window.scrollTo(0, 0)
+}
 
 export function LoginPage() {
   const { user, setUser } = useAuth()
@@ -17,6 +26,7 @@ export function LoginPage() {
     setBusy(true)
     try {
       setUser(await authApi.login(values.username, values.password))
+      settleMobilePage()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '登录失败')
     } finally {
@@ -34,6 +44,7 @@ export function LoginPage() {
     setBusy(true)
     try {
       setUser(await authApi.register(values))
+      settleMobilePage()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '注册失败')
     } finally {
@@ -42,8 +53,8 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 24, background: '#f5f5f5' }}>
-      <Card style={{ width: 'min(420px, 100%)' }}>
+    <div className="login-page">
+      <Card className="login-card">
         <Typography.Title level={3} style={{ marginTop: 0 }}>
           Trailink
         </Typography.Title>
