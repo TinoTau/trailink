@@ -6,6 +6,7 @@ import { ordersApi } from '../api/orders'
 import { useAuthenticatedAuth } from '../auth/authState'
 import { AccountMenu } from './AccountMenu'
 import { OrderFilesBlock } from './OrderFilesBlock'
+import { OrderDetailNotes } from './OrderInfoFields'
 import { readCurrentCompanyId, writeCurrentCompanyId } from '../currentCompany'
 import { formatMonthDay } from '../localDate'
 import { dayActivityLine, formatActivityLine, orderDisplayLabel, parseActivityLine } from '../orderFlags'
@@ -156,7 +157,7 @@ export function CompanyPage() {
     try {
       applyHome(await companyApi.uploadQr(desk.id, file))
       setQrKey((value) => value + 1)
-      message.success('已更新二维码')
+      message.success('已更新公司头像')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '上传失败')
     } finally {
@@ -267,9 +268,9 @@ export function CompanyPage() {
             <div className="profile-identity">
               <div className="profile-avatar">
                 {desk.hasQr ? (
-                  <img className="account-qr" src={`/api/company/${desk.id}/qr?v=${qrKey}`} alt="公司二维码" />
+                  <img className="account-qr" src={`/api/company/${desk.id}/qr?v=${qrKey}`} alt="公司头像" />
                 ) : (
-                  <div className="account-qr placeholder">暂无二维码</div>
+                  <div className="account-qr placeholder">暂无公司头像</div>
                 )}
                 {desk.canEdit ? (
                   <>
@@ -287,7 +288,7 @@ export function CompanyPage() {
                       }}
                     />
                     <button type="button" className="account-chip" disabled={busy} onClick={() => fileRef.current?.click()}>
-                      上传二维码
+                      上传公司头像
                     </button>
                   </>
                 ) : null}
@@ -417,7 +418,7 @@ export function CompanyPage() {
                   key={order.id}
                   onClick={() => void openOrder(order.id)}
                 >
-                  <strong>{orderDisplayLabel(order, user.role === 'driver' ? 'driver' : 'dispatcher')}</strong>
+                  <strong>{orderDisplayLabel(order)}</strong>
                   <span>{formatMonthDay(order.startDate)}</span>
                   <em>{order.dayCount}天</em>
                 </button>
@@ -438,7 +439,7 @@ export function CompanyPage() {
         >
           <div className="account-card">
             <div className="account-card-bar">
-              <h2>{orderDisplayLabel(selectedOrder, user.role === 'driver' ? 'driver' : 'dispatcher')}</h2>
+              <h2>{orderDisplayLabel(selectedOrder)}</h2>
               <button type="button" className="account-chip" onClick={() => setSelectedOrder(null)}>
                 关闭
               </button>
@@ -448,7 +449,13 @@ export function CompanyPage() {
               {selectedOrder.endDate ? ` 至 ${formatMonthDay(selectedOrder.endDate)}` : ''}
               {selectedOrder.dayCount ? ` · ${selectedOrder.dayCount} 天` : ''}
             </p>
-            {selectedOrder.notes ? <p>{selectedOrder.notes}</p> : null}
+            <OrderDetailNotes
+              order={selectedOrder}
+              role={user.role}
+              onSaved={(saved) => {
+                setSelectedOrder(saved)
+              }}
+            />
             <div className="account-files">
               <p>订单截图</p>
               <OrderFilesBlock

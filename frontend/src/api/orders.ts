@@ -48,22 +48,33 @@ export async function createOrderWithDays(input: {
   return { order, dates, warnings }
 }
 
+export function itineraryDayWrite(
+  day: {
+    serviceDate: string
+    description?: string | null
+    endLocation?: string | null
+  },
+  driverId: string | null,
+): ItineraryDayWrite {
+  return {
+    serviceDate: day.serviceDate,
+    description: day.description,
+    endLocation: day.endLocation,
+    driverId,
+  }
+}
+
 export function clearDayDriver(day: {
   serviceDate: string
   description?: string | null
   endLocation?: string | null
 }) {
-  return {
-    serviceDate: day.serviceDate,
-    description: day.description,
-    endLocation: day.endLocation,
-    driverId: null,
-  }
+  return itineraryDayWrite(day, null)
 }
 
 export function updateOrderInfo(
   order: Order,
-  fields: { platformOrderNo?: string; notes?: string; driverNotes?: string; companyId?: string | null },
+  fields: { platformOrderNo?: string; notes?: string; driverNotes?: string; sharedNotes?: string; companyId?: string | null },
 ) {
   return ordersApi.update(order.id, {
     platformOrderNo: fields.platformOrderNo !== undefined
@@ -73,6 +84,7 @@ export function updateOrderInfo(
     guestCount: order.guestCount,
     notes: fields.notes !== undefined ? fields.notes : order.notes,
     driverNotes: fields.driverNotes !== undefined ? fields.driverNotes : order.driverNotes,
+    sharedNotes: fields.sharedNotes !== undefined ? fields.sharedNotes : order.sharedNotes,
     companyId: fields.companyId !== undefined ? fields.companyId : order.companyId,
   })
 }

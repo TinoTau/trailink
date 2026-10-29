@@ -8,6 +8,55 @@
   line-height: 1.1;
 }
 
+.calendar-day-place {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 0;
+  transform: translate(-50%, -52%);
+  color: rgb(0 0 0 / var(--calendar-place-opacity, 0.22));
+  font-size: 26px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.calendar-day-caption b,
+.calendar-day-caption em,
+.calendar-day > b {
+  position: relative;
+  z-index: 1;
+  opacity: var(--calendar-text-opacity, 1);
+}
+
+.calendar-day.order-start::before,
+.calendar-day.order-end::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 100%;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--order-fill, transparent) 72%, black);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.calendar-day.order-start::before {
+  left: 0;
+  border-right: 0;
+  clip-path: inset(0 62% 0 0);
+}
+
+.calendar-day.order-end::after {
+  right: 0;
+  border-left: 0;
+  clip-path: inset(0 0 0 62%);
+}
+
 .calendar-day-caption b {
   font-size: 13px;
   font-weight: 600;
@@ -20,4 +69,59 @@
   font-size: 9px;
   font-style: normal;
   line-height: 1.1;
+}
+
+.calendar-ink-host {
+  position: relative;
+}
+
+.calendar-ink-bar {
+  position: absolute;
+  top: 50%;
+  z-index: 6;
+  width: 28px;
+  height: 132px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  transform: translateY(-50%);
+  opacity: 0.75;
+  touch-action: none;
+  cursor: ns-resize;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.calendar-ink-bar:focus,
+.calendar-ink-bar:focus-visible {
+  outline: none;
+}
+
+.calendar-ink-bar.is-moving {
+  right: auto;
+  cursor: ew-resize;
+}
+
+.calendar-ink-bar-fill,
+.calendar-ink-bar-thumb {
+  position: absolute;
+  pointer-events: none;
+}
+
+.calendar-ink-bar-fill {
+  right: 10px;
+  bottom: 12px;
+  left: 10px;
+  border-radius: 999px;
+  background: #8c8c8c;
+}
+
+.calendar-ink-bar-thumb {
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #262626;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  transform: translate(-50%, -50%);
 }

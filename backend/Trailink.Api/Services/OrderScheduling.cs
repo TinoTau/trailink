@@ -31,9 +31,7 @@ public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
         IEnumerable<DateOnly> dates,
         Guid? excludeOrderId,
         CancellationToken cancellationToken,
-        Guid? incomingCompanyId = null,
-        Guid? viewerUserId = null,
-        bool viewerIsDriver = false)
+        Guid? incomingCompanyId = null)
     {
         var dateList = dates.Distinct().ToList();
         if (dateList.Count == 0)
@@ -54,40 +52,32 @@ public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
             .Select(day => new
             {
                 day.ServiceDate,
-                day.OrderId,
                 day.Order.PlatformOrderNo,
-                day.Order.DriverNotes
+                day.Order.SharedNotes
             })
             .ToListAsync(cancellationToken);
-
-        var missingIds = conflicts
-            .Where(item => string.IsNullOrWhiteSpace(item.PlatformOrderNo))
-            .Select(item => item.OrderId)
-            .Distinct()
-            .ToList();
-        var viewerNotes = viewerUserId is Guid viewerId && missingIds.Count > 0 && !viewerIsDriver
-            ? await db.OrderNotes
-                .Where(note => note.UserId == viewerId && missingIds.Contains(note.OrderId))
-                .ToDictionaryAsync(note => note.OrderId, note => note.Notes, cancellationToken)
-            : new Dictionary<Guid, string>();
 
         return conflicts
             .Select(item =>
             {
-                var label = item.PlatformOrderNo?.Trim();
-                if (string.IsNullOrEmpty(label))
-                {
-                    label = viewerIsDriver
-                        ? item.DriverNotes?.Trim()
-                        : viewerNotes.GetValueOrDefault(item.OrderId)?.Trim();
-                }
-
+                var label = FirstLine(item.PlatformOrderNo) ?? FirstLine(item.SharedNotes);
                 return string.IsNullOrEmpty(label)
                     ? $"司机在 {item.ServiceDate:yyyy-MM-dd} 已有其他行程"
                     : $"司机在 {item.ServiceDate:yyyy-MM-dd} 已有其他行程：{label}";
             })
             .Distinct()
             .ToList();
+    }
+
+    private static string? FirstLine(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var line = value.Trim().Split(['\r', '\n'], 2)[0].Trim();
+        return string.IsNullOrEmpty(line) ? null : line;
     }
 
     public async Task<List<Order>> LoadDriverPlaceholdersAsync(

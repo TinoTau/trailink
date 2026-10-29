@@ -55,7 +55,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             OrderId = orderId,
             ServiceDate = request.ServiceDate,
             Description = request.Description,
-            EndLocation = request.EndLocation
+            EndLocation = TextValue.NullIfBlank(request.EndLocation)
         };
         OrderDriverAssignment.SetDayDriver(day, request.DriverId, user?.Id);
 
@@ -117,18 +117,22 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
                 statusCode: StatusCodes.Status409Conflict);
         }
 
-        if (request.DriverId is Guid assignedDriverId)
+        var driverChanged = day.DriverId != request.DriverId;
+        if (driverChanged && request.DriverId is Guid assignedDriverId)
         {
             await assignment.RemoveDriverPlaceholdersAsync(order, assignedDriverId, [request.ServiceDate], cancellationToken);
         }
 
         day.ServiceDate = request.ServiceDate;
         day.Description = request.Description;
-        day.EndLocation = request.EndLocation;
-        OrderDriverAssignment.SetDayDriver(day, request.DriverId, user?.Id);
-        if (request.DriverId is Guid linkedDriverId)
+        day.EndLocation = TextValue.NullIfBlank(request.EndLocation);
+        if (driverChanged)
         {
-            await assignment.LinkDriverToCompanyAsync(order, linkedDriverId, day.AssignedByUserId, cancellationToken);
+            OrderDriverAssignment.SetDayDriver(day, request.DriverId, user?.Id);
+            if (request.DriverId is Guid linkedDriverId)
+            {
+                await assignment.LinkDriverToCompanyAsync(order, linkedDriverId, day.AssignedByUserId, cancellationToken);
+            }
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -222,14 +226,11 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return [];
         }
 
-        var user = await session.GetUserAsync(cancellationToken);
         return await scheduling.FindDriverConflictsAsync(
             assignedId,
             [serviceDate],
             order.Id,
             cancellationToken,
-            order.CompanyId,
-            user?.Id,
-            user?.Role == UserRoles.Driver);
+            order.CompanyId);
     }
 }

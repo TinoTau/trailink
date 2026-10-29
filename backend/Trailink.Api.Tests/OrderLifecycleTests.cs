@@ -821,7 +821,8 @@ public class OrderLifecycleTests : IClassFixture<ApiFactory>
             PlatformOrderNo = $"P-OUT-{suffix}",
             StartDate = date,
             GuestCount = 4,
-            DriverNotes = "别家备注"
+            DriverNotes = "别家备注",
+            SharedNotes = "别家共用"
         });
         await PostAsync<ItineraryDayReadDto>(other, $"/api/orders/{foreign.Id}/days", new ItineraryDayWriteDto
         {
@@ -860,12 +861,13 @@ public class OrderLifecycleTests : IClassFixture<ApiFactory>
         Assert.Null(listed.CreatedByName);
         Assert.Null(listed.DriverNotes);
         Assert.Null(listed.Notes);
+        Assert.Null(listed.SharedNotes);
         Assert.Empty(listed.Files);
         Assert.Equal(0, listed.GuestCount);
         var day = Assert.Single(listed.Days);
         Assert.Equal(date, day.ServiceDate);
         Assert.Null(day.Description);
-        Assert.Null(day.EndLocation);
+        Assert.Equal("别", day.EndLocation);
         Assert.Null(day.AssignedByName);
         Assert.Null(day.AssignedByContact);
 

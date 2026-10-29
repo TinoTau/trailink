@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { isStoredFile, ordersApi } from '../../api/orders'
+import { isStoredFile, itineraryDayWrite, ordersApi } from '../../api/orders'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { FileField } from '../FileField'
 import { OrderInfoEditor, TrashIcon } from '../OrderInfoFields'
 import { formatLocalTime } from '../../localDate'
 import { splitOrderHint } from '../../orderFlags'
+import { PLACE_PRESETS, placeMark, presetForLocation } from '../../placeMark'
 import { contactLabel } from '../../text'
 import type { DriverCalendarDay, ItineraryDay, Order, OrderActivity, OrderActivityWrite } from '../../types'
 
@@ -126,6 +127,8 @@ function TripEditor(props: TripEditorProps) {
 function TripEditorState({ date, trip, onChanged }: TripEditorProps) {
   const [activities, setActivities] = useState(trip.activities)
   const [composing, setComposing] = useState(false)
+  const [savingPlace, setSavingPlace] = useState(false)
+  const [placeError, setPlaceError] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const dragIdRef = useRef<string | null>(null)
   const startIdsRef = useRef<string[]>([])
@@ -167,8 +170,30 @@ function TripEditorState({ date, trip, onChanged }: TripEditorProps) {
     }
   }
 
+  async function savePlace(endLocation: string) {
+    if ((trip.endLocation ?? '') === endLocation) {
+      return
+    }
+    setSavingPlace(true)
+    setPlaceError(null)
+    try {
+      await ordersApi.updateDay(trip.orderId, trip.id, itineraryDayWrite({
+        serviceDate: trip.serviceDate,
+        description: trip.description,
+        endLocation,
+      }, trip.driverId))
+      await onChanged()
+    } catch (item) {
+      setPlaceError(item instanceof Error ? item.message : '无法保存住宿位置')
+    } finally {
+      setSavingPlace(false)
+    }
+  }
+
   return (
     <article className="driver-detail-trip">
+      <PlaceMarkBar value={trip.endLocation} disabled={savingPlace} onSelect={savePlace} />
+      {placeError ? <p className="driver-edit-error">{placeError}</p> : null}
       {activities.map((activity) => (
         <SavedActivity
           key={activity.id}
@@ -223,6 +248,80 @@ function TripEditorState({ date, trip, onChanged }: TripEditorProps) {
         </div>
       )}
     </article>
+  )
+}
+
+function PlaceMarkBar({
+  value,
+  disabled,
+  onSelect,
+}: {
+  value?: string | null
+  disabled?: boolean
+  onSelect: (value: string) => Promise<void>
+}) {
+  const [customOpen, setCustomOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+  const preset = presetForLocation(value)
+  const customMark = value && !preset ? placeMark(value) : undefined
+
+  return (
+    <div className="place-mark-bar" aria-label="住宿位置">
+      {PLACE_PRESETS.map((item) => (
+        <button
+          key={item.mark}
+          type="button"
+          aria-pressed={preset?.mark === item.mark}
+          disabled={disabled}
+          onClick={() => void onSelect(preset?.mark === item.mark ? '' : item.name)}
+        >
+          {item.mark}
+        </button>
+      ))}
+      {customOpen ? (
+        <form
+          className="place-mark-custom"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const text = draft.trim()
+            if (!text) {
+              return
+            }
+            setCustomOpen(false)
+            void onSelect(text)
+          }}
+        >
+          <input
+            aria-label="其他住宿位置"
+            placeholder="住宿位置"
+            maxLength={200}
+            value={draft}
+            autoFocus
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button type="submit" disabled={disabled || !draft.trim()}>
+            确定
+          </button>
+        </form>
+      ) : (
+        <button
+          type="button"
+          aria-pressed={Boolean(customMark)}
+          aria-label={customMark ? `住宿位置 ${value}` : '其他住宿位置'}
+          disabled={disabled}
+          onClick={() => {
+            if (customMark) {
+              void onSelect('')
+              return
+            }
+            setDraft(preset ? '' : (value ?? ''))
+            setCustomOpen(true)
+          }}
+        >
+          {customMark ?? '...'}
+        </button>
+      )}
+    </div>
   )
 }
 

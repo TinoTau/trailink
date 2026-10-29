@@ -165,6 +165,7 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.StartDate).HasColumnName("start_date");
             entity.Property(x => x.GuestCount).HasColumnName("guest_count");
             entity.Property(x => x.DriverNotes).HasColumnName("driver_notes");
+            entity.Property(x => x.SharedNotes).HasColumnName("shared_notes");
             entity.Property(x => x.CompanyId).HasColumnName("company_id");
             entity.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
             entity.Property(x => x.AssignedDispatcherUserId).HasColumnName("assigned_dispatcher_user_id");

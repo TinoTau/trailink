@@ -736,6 +736,44 @@ public class CrudApiTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Conflict_warning_uses_shared_notes_when_platform_order_no_is_blank()
+    {
+        var driver = await PostAsync<DriverReadDto>("/api/drivers", new DriverWriteDto { Name = "冲突司机-共用备注" });
+        var first = await PostAsync<OrderReadDto>("/api/orders", new OrderWriteDto
+        {
+            SharedNotes = "共用名\n第二行",
+            StartDate = new DateOnly(2032, 4, 2),
+            GuestCount = 1
+        });
+        var second = await PostAsync<OrderReadDto>("/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2032, 4, 2),
+            GuestCount = 1
+        });
+        await PostAsync<ItineraryDayReadDto>($"/api/orders/{first.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2032, 4, 2)
+        });
+        var secondDay = await PostAsync<ItineraryDayReadDto>($"/api/orders/{second.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2032, 4, 2)
+        });
+        await PutAsync<AssignmentResultDto>($"/api/orders/{first.Id}/driver", new AssignDriverDto { DriverId = driver.Id });
+        var warned = await PutAsync<ItineraryDayReadDto>(
+            $"/api/orders/{second.Id}/days/{secondDay.Id}",
+            new ItineraryDayWriteDto
+            {
+                ServiceDate = secondDay.ServiceDate,
+                DriverId = driver.Id
+            });
+        Assert.Contains(warned.Warnings, item => item.Contains("共用名") && !item.Contains("第二行") && !item.Contains(first.OrderNo));
+
+        await _client.DeleteAsync($"/api/orders/{first.Id}");
+        await _client.DeleteAsync($"/api/orders/{second.Id}");
+        await _client.DeleteAsync($"/api/drivers/{driver.Id}");
+    }
+
+    [Fact]
     public async Task Local_service_date_roundtrips_without_shift()
     {
         var order = await PostAsync<OrderReadDto>("/api/orders", new OrderWriteDto
@@ -864,10 +902,12 @@ public class CrudApiTests : IClassFixture<ApiFactory>
         {
             StartDate = new DateOnly(2026, 11, 20),
             GuestCount = 2,
-            Notes = "调度备注"
+            Notes = "调度备注",
+            SharedNotes = "共用备注"
         });
         Assert.Equal("调度备注", order.Notes);
         Assert.Null(order.DriverNotes);
+        Assert.Equal("共用备注", order.SharedNotes);
 
         var driverClient = _factory.CreateClient();
         var suffix = Guid.NewGuid().ToString("N")[..8];
@@ -883,29 +923,34 @@ public class CrudApiTests : IClassFixture<ApiFactory>
         var asDriver = await driverClient.GetFromJsonAsync<OrderReadDto>($"/api/orders/{order.Id}", JsonOptions);
         Assert.Null(asDriver!.Notes);
         Assert.Null(asDriver.DriverNotes);
+        Assert.Equal("共用备注", asDriver.SharedNotes);
 
         var driverWrite = await driverClient.PutAsJsonAsync($"/api/orders/{order.Id}", new OrderWriteDto
         {
             StartDate = order.StartDate,
             GuestCount = order.GuestCount,
             Notes = "想改调度备注",
-            DriverNotes = "司导备注"
+            DriverNotes = "司导备注",
+            SharedNotes = "司导改的共用"
         });
         driverWrite.EnsureSuccessStatusCode();
         var driverSaved = await driverWrite.Content.ReadFromJsonAsync<OrderReadDto>(JsonOptions);
         Assert.Null(driverSaved!.Notes);
         Assert.Equal("司导备注", driverSaved.DriverNotes);
+        Assert.Equal("司导改的共用", driverSaved.SharedNotes);
 
         var asCompany = await _client.GetFromJsonAsync<OrderReadDto>($"/api/orders/{order.Id}", JsonOptions);
         Assert.Equal("调度备注", asCompany!.Notes);
         Assert.Equal("司导备注", asCompany.DriverNotes);
+        Assert.Equal("司导改的共用", asCompany.SharedNotes);
 
         var numbered = await PutAsync<OrderReadDto>($"/api/orders/{order.Id}", new OrderWriteDto
         {
             StartDate = order.StartDate,
             GuestCount = order.GuestCount,
             PlatformOrderNo = "P-KEEP",
-            Notes = "调度备注"
+            Notes = "调度备注",
+            SharedNotes = "司导改的共用"
         });
         Assert.Equal("P-KEEP", numbered.PlatformOrderNo);
 
@@ -914,12 +959,14 @@ public class CrudApiTests : IClassFixture<ApiFactory>
             StartDate = order.StartDate,
             GuestCount = order.GuestCount,
             PlatformOrderNo = "司机改号",
-            DriverNotes = "司导备注"
+            DriverNotes = "司导备注",
+            SharedNotes = "司导改的共用"
         });
         blocked.EnsureSuccessStatusCode();
         var kept = await blocked.Content.ReadFromJsonAsync<OrderReadDto>(JsonOptions);
         Assert.Equal("P-KEEP", kept!.PlatformOrderNo);
         Assert.Equal("司导备注", kept.DriverNotes);
+        Assert.Equal("司导改的共用", kept.SharedNotes);
     }
 
     [Fact]

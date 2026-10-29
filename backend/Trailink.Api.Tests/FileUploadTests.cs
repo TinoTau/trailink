@@ -260,6 +260,116 @@ public class FileUploadTests : IClassFixture<ApiFactory>
         }
     }
 
+    [Fact]
+    public async Task Desk_reads_avatar_only_for_people_it_can_see()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var company = _factory.CreateClient();
+        var registered = await company.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"avco_{suffix}",
+            Password = "Passw0rd!",
+            Name = "头像公司",
+            AccountType = "company",
+            CompanyName = $"头像公司{suffix}"
+        });
+        registered.EnsureSuccessStatusCode();
+        var companyUser = (await registered.Content.ReadFromJsonAsync<SessionUserDto>())!;
+
+        var before = await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.False(before!.Single(item => item.Id == companyUser!.DriverId).HasAvatar);
+
+        (await company.PostAsync("/api/auth/avatar", ImageForm("avatar.png"))).EnsureSuccessStatusCode();
+        var drivers = await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.True(drivers!.Single(item => item.Id == companyUser!.DriverId).HasAvatar);
+        var selfAvatar = await company.GetAsync($"/api/drivers/{companyUser.DriverId}/avatar");
+        selfAvatar.EnsureSuccessStatusCode();
+        Assert.Equal("image/jpeg", selfAvatar.Content.Headers.ContentType?.MediaType);
+
+        var home = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        Assert.True(home!.Desk!.Dispatchers.Single(item => item.UserId == companyUser.Id).HasAvatar);
+        var memberAvatar = await company.GetAsync($"/api/company/dispatchers/{companyUser.Id}/avatar");
+        memberAvatar.EnsureSuccessStatusCode();
+        Assert.Equal("image/jpeg", memberAvatar.Content.Headers.ContentType?.MediaType);
+
+        var dispatcher = _factory.CreateClient();
+        (await dispatcher.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"avdp_{suffix}",
+            Password = "Passw0rd!",
+            Name = "头像调度",
+            AccountType = "driver"
+        })).EnsureSuccessStatusCode();
+        var dispatcherUser = (await dispatcher.GetFromJsonAsync<SessionUserDto>("/api/auth/me"))!;
+        (await dispatcher.PostAsJsonAsync("/api/companies/applications", new ApplyDispatcherDto
+        {
+            CompanyId = companyUser.CompanyId!.Value
+        })).EnsureSuccessStatusCode();
+        home = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        (await company.PostAsJsonAsync(
+            $"/api/company/applications/{home!.Desk!.Applications.Single().Id}/approve",
+            new { })).EnsureSuccessStatusCode();
+
+        home = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        Assert.False(home!.Desk!.Dispatchers.Single(item => item.UserId == dispatcherUser!.Id).HasAvatar);
+        Assert.Equal(HttpStatusCode.NotFound, (await company.GetAsync($"/api/company/dispatchers/{dispatcherUser.Id}/avatar")).StatusCode);
+
+        (await dispatcher.PostAsync("/api/auth/avatar", ImageForm("avatar.png"))).EnsureSuccessStatusCode();
+        home = await company.GetFromJsonAsync<CompanyHomeDto>("/api/company");
+        Assert.True(home!.Desk!.Dispatchers.Single(item => item.UserId == dispatcherUser.Id).HasAvatar);
+        var dispatcherAvatar = await company.GetAsync($"/api/company/dispatchers/{dispatcherUser.Id}/avatar");
+        dispatcherAvatar.EnsureSuccessStatusCode();
+        Assert.Equal("image/jpeg", dispatcherAvatar.Content.Headers.ContentType?.MediaType);
+
+        var driver = _factory.CreateClient();
+        (await driver.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"avdr_{suffix}",
+            Password = "Passw0rd!",
+            Name = "头像司导",
+            AccountType = "driver"
+        })).EnsureSuccessStatusCode();
+        var driverUser = await driver.GetFromJsonAsync<SessionUserDto>("/api/auth/me");
+        (await driver.PostAsync("/api/auth/avatar", ImageForm("avatar.png"))).EnsureSuccessStatusCode();
+        (await driver.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = companyUser.Id
+        })).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.NotFound, (await company.GetAsync($"/api/drivers/{driverUser!.DriverId}/avatar")).StatusCode);
+
+        var incoming = await company.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications");
+        (await company.PostAsJsonAsync($"/api/dispatchers/applications/{incoming!.Single().Id}/approve", new { })).EnsureSuccessStatusCode();
+        var roster = await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.True(roster!.Single(item => item.Id == driverUser.DriverId).HasAvatar);
+        var driverAvatar = await company.GetAsync($"/api/drivers/{driverUser.DriverId}/avatar");
+        driverAvatar.EnsureSuccessStatusCode();
+        Assert.Equal("image/jpeg", driverAvatar.Content.Headers.ContentType?.MediaType);
+
+        (await driver.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
+        {
+            DispatcherUserId = dispatcherUser.Id
+        })).EnsureSuccessStatusCode();
+        var dispatcherIncoming = await dispatcher.GetFromJsonAsync<List<DriverApplicantDto>>("/api/dispatchers/applications");
+        (await dispatcher.PostAsJsonAsync(
+            $"/api/dispatchers/applications/{dispatcherIncoming!.Single().Id}/approve",
+            new { })).EnsureSuccessStatusCode();
+        var dispatcherRoster = await dispatcher.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
+        Assert.True(dispatcherRoster!.Single(item => item.Id == driverUser.DriverId).HasAvatar);
+        (await dispatcher.GetAsync($"/api/drivers/{driverUser.DriverId}/avatar")).EnsureSuccessStatusCode();
+
+        var stranger = _factory.CreateClient();
+        (await stranger.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"avst_{suffix}",
+            Password = "Passw0rd!",
+            Name = "外人",
+            AccountType = "driver"
+        })).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync($"/api/drivers/{driverUser.DriverId}/avatar")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await stranger.GetAsync($"/api/company/dispatchers/{dispatcherUser.Id}/avatar")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await dispatcher.GetAsync($"/api/company/dispatchers/{companyUser.Id}/avatar")).StatusCode);
+    }
+
     private async Task<KeptFiles> CreateOrderWithFiles(HttpClient client, DateOnly day)
     {
         var order = await client.PostAsJsonAsync("/api/orders", new OrderWriteDto

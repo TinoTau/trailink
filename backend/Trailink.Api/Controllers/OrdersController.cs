@@ -126,6 +126,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             StartDate = request.StartDate,
             GuestCount = request.GuestCount,
             DriverNotes = request.DriverNotes,
+            SharedNotes = TextValue.NullIfBlank(request.SharedNotes),
             CreatedByUserId = user?.Id,
             CompanyId = companyId,
             AssignedDispatcherUserId = user?.Role == UserRoles.Dispatcher ? user.Id : null
@@ -180,6 +181,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         order.StartDate = request.StartDate;
         order.GuestCount = request.GuestCount;
         order.DriverNotes = request.DriverNotes;
+        order.SharedNotes = TextValue.NullIfBlank(request.SharedNotes);
         await db.SaveChangesAsync(cancellationToken);
         if (user?.Role != UserRoles.Driver)
         {
@@ -346,9 +348,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             request.DriverId,
             OrderDriverAssignment.AssignerFor(user, order, request.DriverId),
             cancellationToken,
-            request.FailOnConflict,
-            user?.Id,
-            user?.Role == UserRoles.Driver);
+            request.FailOnConflict);
 
         if (!result.Applied)
         {
@@ -442,6 +442,7 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
             GuestCount = order.GuestCount,
             Notes = notes,
             DriverNotes = order.DriverNotes,
+            SharedNotes = order.SharedNotes,
             CompanyId = order.CompanyId,
             CompanyName = order.Company?.Name,
             CreatedByUserId = order.CreatedByUserId,
@@ -622,12 +623,13 @@ public class OrdersController(TrailinkDbContext db, OrderDriverAssignment assign
         dto.AssignedDispatcherContact = null;
         dto.Notes = null;
         dto.DriverNotes = null;
+        dto.SharedNotes = null;
         dto.GuestCount = 0;
         dto.Files = [];
         foreach (var day in dto.Days)
         {
             day.Description = null;
-            day.EndLocation = null;
+            day.EndLocation = TextValue.FirstTextElement(day.EndLocation);
             day.AssignedByName = null;
             day.AssignedByContact = null;
             day.Activities = [];

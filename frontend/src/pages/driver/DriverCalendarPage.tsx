@@ -4,7 +4,7 @@ import { message } from 'antd'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { AccountMenu } from '../AccountMenu'
 import { clearDayDriver, createOrderWithDays, ordersApi } from '../../api/orders'
-import { PRESET_COLORS, contrastText } from '../../calendarUi'
+import { PRESET_COLORS, contrastText, driverCalendarFill, readDriverCalendarColors, writeDriverCalendarColors, type DriverCalendarColors } from '../../calendarUi'
 import {
   WEEKDAYS,
   addMonths,
@@ -28,39 +28,14 @@ import {
   pointFromDragEvent,
 } from '../../calendarDay'
 import { conflictDateChoices, ConflictDatePopover } from '../../ConflictDatePopover'
-import { conflictingOrderIds, driverAssignerCaption, orderDisplayLabel, CONFLICT_RED } from '../../orderFlags'
+import { dateOrderEdges, driverAssignerCaption, orderDisplayLabel, CONFLICT_RED } from '../../orderFlags'
+import { placeMark } from '../../placeMark'
 import type { DriverCalendarDay, DriverCalendarTrip, Order } from '../../types'
+import { CalendarInkBar, useCalendarInk } from '../../calendarInk'
 import { DriverDayEditor } from './DriverDayEditor'
 import './driver-calendar.css'
 
-const COLOR_STORAGE_KEY = 'trailink.driverCalendar.colors.v2'
 const CALENDAR_MONTH_SPAN = 6
-
-interface CalendarColors {
-  past: string
-  upcoming: string
-}
-
-const DEFAULT_COLORS: CalendarColors = {
-  past: '#C6F0E0',
-  upcoming: '#D6E4FF',
-}
-
-function readColors(): CalendarColors {
-  try {
-    const raw = localStorage.getItem(COLOR_STORAGE_KEY)
-    if (!raw) {
-      return DEFAULT_COLORS
-    }
-    const parsed = JSON.parse(raw) as CalendarColors
-    return {
-      past: parsed.past || DEFAULT_COLORS.past,
-      upcoming: parsed.upcoming || DEFAULT_COLORS.upcoming,
-    }
-  } catch {
-    return DEFAULT_COLORS
-  }
-}
 
 function monthsAroundDate(dateText: string, today: Date) {
   const earliest = monthKey(addMonths(today, -CALENDAR_MONTH_SPAN))
@@ -84,6 +59,12 @@ function firstOrderDate(order: Order) {
   return dates[0] || toDateOnly(order.startDate)
 }
 
+function ordersByStart(orders: Order[]) {
+  return [...orders].sort(
+    (left, right) => firstOrderDate(left).localeCompare(firstOrderDate(right)) || left.id.localeCompare(right.id),
+  )
+}
+
 function daysByDriver(orders: Order[], driverId: string | null): Record<string, DriverCalendarDay> {
   if (!driverId) {
     return {}
@@ -98,7 +79,7 @@ function daysByDriver(orders: Order[], driverId: string | null): Record<string, 
       const assignerName = driverAssignerCaption(order, day)
       bucket.items.push({
         orderId: order.id,
-        label: orderDisplayLabel(order, 'driver'),
+        label: orderDisplayLabel(order),
         itineraryDayId: day.id,
         endLocation: day.endLocation,
       })
@@ -113,6 +94,7 @@ function daysByDriver(orders: Order[], driverId: string | null): Record<string, 
 
 export function DriverCalendarPage() {
   const { user } = useAuthenticatedAuth()
+  const ink = useCalendarInk()
   const driverId = user.driverId
   const today = useMemo(() => todayLocal(), [])
   const todayKey = formatLocalDate(today)
@@ -120,7 +102,7 @@ export function DriverCalendarPage() {
   const latestMonth = monthKey(addMonths(today, CALENDAR_MONTH_SPAN))
   const [months, setMonths] = useState(() => [-2, -1, 0, 1, 2].map((offset) => addMonths(today, offset)))
   const [orders, setOrders] = useState<Order[]>([])
-  const [colors, setColors] = useState<CalendarColors>(readColors)
+  const [colors, setColors] = useState<DriverCalendarColors>(readDriverCalendarColors)
   const [colorTarget, setColorTarget] = useState<'past' | 'upcoming' | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [conflictPick, setConflictPick] = useState<{ date: string; anchor: DOMRect } | null>(null)
@@ -141,9 +123,10 @@ export function DriverCalendarPage() {
   const unbindLock = useRef(false)
 
   const daysByDate = useMemo(() => daysByDriver(orders, driverId), [orders, driverId])
-  const conflictOrderIds = useMemo(() => [...conflictingOrderIds(orders, driverId)], [orders, driverId])
   const visibleSelectedDate = selectedDate && daysByDate[selectedDate] ? selectedDate : null
   const selectedDay = visibleSelectedDate ? daysByDate[visibleSelectedDate] : undefined
+  const [detailBelow, setDetailBelow] = useState(false)
+  const [detailHintBox, setDetailHintBox] = useState<{ left: number; top: number } | null>(null)
   const [rangeFrom, rangeTo] = rangeStart ? orderedRange(rangeStart, rangeEnd) : [null, null]
   const addingTrip = menuOpen && !canceling
 
@@ -176,6 +159,56 @@ export function DriverCalendarPage() {
     }, 80)
     return () => window.clearTimeout(timer)
   }, [todayKey, months, orders, selectedDate])
+
+  useEffect(() => {
+    const root = scrollRef.current
+    if (!root) {
+      return
+    }
+    let frame = 0
+    function check() {
+      const scroller = scrollRef.current
+      const card = scroller?.querySelector<HTMLElement>('.driver-detail-card')
+      const day = visibleSelectedDate ? document.getElementById(`driver-day-${visibleSelectedDate}`) : null
+      if (!visibleSelectedDate || !scroller || !card || !day) {
+        setDetailBelow(false)
+        setDetailHintBox(null)
+        return
+      }
+      const rootRect = scroller.getBoundingClientRect()
+      const cardRect = card.getBoundingClientRect()
+      const below = cardRect.top > rootRect.bottom - 48
+      if (!below) {
+        setDetailBelow(false)
+        setDetailHintBox(null)
+        return
+      }
+      const dayRect = day.getBoundingClientRect()
+      const width = 76
+      const height = 32
+      let top = dayRect.bottom + 6
+      if (top + height > rootRect.bottom - 8) {
+        top = rootRect.bottom - height - 8
+      }
+      let left = dayRect.left + dayRect.width / 2 - width / 2
+      left = Math.min(Math.max(left, rootRect.left + 8), rootRect.right - width - 8)
+      const next = { left: Math.round(left), top: Math.round(top) }
+      setDetailBelow(true)
+      setDetailHintBox((current) => (current?.left === next.left && current.top === next.top ? current : next))
+    }
+    function schedule() {
+      window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(check)
+    }
+    schedule()
+    root.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      root.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+    }
+  }, [visibleSelectedDate, orders, months])
 
   useEffect(() => {
     function cancelHold() {
@@ -238,9 +271,9 @@ export function DriverCalendarPage() {
     }
   }, [])
 
-  function persistColors(next: CalendarColors) {
+  function persistColors(next: DriverCalendarColors) {
     setColors(next)
-    localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(next))
+    writeDriverCalendarColors(next)
   }
 
   function prependMonth() {
@@ -282,6 +315,16 @@ export function DriverCalendarPage() {
     })
   }
 
+  function revealOpenDetail() {
+    const root = scrollRef.current
+    const card = root?.querySelector<HTMLElement>('.driver-detail-card')
+    if (!root || !card) {
+      return
+    }
+    const top = card.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop
+    root.scrollTo({ top: Math.max(0, top - 8), behavior: 'smooth' })
+  }
+
   function onScroll() {
     const scroller = scrollRef.current
     if (!scroller || expandingRef.current) {
@@ -296,7 +339,7 @@ export function DriverCalendarPage() {
   }
 
   function tripFill(dateText: string) {
-    return dateText < todayKey ? colors.past : colors.upcoming
+    return driverCalendarFill(dateText, todayKey, colors)
   }
 
   function clearRangeHold() {
@@ -476,7 +519,7 @@ export function DriverCalendarPage() {
       if (result.warnings.length > 0) {
         message.warning(result.warnings.join('；'))
       } else {
-        const label = orderDisplayLabel(order, 'driver')
+        const label = orderDisplayLabel(order)
         message.success(label ? `已领取 ${label}，共 ${result.updatedDayCount} 天` : `已领取，共 ${result.updatedDayCount} 天`)
       }
       const focusDate = firstOrderDate(order)
@@ -617,7 +660,7 @@ export function DriverCalendarPage() {
   }
 
   return (
-    <div className="driver-calendar-page">
+    <div className="driver-calendar-page" style={ink.style}>
       <header className="driver-calendar-header">
         <div>
           <h1>我的行程</h1>
@@ -723,14 +766,22 @@ export function DriverCalendarPage() {
       {conflictPick && driverId ? (
         <ConflictDatePopover
           anchor={conflictPick.anchor}
-          choices={conflictDateChoices(orders, driverId, conflictPick.date, conflictOrderIds, (order) => ({
-            label: orderDisplayLabel(order, 'driver') || '订单',
-            showText: true,
-          }))}
+          choices={conflictDateChoices(
+            ordersByStart(orders),
+            driverId,
+            conflictPick.date,
+            [],
+            (order, day) => ({
+              label: driverAssignerCaption(order, day) ?? '',
+              showText: true,
+            }),
+            { patterns: false },
+          )}
           onChoose={(choice) => void releaseConflictDay(choice.orderId, choice.dayId)}
           onClose={() => setConflictPick(null)}
         />
       ) : null}
+      <div className="driver-calendar-stage calendar-ink-host">
       <div className="driver-calendar-scroll" ref={scrollRef} onScroll={onScroll}>
         {months.map((month) => (
           <MonthSection
@@ -739,6 +790,7 @@ export function DriverCalendarPage() {
             todayKey={todayKey}
             selectedDate={visibleSelectedDate}
             daysByDate={daysByDate}
+            orders={orders}
             tripFill={tripFill}
             addingTrip={addingTrip}
             canceling={canceling}
@@ -763,6 +815,21 @@ export function DriverCalendarPage() {
           </MonthSection>
         ))}
       </div>
+      <CalendarInkBar balance={ink.balance} side={ink.side} onChange={ink.setBalance} onSideChange={ink.setSide} />
+      </div>
+      {detailBelow && detailHintBox ? (
+        <button
+          type="button"
+          className="driver-detail-hint"
+          style={{ left: detailHintBox.left, top: detailHintBox.top }}
+          aria-label="订单详情在下方"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={revealOpenDetail}
+        >
+          <DetailBelowIcon />
+          详情
+        </button>
+      ) : null}
       {colorTarget && (
         <div className="driver-swatches">
           {PRESET_COLORS.map((color) => (
@@ -801,11 +868,20 @@ export function DriverCalendarPage() {
   )
 }
 
+function DetailBelowIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  )
+}
+
 function MonthSection({
   month,
   todayKey,
   selectedDate,
   daysByDate,
+  orders,
   tripFill,
   addingTrip,
   canceling,
@@ -822,6 +898,7 @@ function MonthSection({
   todayKey: string
   selectedDate: string | null
   daysByDate: Record<string, DriverCalendarDay>
+  orders: Order[]
   tripFill: (dateText: string) => string
   addingTrip: boolean
   canceling: boolean
@@ -854,6 +931,9 @@ function MonthSection({
           const hasTrip = Boolean(daysByDate[dateText])
           const conflict = (daysByDate[dateText]?.items.length ?? 0) > 1
           const fill = conflict ? CONFLICT_RED : hasTrip ? tripFill(dateText) : undefined
+          const edges = cell.inMonth && hasTrip
+            ? dateOrderEdges(orders, dateText, daysByDate[dateText].items.map((item) => item.orderId))
+            : { start: false, end: false }
           const selected = selectedDate === dateText
           const inRange = Boolean(rangeFrom && rangeTo && dateText >= rangeFrom && dateText <= rangeTo)
           const rangeEdge = dateText === rangeFrom || dateText === rangeTo
@@ -863,10 +943,13 @@ function MonthSection({
               type="button"
               id={cell.inMonth ? `driver-day-${dateText}` : undefined}
               className={[
+                'calendar-day',
                 'driver-day',
                 cell.inMonth ? '' : 'outside',
                 hasTrip ? 'has-trip' : '',
                 conflict ? 'conflict' : '',
+                edges.start ? 'order-start' : '',
+                edges.end ? 'order-end' : '',
                 selected ? 'selected' : '',
                 releaseDate === dateText ? 'release' : '',
                 inRange ? 'in-range' : '',
@@ -884,7 +967,11 @@ function MonthSection({
               }
               style={
                 fill
-                  ? { background: fill, color: contrastText(fill) }
+                  ? {
+                      background: fill,
+                      color: contrastText(fill),
+                      ...(edges.start || edges.end ? { '--order-fill': fill } : {}),
+                    }
                   : undefined
               }
               {...(cell.inMonth ? { [CALENDAR_DATE_ATTR]: dateText } : {})}
@@ -930,9 +1017,13 @@ function MonthSection({
             >
               {cell.inMonth ? (
                 hasTrip ? (
-                  <CalendarDayCaption day={cell.date.getDate()} label={daysByDate[dateText].assignerName} />
+                  <CalendarDayCaption
+                    day={cell.date.getDate()}
+                    label={daysByDate[dateText].assignerName}
+                    place={placeMark(daysByDate[dateText].items.find((item) => item.endLocation)?.endLocation)}
+                  />
                 ) : (
-                  cell.date.getDate()
+                  <b>{cell.date.getDate()}</b>
                 )
               ) : (
                 ''

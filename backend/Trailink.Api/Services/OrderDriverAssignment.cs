@@ -109,9 +109,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
         Guid? driverId,
         Guid? assignedByUserId,
         CancellationToken cancellationToken,
-        bool failOnConflict = false,
-        Guid? viewerUserId = null,
-        bool viewerIsDriver = false)
+        bool failOnConflict = false)
     {
         var warnings = driverId is Guid assignedId
             ? await scheduling.FindDriverConflictsAsync(
@@ -119,9 +117,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
                 order.Days.Select(day => day.ServiceDate),
                 order.Id,
                 cancellationToken,
-                order.CompanyId,
-                viewerUserId,
-                viewerIsDriver)
+                order.CompanyId)
             : [];
 
         if (failOnConflict && warnings.Count > 0)

@@ -7,6 +7,7 @@ public class OrderWriteDto
     public int GuestCount { get; set; }
     public string? Notes { get; set; }
     public string? DriverNotes { get; set; }
+    public string? SharedNotes { get; set; }
     public Guid? CompanyId { get; set; }
 }
 
@@ -21,6 +22,7 @@ public class OrderReadDto
     public int GuestCount { get; set; }
     public string? Notes { get; set; }
     public string? DriverNotes { get; set; }
+    public string? SharedNotes { get; set; }
     public Guid? CompanyId { get; set; }
     public string? CompanyName { get; set; }
     public string? CompanyNote { get; set; }

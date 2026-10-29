@@ -6,12 +6,15 @@ function clipTileLabel(raw: string) {
   return raw.length > TILE_LABEL_MAX ? raw.slice(0, TILE_LABEL_MAX) : raw
 }
 
+function firstLine(value?: string | null) {
+  return (value ?? '').split(/\r?\n/, 1)[0].trim()
+}
+
 export function orderDisplayLabel(order: {
   platformOrderNo?: string | null
-  notes?: string | null
-  driverNotes?: string | null
-}, side: 'dispatcher' | 'driver' = 'dispatcher') {
-  const raw = (order.platformOrderNo ?? '').trim() || ((side === 'driver' ? order.driverNotes : order.notes) ?? '').trim()
+  sharedNotes?: string | null
+}) {
+  const raw = firstLine(order.platformOrderNo) || firstLine(order.sharedNotes)
   return clipTileLabel(raw)
 }
 
@@ -239,6 +242,40 @@ export function conflictingOrderIds(orders: Order[], driverId?: string | null) {
     }
   }
   return conflicted
+}
+
+export function orderSpan(order: { days: { serviceDate: string }[] }) {
+  const dates = order.days.map((day) => day.serviceDate).sort()
+  if (dates.length === 0) {
+    return null
+  }
+  return { start: dates[0], end: dates[dates.length - 1] }
+}
+
+export function dateOrderEdges(
+  orders: { id: string; days: { serviceDate: string }[] }[],
+  date: string,
+  orderIds: Iterable<string>,
+) {
+  const present = new Set(orderIds)
+  let start = false
+  let end = false
+  for (const order of orders) {
+    if (!present.has(order.id)) {
+      continue
+    }
+    const span = orderSpan(order)
+    if (!span) {
+      continue
+    }
+    if (span.start === date) {
+      start = true
+    }
+    if (span.end === date) {
+      end = true
+    }
+  }
+  return { start, end }
 }
 
 export function dayOnDriverDate(order: Order, driverId: string, date: string) {

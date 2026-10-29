@@ -354,6 +354,10 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("platform_order_no");
 
+                    b.Property<string>("SharedNotes")
+                        .HasColumnType("text")
+                        .HasColumnName("shared_notes");
+
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date")
                         .HasColumnName("start_date");

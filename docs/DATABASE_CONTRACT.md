@@ -87,6 +87,7 @@ assigned_dispatcher_user_id     UUID NULL
 - `start_date` 为行程所在地当地日期，类型 `DATE`，不做 UTC 转换。
 - 调度备注不写在 `orders` 上，见 `order_notes`。每人一条，只自己可见。
 - `driver_notes` 是司导备注，只在「我的行程」读写。角色为司导的接口响应不返回调度备注。
+- `shared_notes` 是共用备注，公司、调度员、司导都能读写。各自的备注仍互不可见，共用备注显示在各自备注上方。
 - `assigned_dispatcher_user_id` 只表示公司把整单交给哪位调度员，不拆天、不另建订单。调度员建单时默认写成自己。公司改派即覆盖。
 
 ---
@@ -134,6 +135,7 @@ assigned_by_user_id  UUID NULL
 规则：
 
 - 一个订单同一天只保留一条行程记录。
+- `end_location` 是当天住宿位置。日历用它的第一个字做浮雕，不另建地点表。
 - `service_date` 为行程所在地当地日期，类型 `DATE`，不做 UTC 转换。
 - 不记录每日出发时间，不恢复 `start_time`，不新增出发/接人时间字段。
 - 删除订单时级联删除对应的每日行程。
@@ -187,7 +189,7 @@ file_path   TEXT NOT NULL
 
 - `order_id` → `orders.id`
 
-文件实际存储在 `App_Data/files/orders/`。`file_path` 为相对路径 `files/orders/{fileId}{ext}`。删除订单时同时删除磁盘文件。订单最后一天起满 7 天后删除这些行和磁盘文件。头像和公司二维码不在此列。
+文件实际存储在 `App_Data/files/orders/`。`file_path` 为相对路径 `files/orders/{fileId}{ext}`。删除订单时同时删除磁盘文件。订单最后一天起满 7 天后删除这些行和磁盘文件。用户头像和公司头像不在此列。
 
 ---
 
@@ -243,7 +245,7 @@ assigned_color VARCHAR(7) NULL
 - 注册公司或司导时同时写一条 `drivers`，`driver_id` 指向该司机。已有账户若还没有司机身份，登录或 `me` 时补写。
 - 调度员与司导可以同时属于多家公司，关系只写 `company_members`，不再占用 `users.company_id`。
 - 批准为调度员后写入成员行，并把账户 `role` 设为 `dispatcher`；从最后一家公司移除后回到 `driver`，保留 `driver_id`。
-- `avatar_path` 指向压缩后的 `files/avatars/{userId}.jpg`。再次上传时删除该用户旧头像文件。头像、二维码、电子票、订单截图都落在 `App_Data/files/` 下各自子目录，不进 `wwwroot`。
+- `avatar_path` 指向压缩后的 `files/avatars/{userId}.jpg`。再次上传时删除该用户旧头像文件。用户头像、公司头像、电子票、订单截图都落在 `App_Data/files/` 下各自子目录，不进 `wwwroot`。
 - `assigned_color` 是该用户自己的已分配颜色（调度台 / 派给调度共用），每人一条。空则前端用默认浅绿。不另建颜色表。
 - 登录用户名和密码只由本人在个人信息修改。用户名仍是 `username`，密码只存 `password_hash`。改用户名不换 `id`，登录 Cookie 仍按用户 id。
 - `contact` 是该用户自己的联系方式，手机号或微信号，只由本人在个人信息修改。公司信息里待批准申请和调度员姓名后、个人信息的司导申请、调度台司导详情、以及我的行程点开日期后的调度员姓名旁，都读这一列。不读登录用户名，也不读 `companies.contact` 或 `drivers.phone`。

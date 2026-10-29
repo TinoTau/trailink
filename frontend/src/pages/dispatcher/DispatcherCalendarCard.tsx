@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from 'react'
+import { CalendarInkBar, useCalendarInk } from '../../calendarInk'
 import { CALENDAR_DATE_ATTR, CalendarDayCaption, captureCalendarPointer } from '../../calendarDay'
 import { WEEKDAYS, formatLocalDate, monthCells, monthsBetween, orderedRange, pad, todayLocal } from '../../localDate'
 import { OrderInfoFields, OrderInfoPanel, TrashIcon } from '../OrderInfoFields'
@@ -8,11 +9,14 @@ export interface CalendarMark {
   dayId: string
   orderId: string
   label?: string
+  place?: string
   assigned?: boolean
   owned?: boolean
   color?: string
   textColor?: string
   conflict?: boolean
+  orderStart?: boolean
+  orderEnd?: boolean
 }
 
 interface DispatcherCalendarCardProps {
@@ -23,6 +27,7 @@ interface DispatcherCalendarCardProps {
   rangeStart: string
   rangeEnd: string
   onClose: () => void
+  inkBar?: boolean
   onCardPointerDown?: (event: PointerEvent<HTMLElement>) => void
   onDayPointerDown?: (event: PointerEvent<HTMLButtonElement>, mark: CalendarMark) => void
   onDayClick?: (mark: CalendarMark, anchor: HTMLButtonElement) => void
@@ -42,6 +47,8 @@ interface DispatcherCalendarCardProps {
   onCompanyChange?: (companyId: string, companyName: string) => void
   notes?: string
   onNotesChange?: (value: string) => void
+  sharedNotes?: string
+  onSharedNotesChange?: (value: string) => void
   onNotesSave?: () => void
   notesExtra?: ReactNode
   notesLabel?: string
@@ -61,6 +68,7 @@ export function DispatcherCalendarCard({
   rangeStart,
   rangeEnd,
   onClose,
+  inkBar = false,
   onCardPointerDown,
   onDayPointerDown,
   onDayClick,
@@ -80,6 +88,8 @@ export function DispatcherCalendarCard({
   onCompanyChange,
   notes,
   onNotesChange,
+  sharedNotes,
+  onSharedNotesChange,
   onNotesSave,
   notesExtra,
   notesLabel,
@@ -90,6 +100,7 @@ export function DispatcherCalendarCard({
   bodyKey,
   onBodyScroll,
 }: DispatcherCalendarCardProps) {
+  const ink = useCalendarInk()
   const [localInfoOpen, setLocalInfoOpen] = useState(false)
   const notesOpen = onInfoOpenChange ? Boolean(infoOpen) : localInfoOpen
   const byDate = new Map(marks.map((mark) => [mark.date, mark]))
@@ -117,12 +128,13 @@ export function DispatcherCalendarCard({
   }
 
   return (
-    <article className="dispatcher-card">
+    <article className={`dispatcher-card${inkBar ? ' calendar-ink-host' : ''}`} style={inkBar ? ink.style : undefined}>
       <OrderInfoPanel
         title={title}
         subtitle={subtitle}
         meta={meta}
         notes={notes}
+        sharedNotes={sharedNotes}
         open={notesOpen}
         onOpenChange={(next) => {
           if (onInfoOpenChange) {
@@ -163,8 +175,10 @@ export function DispatcherCalendarCard({
             onCompanyChange={onCompanyChange}
             notes={notes}
             onNotesChange={onNotesChange}
-            notesLabel={notesLabel ?? (canEditOrder ? '调度备注' : '备注')}
-            notesPlaceholder={notesPlaceholder ?? (canEditOrder ? '仅调度可见，司导看不到' : '给这个司导写备注')}
+            sharedNotes={sharedNotes}
+            onSharedNotesChange={onSharedNotesChange}
+            notesLabel={notesLabel}
+            notesPlaceholder={notesPlaceholder}
             onSave={onNotesSave}
             extra={notesExtra}
             autoFocus
@@ -194,17 +208,23 @@ export function DispatcherCalendarCard({
                   <button
                     key={date + String(cell.inMonth)}
                     type="button"
-                    className={`dispatcher-day${!cell.inMonth ? ' outside' : ''}${mark ? ' marked' : ''}${mark?.assigned === false ? ' unassigned' : ''}${mark?.owned === false ? ' locked' : ''}${inRange ? ' in-range' : ''}${rangeEdge ? ' range-edge' : ''}${date === today && cell.inMonth ? ' today' : ''}`}
+                    className={`calendar-day dispatcher-day${!cell.inMonth ? ' outside' : ''}${mark ? ' marked' : ''}${mark?.conflict ? ' conflict' : ''}${mark?.assigned === false ? ' unassigned' : ''}${mark?.owned === false ? ' locked' : ''}${cell.inMonth && mark?.orderStart ? ' order-start' : ''}${cell.inMonth && mark?.orderEnd ? ' order-end' : ''}${inRange ? ' in-range' : ''}${rangeEdge ? ' range-edge' : ''}${date === today && cell.inMonth ? ' today' : ''}`}
                     disabled={!mark && !selectableDay}
                     style={
                       mark?.color
-                        ? { background: mark.color, color: mark.textColor || undefined }
+                        ? {
+                            background: mark.color,
+                            color: mark.textColor || undefined,
+                            ...(cell.inMonth && (mark.orderStart || mark.orderEnd)
+                              ? { '--order-fill': mark.color }
+                              : {}),
+                          }
                         : undefined
                     }
                     {...(cell.inMonth ? { 'data-service-date': date } : {})}
                     {...(selectableDay ? { [CALENDAR_DATE_ATTR]: date } : {})}
                     onClick={
-                      mark?.conflict
+                      mark?.conflict || mark?.owned === false
                         ? (event) => {
                             event.stopPropagation()
                             onDayClick?.(mark, event.currentTarget)
@@ -255,7 +275,7 @@ export function DispatcherCalendarCard({
                     }
                     onPointerEnter={selectableDay ? () => onDatePointerEnter?.(date) : undefined}
                   >
-                    <CalendarDayCaption day={cell.date.getDate()} label={mark?.label} />
+                    <CalendarDayCaption day={cell.date.getDate()} label={mark?.label} place={mark?.place} />
                   </button>
                 )
               })}
@@ -263,6 +283,9 @@ export function DispatcherCalendarCard({
           </section>
         ))}
       </div>
+      {inkBar ? (
+        <CalendarInkBar balance={ink.balance} side={ink.side} onChange={ink.setBalance} onSideChange={ink.setSide} />
+      ) : null}
       {footer ? <div className="dispatcher-card-footer">{footer}</div> : null}
     </article>
   )
@@ -280,6 +303,7 @@ export function DispatcherDayCard({
   notesPlaceholder,
   onRemove,
   removeLabel = '移除',
+  onHeadPointerDown,
   children,
 }: {
   title: string
@@ -293,6 +317,7 @@ export function DispatcherDayCard({
   notesPlaceholder?: string
   onRemove?: () => void
   removeLabel?: string
+  onHeadPointerDown?: (event: PointerEvent<HTMLElement>) => void
   children: ReactNode
 }) {
   const [notesOpen, setNotesOpen] = useState(false)
@@ -308,6 +333,7 @@ export function DispatcherDayCard({
         onOpenChange={setNotesOpen}
         editable={canEditNotes}
         editLabel="备注"
+        onHeadPointerDown={onHeadPointerDown}
         extraActions={cardRemoveButton(onRemove, removeLabel)}
         trailing={
           <button type="button" className="dispatcher-icon-btn" aria-label={closeLabel} onClick={onClose}>

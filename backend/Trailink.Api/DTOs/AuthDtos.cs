@@ -153,6 +153,7 @@ public class CompanyOrderDto
     public string? PlatformOrderNo { get; set; }
     public string? Notes { get; set; }
     public string? DriverNotes { get; set; }
+    public string? SharedNotes { get; set; }
     public DateOnly StartDate { get; set; }
     public int DayCount { get; set; }
     public string Kind { get; set; } = "company";
@@ -181,6 +182,7 @@ public class CompanyMemberDto
     public string? Contact { get; set; }
     public string? Notes { get; set; }
     public bool Hidden { get; set; }
+    public bool HasAvatar { get; set; }
 }
 
 public class DispatcherNoteWriteDto

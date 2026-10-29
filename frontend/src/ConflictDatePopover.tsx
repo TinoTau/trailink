@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './ConflictDatePopover.css'
 
+import { CalendarDayCaption } from './calendarDay'
 import { formatMonthDay } from './localDate'
+import { placeMark } from './placeMark'
 import { conflictPatternStyle, dayOnDriverDate, ordersOnDriverDate, patternForOrder, type ConflictPattern } from './orderFlags'
 import type { ItineraryDay, Order } from './types'
 
@@ -11,7 +13,8 @@ export type ConflictDateChoice = {
   dayId: string
   dateLabel: string
   label: string
-  pattern: ConflictPattern
+  place?: string
+  pattern?: ConflictPattern
   showText: boolean
 }
 
@@ -21,8 +24,10 @@ export function conflictDateChoices(
   date: string,
   patternIds: Iterable<string>,
   textFor: (order: Order, day: ItineraryDay | undefined) => { label: string; showText: boolean },
+  options?: { patterns?: boolean },
 ): ConflictDateChoice[] {
-  const ids = [...patternIds]
+  const withPattern = options?.patterns !== false
+  const ids = withPattern ? [...patternIds] : []
   const dateLabel = formatMonthDay(date)
   return ordersOnDriverDate(orders, driverId, date).map((order) => {
     const day = dayOnDriverDate(order, driverId, date)
@@ -32,7 +37,8 @@ export function conflictDateChoices(
       dayId: day?.id ?? '',
       dateLabel,
       label: text.label,
-      pattern: patternForOrder(ids, order.id),
+      place: placeMark(day?.endLocation),
+      pattern: withPattern ? patternForOrder(ids, order.id) : undefined,
       showText: text.showText,
     }
   })
@@ -78,7 +84,7 @@ export function ConflictDatePopover({
           key={choice.orderId}
           type="button"
           className={`conflict-date-copy${armedId === choice.orderId ? ' release' : ''}`}
-          style={conflictPatternStyle(choice.pattern, 62)}
+          style={choice.pattern ? conflictPatternStyle(choice.pattern, 62) : undefined}
           aria-pressed={armedId === choice.orderId}
           aria-label={
             armedId === choice.orderId
@@ -95,12 +101,11 @@ export function ConflictDatePopover({
             onChoose(choice)
           }}
         >
-          {choice.showText ? (
-            <>
-              <b>{choice.dateLabel}</b>
-              {choice.label ? <em>{choice.label}</em> : null}
-            </>
-          ) : null}
+          <CalendarDayCaption
+            day={choice.showText ? choice.dateLabel : undefined}
+            label={choice.showText ? choice.label : undefined}
+            place={choice.place}
+          />
         </button>
       ))}
     </div>,

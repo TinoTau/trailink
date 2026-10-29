@@ -34,6 +34,7 @@ POST /api/company/applications/{applicationId}/approve
 DELETE /api/company/dispatchers/{userId}
 PUT  /api/company/dispatchers/{userId}/notes
 PUT  /api/company/dispatchers/{userId}/hidden
+GET  /api/company/dispatchers/{userId}/avatar
 GET  /api/dispatchers?name=
 POST /api/dispatchers/applications
 GET  /api/dispatchers/applications
@@ -58,9 +59,9 @@ DELETE /api/dispatchers/drivers/{driverId}
 
 `GET /api/auth/me` 返回角色、所属公司列表、本人 `driverId`、`hasAvatar`、`assignedColor`、待批准的调度员申请，以及待批准的司导申请。角色以数据库为准。一人可属于多家公司。公司与调度员若还没有司机身份，登录或 `me` 时会补一条 `drivers` 记录，与司导共用行程日历。注册时另写一条已批准的 `driver_applications`，申请人和批准人都是本人；已有账号在登录或 `me` 时补上这一行。公司和调度员因此一开始就能把自己当成司导派单。普通司导没有调度台。公司账户注册时再给自己写一条 `company_members.role=dispatcher`，账号角色仍是公司；已有公司账号在登录或 `me` 时补上。这样公司打开派给调度就能把单交给自己。司导和调度员账号没有所属公司，不写这一行。对外的申请接口仍拒绝向自己申请。`assignedColor` 是当前用户自己的已分配颜色，写在 `users.assigned_color`，未选过时为默认浅绿。`PUT /api/auth/assigned-color` 只改自己这一条，必须是调度台提供的色板之一；其他人读不到、也改不了。`PUT /api/auth/name` 改当前用户 `users.name`，1 到 100 字。若已有本人 `driver_id`，同时把对应 `drivers.name` 写成同一姓名。`PUT /api/auth/username` 只改当前用户 `users.username`，3 到 50 个字符，忽略大小写后不能与其他人重复，改完仍保持登录。`PUT /api/auth/password` 须提交当前密码和新密码，新密码至少 8 位；当前密码不对时不修改，改完仍保持登录。`PUT /api/auth/contact` 改当前用户 `users.contact`，可空，最长 200 字，清空即删除。`GET /api/auth/me` 带回这条联系方式。公司信息的待批准申请和调度员名单在姓名后显示 `users.contact`，没有联系方式时前端写「暂未填写」，不显示登录用户名。`GET /api/drivers` 不是全员名册。调度员只看到向自己申请、且已批准的司导；待批准的人只出现在申请列表。公司账户只看到向本公司账户申请、且已批准的司导；调度员名下的司导，以及只因派单写入 `company_members` 的司导，不会出现在公司调度台。没有 `driver_notes` 行时 `hidden` 为 false，调度台默认显示。隐藏只读这一列，不读浏览器。司导只看到自己。已绑定账号的司导优先返回 `users.name`，避免改名后调度台卡片仍显示旧档案名。未绑定账号的司导档案仍读 `drivers.name`，不出现在这三份名单里。
 
-`POST /api/auth/avatar` 上传本人头像，`GET /api/auth/avatar` 读取。只接受 8MB 以内的 jpg / png / webp。服务端缩小到最长边 256 并压成 JPEG 后再写入 `App_Data/files/avatars/`，`users.avatar_path` 存相对路径。覆盖上传时删除该用户旧头像（含不同扩展名）。读取带 `Cache-Control: private, max-age=86400`。
+`POST /api/auth/avatar` 上传本人头像，`GET /api/auth/avatar` 读取。只接受 8MB 以内的 jpg / png / webp。服务端缩小到最长边 256 并压成 JPEG 后再写入 `App_Data/files/avatars/`，`users.avatar_path` 存相对路径。覆盖上传时删除该用户旧头像（含不同扩展名）。本人读取带 `Cache-Control: private, max-age=86400`。调度台和派给调度显示的是同一张头像，不另存文件。`GET /api/drivers` 与 `GET /api/drivers/{id}` 增加 `hasAvatar`，已绑定账号且 `avatar_path` 非空时为 true。`GET /api/drivers/{id}/avatar` 只给能在司导名单里看到这位司导的登录用户读取，其他人与没有头像都是 404。`GET /api/company` 的 `dispatchers[].hasAvatar` 同样表示该调度员是否上传过头像。`GET /api/company/dispatchers/{userId}/avatar` 只给本公司账户读取已列入本公司调度员名单的人；非公司账户 403，不是本公司调度员或没有头像为 404。这两处读取带 `Cache-Control: private, no-cache`，换头像后下次打开页面即可看到新图。
 
-`GET /api/companies?name=` 需登录，按名称模糊查找，最多 20 条。司导和调度员都可以申请成为某家公司的调度员。已经是该公司司导成员的仍可申请升为调度员；已经是调度员则不能再申请。`GET /api/dispatchers?name=` 只用于按姓名查找并提交申请，不是公司或调度台的人员名单。可以搜到调度员，也可以搜到公司账户。司导和调度员可以向某位调度员或某个公司账户申请成为司导；即使已经属于同一家公司，仍要单独申请。向调度员申请并批准后，关系留在 `driver_applications`，并写入该调度员所在公司的 `company_members`，`role=driver`，司导资源跟着调度员进公司，公司账户的调度台不因此列出。向公司账户申请并批准后，同一张表的 `dispatcher_user_id` 指向公司账户，公司调度台只看这一行。公司和调度员都在个人信息页看到待批准申请，每行是申请人姓名和其 `users.contact`，没有联系方式时前端写「暂未填写」，不显示登录用户名。`DELETE /api/dispatchers/drivers/{driverId}` 删除当前调度员与这位司导已批准的 `driver_applications` 行，不能删除自己这一行。同时收回未完成订单里分给这位司导、且由该调度员派出或挂在该调度员名下的日期：这些行程日清空 `driver_id`，有几天清几天，不删订单。最后一天早于今天的订单不动。不删司导账号，不改 `company_members`。对方可以重新申请。批准前调度台看不到这位司导，另一位调度员也不会因为同公司就看到。`GET /api/company` 返回可查看的公司列表和当前公司桌面，多家公司用同一下拉切换，选项文字是 `companies[].notes`（当前用户自己的公司简称）。`desk.name` 是公司全名。能看到的公司包括自己所属的，以及接过订单的：创建过、被指派为调度、派过行程日，或行程日 `driver_id` 是自己。桌面含公司全名、负责人、联系方式、二维码、本人公司简称，以及订单缩略。缩略不展示系统订单号：有公司订单号用公司订单号，否则司导用司导备注、调度员和公司账户用自己的订单备注。图标再显示起始日期和天数。点开后每个行程日先展示该日活动内容，多个活动用 `-` 连接，活动后再展示当天司导姓名（`itinerary_days.driver_id`）。没派司导时前端写未分配。活动输入不放占位文字，弹框不再另写一行公司订单号；公司、调度员、司导都改 `order_activities.content`，不另存一份。公司账户只看本公司已派完、且最后一天早于今天的历史单。司导看自己当前跑着的单，调度员看自己当前跑着的和自己当前分配的单（行程日 `assigned_by_user_id` 是自己）；已结束（最后一天早于今天）和尚未结束的都在内。只创建或只被指派为调度、但没有自己跑或分配的单不出现。分配改掉后，当前行程日不再属于自己，这张单就不再出现。与公司建立联系后若还没有简称，写入公司账户已保存的简称；公司还没有简称时，写入公司名前两个字。用户可再改自己的，不会改掉公司的简称，公司之后再改也不会覆盖已经写好的个人简称。清空个人简称则回到公司当前保存的简称。公司账户可 `PUT /api/company` 修改公司全名和联系方式，上传二维码，并批准或移除调度员。名称 1 到 200 字，不能与其他公司重复；请求不带 `name` 时不改名称，不带 `contact` 时不改联系方式。已有公司简称不随全名改写。`canManage`、申请列表和调度员名单只给公司账户；调度员和司导读同一接口时这三项为空。`GET /api/company` 的 `dispatchers[].notes` 是当前公司账户给该调度员写的备注，落在 `dispatcher_notes`，调度员读同一接口看不到这些人。`PUT /api/company/dispatchers/{userId}/notes` 只给本公司调度员写这条备注，清空备注且未隐藏则删除自己这一行。`PUT /api/company/dispatchers/{userId}/hidden` 只给本公司调度员写 `dispatcher_notes.hidden`，没有这一行时视为显示。`DELETE /api/company/dispatchers/{userId}` 不能删除公司账户自己。删掉别人时，未完成且分给他的本公司订单清空 `assigned_dispatcher_user_id`，并清空各行程日司导；最后一天早于今天的订单保留。二维码走同一套本地存储，写入 `App_Data/files/qr/`，`companies.qr_path` 存相对路径；旧的 `company-qr/` 路径仍可读取。`POST /api/orders` 可带 `companyId`，写入当前公司。调度台「所有订单」在前端排除历史单，仍读 `GET /api/orders`。
+`GET /api/companies?name=` 需登录，按名称模糊查找，最多 20 条。司导和调度员都可以申请成为某家公司的调度员。已经是该公司司导成员的仍可申请升为调度员；已经是调度员则不能再申请。`GET /api/dispatchers?name=` 只用于按姓名查找并提交申请，不是公司或调度台的人员名单。可以搜到调度员，也可以搜到公司账户。司导和调度员可以向某位调度员或某个公司账户申请成为司导；即使已经属于同一家公司，仍要单独申请。向调度员申请并批准后，关系留在 `driver_applications`，并写入该调度员所在公司的 `company_members`，`role=driver`，司导资源跟着调度员进公司，公司账户的调度台不因此列出。向公司账户申请并批准后，同一张表的 `dispatcher_user_id` 指向公司账户，公司调度台只看这一行。公司和调度员都在个人信息页看到待批准申请，每行是申请人姓名和其 `users.contact`，没有联系方式时前端写「暂未填写」，不显示登录用户名。`DELETE /api/dispatchers/drivers/{driverId}` 删除当前调度员与这位司导已批准的 `driver_applications` 行，不能删除自己这一行。同时收回未完成订单里分给这位司导、且由该调度员派出或挂在该调度员名下的日期：这些行程日清空 `driver_id`，有几天清几天，不删订单。最后一天早于今天的订单不动。不删司导账号，不改 `company_members`。对方可以重新申请。批准前调度台看不到这位司导，另一位调度员也不会因为同公司就看到。`GET /api/company` 返回可查看的公司列表和当前公司桌面，多家公司用同一下拉切换，选项文字是 `companies[].notes`（当前用户自己的公司简称）。`desk.name` 是公司全名。能看到的公司包括自己所属的，以及接过订单的：创建过、被指派为调度、派过行程日，或行程日 `driver_id` 是自己。桌面含公司全名、负责人、联系方式、公司头像、本人公司简称，以及订单缩略。缩略不展示系统订单号：有公司订单号用公司订单号，否则用共用备注。图标再显示起始日期和天数。点开后每个行程日先展示该日活动内容，多个活动用 `-` 连接，活动后再展示当天司导姓名（`itinerary_days.driver_id`）。没派司导时前端写未分配。活动输入不放占位文字，弹框不再另写一行公司订单号；公司、调度员、司导都改 `order_activities.content`，不另存一份。公司账户只看本公司已派完、且最后一天早于今天的历史单。司导看自己当前跑着的单，调度员看自己当前跑着的和自己当前分配的单（行程日 `assigned_by_user_id` 是自己）；已结束（最后一天早于今天）和尚未结束的都在内。只创建或只被指派为调度、但没有自己跑或分配的单不出现。分配改掉后，当前行程日不再属于自己，这张单就不再出现。与公司建立联系后若还没有简称，写入公司账户已保存的简称；公司还没有简称时，写入公司名前两个字。用户可再改自己的，不会改掉公司的简称，公司之后再改也不会覆盖已经写好的个人简称。清空个人简称则回到公司当前保存的简称。公司账户可 `PUT /api/company` 修改公司全名和联系方式，上传公司头像，并批准或移除调度员。名称 1 到 200 字，不能与其他公司重复；请求不带 `name` 时不改名称，不带 `contact` 时不改联系方式。已有公司简称不随全名改写。`canManage`、申请列表和调度员名单只给公司账户；调度员和司导读同一接口时这三项为空。`GET /api/company` 的 `dispatchers[].notes` 是当前公司账户给该调度员写的备注，落在 `dispatcher_notes`，调度员读同一接口看不到这些人。`PUT /api/company/dispatchers/{userId}/notes` 只给本公司调度员写这条备注，清空备注且未隐藏则删除自己这一行。`PUT /api/company/dispatchers/{userId}/hidden` 只给本公司调度员写 `dispatcher_notes.hidden`，没有这一行时视为显示。`DELETE /api/company/dispatchers/{userId}` 不能删除公司账户自己。删掉别人时，未完成且分给他的本公司订单清空 `assigned_dispatcher_user_id`，并清空各行程日司导；最后一天早于今天的订单保留。公司头像走同一套本地存储，写入 `App_Data/files/qr/`，`companies.qr_path` 存相对路径；旧的 `company-qr/` 路径仍可读取。`POST /api/orders` 可带 `companyId`，写入当前公司。调度台「所有订单」在前端排除历史单，仍读 `GET /api/orders`。
 
 ---
 
@@ -69,6 +70,7 @@ DELETE /api/dispatchers/drivers/{driverId}
 ```http
 GET    /api/drivers
 GET    /api/drivers/{id}
+GET    /api/drivers/{id}/avatar
 POST   /api/drivers
 PUT    /api/drivers/{id}
 PUT    /api/drivers/{id}/notes
@@ -91,7 +93,7 @@ DELETE /api/drivers/{id}
 { "notes": "基督城常驻" }
 ```
 
-`PUT /api/drivers/{id}/notes` 只改当前用户自己的备注，其他人读不到。清空备注且未隐藏时删除这一行；已经隐藏时保留空备注。`PUT /api/drivers/{id}/hidden` 只改同一行的 `hidden`。调度台隐藏和恢复走这一条，不另建表。`PUT /api/drivers/{id}` 只改司导档案的姓名和电话；已绑定登录账号时不覆盖其 `users.name`。已绑定账号的司导，`contact` 读该用户自己填写的 `users.contact`，不读 `drivers.phone`。调度台司导详情用这一条。
+`PUT /api/drivers/{id}/notes` 只改当前用户自己的备注，其他人读不到。清空备注且未隐藏时删除这一行；已经隐藏时保留空备注。`PUT /api/drivers/{id}/hidden` 只改同一行的 `hidden`。调度台隐藏和恢复走这一条，不另建表。`PUT /api/drivers/{id}` 只改司导档案的姓名和电话；已绑定登录账号时不覆盖其 `users.name`。已绑定账号的司导，`contact` 读该用户自己填写的 `users.contact`，不读 `drivers.phone`。调度台司导详情用这一条。`hasAvatar` 表示该账号是否有头像。`GET /api/drivers/{id}/avatar` 打开 `users.avatar_path` 指向的同一文件。
 
 ---
 
@@ -134,8 +136,8 @@ GET /api/orders?startDate=2026-11-01&endDate=2026-11-30
 `companyId` / `companyName` 是订单所属公司。公司账户建单时强制写本公司，不能改绑。调度员和司导建单都不默认绑所属公司，即使只属于一家；不传 `companyId` 则保持空。调度员可指定任意已有公司。调度台点选公司后立即用同一套 `PUT /api/orders/{id}` 写入或改绑；调度员更新时明确传 `companyId: null` 表示解绑。改绑后原公司列表不再出现，新公司能看到。
 `assignedDispatcherUserId` / `assignedDispatcherName` / `assignedDispatcherContact` 是公司把整单交给哪位调度员，只读摘要。联系方式读该用户的 `users.contact`。调度员建单时默认写成自己。
 `DELETE /api/orders/{id}`：调度员对分给自己且已绑公司的单只做退回公司池（与 `PUT /dispatcher` 传 `null` 同一套清空），不删行；未绑公司则真正删除该单和附件。公司账户删除订单和附件。司导 403。只能处理分给自己的单。
-行程日另有 `assignedByUserId` / `assignedByName` / `assignedByContact`：当前是谁把这天派给司导，联系方式读该用户的 `users.contact`。我的行程点开某一天，在公司订单号下面显示这位调度员的姓名和联系方式。调度台司导日历和我的行程日期框优先用它显示姓名；没有时回退 `createdByName`。我的行程在订单已绑公司时，把公司名称和这位调度员的姓名连在一起；连起来超过 6 个字，且当前用户给这家公司写了缩写，则显示「缩写-调度员姓名」。缩写是 `companyNote`，来自 `company_notes`，只当前用户自己看得到。调度台点开司导时画出他的全部未来行程，不限本公司。仅自己分配的日期显示本人姓名并可拖回取消；其他人的日期只着色，不写公司名或调度员姓名。列表和详情的行程日都带 `driverId` / `driverName`；公司在派给调度点开订单日历时，日期按有没有司导着色，标注司导姓。
-`notes` 为当前登录用户自己的备注，落在 `order_notes`，其他人读同一单看不到。公司、调度员各写各的；司导身份读取时 `notes` 恒为 null，也看不到公司或调度备注。司导写入不能改这条。`driverNotes` 仍是司导备注，写在 `orders.driver_notes`。调度台只改调度员自己的 `notes`，派给调度里公司改自己的 `notes`，我的行程只改 `driverNotes`，共用 `PUT /api/orders/{id}`。司导提交的公司订单号被忽略，原值保留。
+行程日另有 `assignedByUserId` / `assignedByName` / `assignedByContact`：当前是谁把这天派给司导，联系方式读该用户的 `users.contact`。我的行程点开某一天，在公司订单号下面显示这位调度员的姓名和联系方式。调度台司导日历和我的行程日期框优先用它，没有时回退 `createdByName`。我的行程在订单已绑公司时，把公司名称和这位调度员的姓名连在一起；连起来超过 6 个字，且当前用户给这家公司写了缩写，则显示「缩写-调度员姓名」。缩写是 `companyNote`，来自 `company_notes`，只当前用户自己看得到。调度台点开司导时画出他的全部行程，包括已完成和进行中已过的日期，不限本公司；自己分配的日期用这一套同样的文字并可拖回取消；其他人的日期只着色，不写公司名或调度员姓名。列表和详情的行程日都带 `driverId` / `driverName`；公司在派给调度点开订单日历时，日期按有没有司导着色，标注司导姓。
+`notes` 为当前登录用户自己的备注，落在 `order_notes`，其他人读同一单看不到。公司、调度员各写各的；司导身份读取时 `notes` 恒为 null，也看不到公司或调度备注。司导写入不能改这条。`driverNotes` 仍是司导备注，写在 `orders.driver_notes`。调度台只改调度员自己的 `notes`，派给调度里公司改自己的 `notes`，我的行程只改 `driverNotes`，共用 `PUT /api/orders/{id}`。司导提交的公司订单号被忽略，原值保留。`sharedNotes` 写在 `orders.shared_notes`，公司、调度员、司导都能读写，不按人拆开。别人的行程在司导日历里仍不带回这条，和各自备注一样隐藏。
 
 ---
 
@@ -165,6 +167,7 @@ DELETE /api/orders/{orderId}/days/{dayId}
 `failOnConflict` 仅更新接口使用，默认 `false`：冲突只进 `warnings`，仍保存。调度台按天拖拽不传 `true`，重叠日期仍保存，由日历标红。传 `true` 时该司机当日已被其他订单占用则返回 409，不保存。  
 已绑定公司的真实订单派给司导时，不把该司导自己创建且未绑公司的占位单算作冲突；重叠的占位单整单删除，即使天数与真实订单不一致。未绑定公司的调度员自建单不能覆盖占位单，仍按普通冲突处理。  
 `serviceDate` 为当地日期 `YYYY-MM-DD`，不做时区换算。  
+`endLocation` 是当天住宿位置。常用地点由当日详情点选后写入全名，其他地点写入用户输入的文字。再点已选按钮时写入空值。日历展示这个字段的第一个字。`driverId` 与原来相同才只改地点和描述，不改派单人。不在本调度台范围内的订单，这个字段只返回第一个字。  
 同一订单不同行程日可以绑定不同司机，不另建订单。
 
 ---
@@ -286,7 +289,7 @@ GET    /api/orders/{orderId}/files/{fileId}
 DELETE /api/orders/{orderId}/files/{fileId}
 ```
 
-上传采用 `multipart/form-data`，字段名 `file`。订单截图写入 `App_Data/files/orders/`，`order_files` 存文件名和相对路径。只接受 8MB 以内的 jpg / png / webp。四种上传（二维码、头像、电子票、订单截图）共用 `AppFileStore`，不另开存储路径。订单最后一天起满 7 天后删除该单截图的文件和 `order_files` 行。头像和公司二维码不删。
+上传采用 `multipart/form-data`，字段名 `file`。订单截图写入 `App_Data/files/orders/`，`order_files` 存文件名和相对路径。只接受 8MB 以内的 jpg / png / webp。四种上传（公司头像、用户头像、电子票、订单截图）共用 `AppFileStore`，不另开存储路径。订单最后一天起满 7 天后删除该单截图的文件和 `order_files` 行。用户头像和公司头像不删。
 
 ---
 
@@ -303,7 +306,7 @@ DELETE /api/orders/{orderId}/files/{fileId}
 - 活动必须属于对应订单和行程日
 - 删除不存在的资源返回 404
 
-司机同一天已有其他行程时，派单接口可在响应中返回冲突提示信息，但不阻止保存。提示里写公司订单号；没有公司订单号时，司导看到司导备注，其他人看到自己的订单备注。不写系统订单号。  
+司机同一天已有其他行程时，派单接口可在响应中返回冲突提示信息，但不阻止保存。提示里写公司订单号；没有公司订单号时写共用备注。不写系统订单号。  
 例外：已绑定公司的真实订单覆盖司导自建且未绑公司的占位单时不报冲突，并删除该占位单。
 
 ---

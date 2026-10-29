@@ -77,6 +77,7 @@ export type CompanyMemberDto = {
     contact?: null | string;
     notes?: null | string;
     hidden?: boolean;
+    hasAvatar?: boolean;
 };
 
 export type CompanyNoteWriteDto = {
@@ -90,6 +91,7 @@ export type CompanyOrderDto = {
     platformOrderNo?: null | string;
     notes?: null | string;
     driverNotes?: null | string;
+    sharedNotes?: null | string;
     startDate?: string;
     dayCount?: number | string;
     kind?: string;
@@ -127,6 +129,7 @@ export type DriverReadDto = {
     contact?: null | string;
     notes?: null | string;
     hidden?: boolean;
+    hasAvatar?: boolean;
 };
 
 export type DriverWriteDto = {
@@ -202,6 +205,7 @@ export type OrderReadDto = {
     guestCount?: number | string;
     notes?: null | string;
     driverNotes?: null | string;
+    sharedNotes?: null | string;
     companyId?: null | string;
     companyName?: null | string;
     companyNote?: null | string;
@@ -221,6 +225,7 @@ export type OrderWriteDto = {
     guestCount?: number | string;
     notes?: null | string;
     driverNotes?: null | string;
+    sharedNotes?: null | string;
     companyId?: null | string;
 };
 
@@ -573,6 +578,22 @@ export type PostApiCompanyApplicationsByApplicationIdApproveResponses = {
 
 export type PostApiCompanyApplicationsByApplicationIdApproveResponse = PostApiCompanyApplicationsByApplicationIdApproveResponses[keyof PostApiCompanyApplicationsByApplicationIdApproveResponses];
 
+export type GetApiCompanyDispatchersByUserIdAvatarData = {
+    body?: never;
+    path: {
+        userId: string;
+    };
+    query?: never;
+    url: '/api/company/dispatchers/{userId}/avatar';
+};
+
+export type GetApiCompanyDispatchersByUserIdAvatarResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type DeleteApiCompanyDispatchersByUserIdData = {
     body?: never;
     path: {
@@ -590,6 +611,22 @@ export type DeleteApiCompanyDispatchersByUserIdResponses = {
 };
 
 export type DeleteApiCompanyDispatchersByUserIdResponse = DeleteApiCompanyDispatchersByUserIdResponses[keyof DeleteApiCompanyDispatchersByUserIdResponses];
+
+export type PutApiCompanyDispatchersByUserIdHiddenData = {
+    body: DriverHiddenWriteDto;
+    path: {
+        userId: string;
+    };
+    query?: never;
+    url: '/api/company/dispatchers/{userId}/hidden';
+};
+
+export type PutApiCompanyDispatchersByUserIdHiddenResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
 
 export type PutApiCompanyNotesData = {
     body: CompanyNoteWriteDto;
@@ -740,6 +777,22 @@ export type PostApiDriversResponses = {
 };
 
 export type PostApiDriversResponse = PostApiDriversResponses[keyof PostApiDriversResponses];
+
+export type GetApiDriversByIdAvatarData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/drivers/{id}/avatar';
+};
+
+export type GetApiDriversByIdAvatarResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
 
 export type DeleteApiDriversByIdData = {
     body?: never;
@@ -1075,6 +1128,7 @@ export type GetApiOrdersData = {
         startDate?: string;
         endDate?: string;
         orderNo?: string;
+        driverId?: string;
     };
     url: '/api/orders';
 };

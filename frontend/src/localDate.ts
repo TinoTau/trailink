@@ -33,6 +33,10 @@ export function laterDate(...values: Array<string | null | undefined>) {
   return values.filter((value): value is string => Boolean(value)).sort().at(-1)
 }
 
+export function earlierDate(...values: Array<string | null | undefined>) {
+  return values.filter((value): value is string => Boolean(value)).sort()[0]
+}
+
 export function orderedRange(start: string, end?: string | null) {
   const finish = end || start
   return start <= finish ? [start, finish] as const : [finish, start] as const

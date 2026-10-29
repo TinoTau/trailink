@@ -21,4 +21,30 @@ body {
   html .ant-input-affix-wrapper > textarea.ant-input {
     font-size: 16px;
   }
+
+  html body,
+  html body * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  html body :is(
+    input:not([type]),
+    input[type='text'],
+    input[type='search'],
+    input[type='password'],
+    input[type='email'],
+    input[type='tel'],
+    input[type='url'],
+    input[type='number'],
+    textarea,
+    select,
+    option,
+    [contenteditable='true']
+  ) {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
 }

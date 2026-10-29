@@ -9,6 +9,19 @@ import type { CompanySearch, Order } from '../types'
 import { OrderFilesBlock } from './OrderFilesBlock'
 import './dispatcher/dispatcher.css'
 
+export function privateOrderNoteCopy(role: string) {
+  if (role === 'driver') {
+    return { label: '司导备注', placeholder: '仅自己可见，调度看不到' }
+  }
+  if (role === 'company') {
+    return { label: '公司备注', placeholder: '仅公司可见，调度和司导看不到' }
+  }
+  return { label: '调度备注', placeholder: '仅调度可见，司导看不到' }
+}
+
+const sharedOrderNoteLabel = '共用备注'
+const sharedOrderNotePlaceholder = '公司、调度员和司导都能看到'
+
 export function OrderInfoFields({
   heading = '订单信息',
   subtitle,
@@ -16,10 +29,12 @@ export function OrderInfoFields({
   onPlatformOrderNoChange,
   notes,
   onNotesChange,
+  sharedNotes,
+  onSharedNotesChange,
   onSave,
   extra,
   autoFocus,
-  notesLabel = '备注',
+  notesLabel,
   notesPlaceholder,
   companyId,
   companyName,
@@ -31,6 +46,8 @@ export function OrderInfoFields({
   onPlatformOrderNoChange?: (value: string) => void
   notes?: string
   onNotesChange?: (value: string) => void
+  sharedNotes?: string
+  onSharedNotesChange?: (value: string) => void
   onSave?: () => void
   extra?: ReactNode
   autoFocus?: boolean
@@ -42,8 +59,12 @@ export function OrderInfoFields({
 }) {
   const { user } = useAuthenticatedAuth()
   const canEditOrder = Boolean(onPlatformOrderNoChange)
+  const blurSave = canEditOrder || onSharedNotesChange ? undefined : onSave
   const canBindCompany = Boolean(onCompanyChange) && user.role === 'dispatcher'
   const showCompany = canBindCompany || (canEditOrder && (user.role === 'company' || companyName))
+  const privateCopy = privateOrderNoteCopy(user.role)
+  const resolvedNotesLabel = notesLabel ?? (canEditOrder ? privateCopy.label : '备注')
+  const resolvedNotesPlaceholder = notesPlaceholder ?? (canEditOrder ? privateCopy.placeholder : '给这个司导写备注')
 
   return (
     <div className="dispatcher-notes" onPointerDown={(event) => event.stopPropagation()}>
@@ -84,22 +105,60 @@ export function OrderInfoFields({
           />
         </label>
       ) : null}
+      {onSharedNotesChange ? (
+        <NoteBox
+          label={sharedOrderNoteLabel}
+          value={sharedNotes ?? ''}
+          placeholder={sharedOrderNotePlaceholder}
+          autoFocus={autoFocus && !canEditOrder}
+          onChange={onSharedNotesChange}
+          onBlur={blurSave}
+        />
+      ) : null}
       {onNotesChange ? (
-        <label className="dispatcher-notes-field">
-          {notesLabel}
-          <textarea
-            value={notes ?? ''}
-            rows={3}
-            autoFocus={autoFocus && !canEditOrder}
-            onPointerDown={(event) => event.stopPropagation()}
-            onChange={(event) => onNotesChange(event.target.value)}
-            onBlur={canEditOrder ? undefined : onSave}
-            placeholder={notesPlaceholder ?? (canEditOrder ? '订单备注' : '给这个司导写备注')}
-          />
-        </label>
+        <NoteBox
+          label={resolvedNotesLabel}
+          value={notes ?? ''}
+          placeholder={resolvedNotesPlaceholder}
+          autoFocus={autoFocus && !canEditOrder && !onSharedNotesChange}
+          onChange={onNotesChange}
+          onBlur={blurSave}
+        />
       ) : null}
       {extra}
     </div>
+  )
+}
+
+function NoteBox({
+  label,
+  value,
+  placeholder,
+  autoFocus,
+  onChange,
+  onBlur,
+}: {
+  label: string
+  value: string
+  placeholder?: string
+  autoFocus?: boolean
+  onChange: (value: string) => void
+  onBlur?: () => void
+}) {
+  return (
+    <label className="dispatcher-notes-field">
+      {label}
+      <textarea
+        className="note-line"
+        value={value}
+        rows={1}
+        autoFocus={autoFocus}
+        onPointerDown={(event) => event.stopPropagation()}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+        placeholder={placeholder}
+      />
+    </label>
   )
 }
 
@@ -203,11 +262,24 @@ export function TrashIcon() {
   )
 }
 
+function OrderNotesPreview({ sharedNotes, notes }: { sharedNotes?: string | null; notes?: string | null }) {
+  if (!sharedNotes && !notes) {
+    return null
+  }
+  return (
+    <>
+      {sharedNotes ? <p className="dispatcher-notes-preview">{sharedNotes}</p> : null}
+      {notes ? <p className="dispatcher-notes-preview">{notes}</p> : null}
+    </>
+  )
+}
+
 export function OrderInfoPanel({
   title,
   subtitle,
   meta,
   notes,
+  sharedNotes,
   open,
   onOpenChange,
   editable,
@@ -221,6 +293,7 @@ export function OrderInfoPanel({
   subtitle?: string
   meta?: string | null
   notes?: string | null
+  sharedNotes?: string | null
   open?: boolean
   onOpenChange?: (open: boolean) => void
   editable?: boolean
@@ -262,7 +335,7 @@ export function OrderInfoPanel({
           {extraActions}
         </div>
         {meta ? <p className="dispatcher-card-meta">{meta}</p> : null}
-        {editable && notesOpen ? children : notes ? <p className="dispatcher-notes-preview">{notes}</p> : null}
+        {editable && notesOpen ? children : <OrderNotesPreview sharedNotes={sharedNotes} notes={notes} />}
         {subtitle ? <p>{subtitle}</p> : null}
       </div>
       {trailing}
@@ -279,18 +352,20 @@ interface OrderInfoEditorProps {
 
 export function OrderInfoEditor(props: OrderInfoEditorProps) {
   const { order } = props
-  const version = `${order.id}:${order.platformOrderNo ?? ''}:${order.driverNotes ?? ''}:${order.files.length}`
+  const version = `${order.id}:${order.platformOrderNo ?? ''}:${order.sharedNotes ?? ''}:${order.driverNotes ?? ''}:${order.files.length}`
   return <OrderInfoEditorState key={version} {...props} />
 }
 
 function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoEditorProps) {
   const [open, setOpen] = useState(false)
   const [notes, setNotes] = useState(order.driverNotes ?? '')
+  const [sharedNotes, setSharedNotes] = useState(order.sharedNotes ?? '')
 
   async function save() {
     try {
-      const saved = await updateOrderInfo(order, { driverNotes: notes })
+      const saved = await updateOrderInfo(order, { driverNotes: notes, sharedNotes })
       setNotes(saved.driverNotes ?? '')
+      setSharedNotes(saved.sharedNotes ?? '')
       message.success('订单已保存')
       setOpen(false)
       await onSaved()
@@ -301,10 +376,11 @@ function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoE
 
   return (
     <OrderInfoPanel
-      title={orderDisplayLabel(order, 'driver')}
+      title={orderDisplayLabel(order)}
       meta={meta}
       subtitle={`${formatMonthDay(order.startDate)}${order.endDate ? ` 至 ${formatMonthDay(order.endDate)}` : ''} · ${order.dayCount} 天`}
       notes={notes}
+      sharedNotes={sharedNotes}
       open={open}
       onOpenChange={setOpen}
       editable
@@ -314,8 +390,10 @@ function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoE
         heading="订单信息"
         notes={notes}
         onNotesChange={setNotes}
-        notesLabel="司导备注"
-        notesPlaceholder="仅自己可见，调度看不到"
+        sharedNotes={sharedNotes}
+        onSharedNotesChange={setSharedNotes}
+        notesLabel={privateOrderNoteCopy('driver').label}
+        notesPlaceholder={privateOrderNoteCopy('driver').placeholder}
         onSave={() => void save()}
         extra={
           <label className="dispatcher-notes-field">
@@ -330,5 +408,61 @@ function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoE
         }
       />
     </OrderInfoPanel>
+  )
+}
+
+export function OrderDetailNotes({
+  order,
+  role,
+  onSaved,
+}: {
+  order: Order
+  role: string
+  onSaved: (order: Order) => void | Promise<void>
+}) {
+  const privateNotes = role === 'driver' ? order.driverNotes ?? '' : order.notes ?? ''
+  const version = `${order.id}:${order.sharedNotes ?? ''}:${privateNotes}`
+  return <OrderDetailNotesState key={version} order={order} role={role} privateNotes={privateNotes} onSaved={onSaved} />
+}
+
+function OrderDetailNotesState({
+  order,
+  role,
+  privateNotes,
+  onSaved,
+}: {
+  order: Order
+  role: string
+  privateNotes: string
+  onSaved: (order: Order) => void | Promise<void>
+}) {
+  const copy = privateOrderNoteCopy(role)
+  const [sharedNotes, setSharedNotes] = useState(order.sharedNotes ?? '')
+  const [notes, setNotes] = useState(privateNotes)
+
+  async function save() {
+    try {
+      const saved = await updateOrderInfo(
+        order,
+        role === 'driver' ? { driverNotes: notes, sharedNotes } : { notes, sharedNotes },
+      )
+      message.success('订单已保存')
+      await onSaved(saved)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '保存订单失败')
+    }
+  }
+
+  return (
+    <OrderInfoFields
+      heading="订单信息"
+      sharedNotes={sharedNotes}
+      onSharedNotesChange={setSharedNotes}
+      notes={notes}
+      onNotesChange={setNotes}
+      notesLabel={copy.label}
+      notesPlaceholder={copy.placeholder}
+      onSave={() => void save()}
+    />
   )
 }

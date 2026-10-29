@@ -106,7 +106,7 @@ public class CompanyDeskController(
             company.QrPath,
             AppFileStore.ImageExtensions,
             AppFileStore.ImageLimit,
-            "二维码请上传 1MB 以内的 jpg / png / webp。",
+            "公司头像请上传 1MB 以内的 jpg / png / webp。",
             cancellationToken);
         if (error is not null)
         {
@@ -181,6 +181,35 @@ public class CompanyDeskController(
         db.DispatcherApplications.Remove(application);
         await db.SaveChangesAsync(cancellationToken);
         return await Get(company.Id, cancellationToken);
+    }
+
+    [HttpGet("dispatchers/{userId:guid}/avatar")]
+    public async Task<IActionResult> DispatcherAvatar(Guid userId, CancellationToken cancellationToken)
+    {
+        var company = await LoadOwnedCompanyAsync(cancellationToken);
+        if (company is null)
+        {
+            return Forbid();
+        }
+
+        var listed = await CompanyMembership.IsDispatcherAsync(db, company.Id, userId, cancellationToken);
+        if (!listed)
+        {
+            return NotFound();
+        }
+
+        var path = await db.Users
+            .Where(item => item.Id == userId)
+            .Select(item => item.AvatarPath)
+            .FirstOrDefaultAsync(cancellationToken);
+        var opened = files.Open(path);
+        if (opened is null)
+        {
+            return NotFound();
+        }
+
+        Response.Headers.CacheControl = "private, no-cache";
+        return PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
     }
 
     [HttpDelete("dispatchers/{userId:guid}")]
@@ -489,7 +518,8 @@ public class CompanyDeskController(
                         Name = member.User.Name,
                         Contact = member.User.Contact,
                         Notes = dispatcherNotes.GetValueOrDefault(member.UserId),
-                        Hidden = dispatcherHidden.GetValueOrDefault(member.UserId)
+                        Hidden = dispatcherHidden.GetValueOrDefault(member.UserId),
+                        HasAvatar = !string.IsNullOrWhiteSpace(member.User.AvatarPath)
                     })
                     .ToList()
                 : [],
@@ -500,6 +530,7 @@ public class CompanyDeskController(
                 PlatformOrderNo = order.PlatformOrderNo,
                 Notes = viewerNotes.GetValueOrDefault(order.Id),
                 DriverNotes = user.Role == UserRoles.Driver ? order.DriverNotes : null,
+                SharedNotes = order.SharedNotes,
                 StartDate = order.StartDate,
                 DayCount = order.Days.Count,
                 Kind = isOwner

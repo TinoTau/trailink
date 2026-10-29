@@ -9,7 +9,7 @@ namespace Trailink.Api.Controllers;
 
 [ApiController]
 [Route("api/drivers")]
-public class DriversController(TrailinkDbContext db, AuthSession session) : ControllerBase
+public class DriversController(TrailinkDbContext db, AuthSession session, AppFileStore files) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<DriverReadDto>>> List(CancellationToken cancellationToken)
@@ -35,8 +35,36 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
         {
             accounts.TryGetValue(driver.Id, out var account);
             notes.TryGetValue(driver.Id, out var note);
-            return ToRead(driver, note?.Notes, account?.Name, account?.Contact, note?.Hidden ?? false);
+            return ToRead(
+                driver,
+                note?.Notes,
+                account?.Name,
+                account?.Contact,
+                note?.Hidden ?? false,
+                account?.HasAvatar ?? false);
         }).ToList());
+    }
+
+    [HttpGet("{id:guid}/avatar")]
+    public async Task<IActionResult> Avatar(Guid id, CancellationToken cancellationToken)
+    {
+        if (!await CanReadAsync(id, cancellationToken))
+        {
+            return NotFound();
+        }
+
+        var path = await db.Users
+            .Where(item => item.DriverId == id)
+            .Select(item => item.AvatarPath)
+            .FirstOrDefaultAsync(cancellationToken);
+        var opened = files.Open(path);
+        if (opened is null)
+        {
+            return NotFound();
+        }
+
+        Response.Headers.CacheControl = "private, no-cache";
+        return PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
     }
 
     [HttpGet("{id:guid}")]
@@ -182,9 +210,15 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
         }
         var account = await db.Users
             .Where(item => item.DriverId == driver.Id)
-            .Select(item => new { item.Name, item.Contact })
+            .Select(item => new { item.Name, item.Contact, item.AvatarPath })
             .FirstOrDefaultAsync(cancellationToken);
-        return ToRead(driver, note?.Notes, account?.Name, account?.Contact, note?.Hidden ?? false);
+        return ToRead(
+            driver,
+            note?.Notes,
+            account?.Name,
+            account?.Contact,
+            note?.Hidden ?? false,
+            !string.IsNullOrWhiteSpace(account?.AvatarPath));
     }
 
     private IQueryable<Driver> VisibleDrivers(User? user) => DriverRoster.Visible(db, user);
@@ -207,11 +241,16 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
     {
         var rows = await db.Users
             .Where(item => item.DriverId != null && driverIds.Contains(item.DriverId.Value))
-            .Select(item => new { item.DriverId, item.Name, item.Contact })
+            .Select(item => new { item.DriverId, item.Name, item.Contact, item.AvatarPath })
             .ToListAsync(cancellationToken);
         return rows
             .GroupBy(item => item.DriverId!.Value)
-            .ToDictionary(group => group.Key, group => new AccountProfile(group.First().Name, group.First().Contact));
+            .ToDictionary(
+                group => group.Key,
+                group => new AccountProfile(
+                    group.First().Name,
+                    group.First().Contact,
+                    !string.IsNullOrWhiteSpace(group.First().AvatarPath)));
     }
 
     private static DriverReadDto ToRead(
@@ -219,16 +258,18 @@ public class DriversController(TrailinkDbContext db, AuthSession session) : Cont
         string? notes,
         string? accountName = null,
         string? accountContact = null,
-        bool hidden = false) => new()
+        bool hidden = false,
+        bool hasAvatar = false) => new()
     {
         Id = driver.Id,
         Name = string.IsNullOrWhiteSpace(accountName) ? driver.Name : accountName,
         Phone = driver.Phone,
         Contact = string.IsNullOrWhiteSpace(accountContact) ? null : accountContact,
         Notes = string.IsNullOrWhiteSpace(notes) ? null : notes,
-        Hidden = hidden
+        Hidden = hidden,
+        HasAvatar = hasAvatar
     };
 
-    private sealed record AccountProfile(string Name, string? Contact);
+    private sealed record AccountProfile(string Name, string? Contact, bool HasAvatar);
     private sealed record ViewerNote(string? Notes, bool Hidden);
 }

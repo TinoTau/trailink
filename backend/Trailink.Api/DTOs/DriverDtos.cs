@@ -24,4 +24,5 @@ public class DriverReadDto
     public string? Contact { get; set; }
     public string? Notes { get; set; }
     public bool Hidden { get; set; }
+    public bool HasAvatar { get; set; }
 }

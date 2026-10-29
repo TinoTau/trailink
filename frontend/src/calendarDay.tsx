@@ -43,7 +43,7 @@ export function pointFromDragEvent(event: PointerEvent | TouchEvent) {
   return pointer ? { x: pointer.clientX, y: pointer.clientY } : null
 }
 
-export function calendarHoldShifted(hold: CalendarHold, x: number, y: number) {
+export function calendarHoldShifted(hold: { x: number; y: number }, x: number, y: number) {
   const dx = x - hold.x
   const dy = y - hold.y
   return dx * dx + dy * dy > HOLD_SLOP_PX * HOLD_SLOP_PX
@@ -72,10 +72,14 @@ export function captureCalendarPointer(target: HTMLElement, pointerId: number) {
   }
 }
 
-export function CalendarDayCaption({ day, label }: { day: number; label?: string }) {
+export function CalendarDayCaption({ day, label, place }: { day?: number | string; label?: string; place?: string }) {
+  if (day === undefined && !label && !place) {
+    return null
+  }
   return (
     <span className="calendar-day-caption">
-      <b>{day}</b>
+      {place ? <i className="calendar-day-place" aria-hidden>{place}</i> : null}
+      {day !== undefined ? <b>{day}</b> : null}
       {label ? <em>{label}</em> : null}
     </span>
   )
