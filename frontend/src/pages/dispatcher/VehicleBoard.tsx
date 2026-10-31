@@ -4,36 +4,11 @@ import { vehiclesApi } from '../../api/vehicles'
 import { compressPhoto } from '../../photoImage'
 import type { Vehicle } from '../../types'
 import { FileField } from '../FileField'
+import { PinIcon } from '../icons'
+import { downloadPhoto, PHOTO_ACCEPT, PhotoLargeView, usePhotoViewer, type ViewerPhoto } from '../PhotoViewer'
 import { OrderInfoFields } from '../OrderInfoFields'
 import { DispatcherCalendarCard, DispatcherDayCard, type CalendarMark } from './DispatcherCalendarCard'
 import { paneLiftLimit, startPaneLift } from './paneLift'
-
-let vehicleBackdropUntil = 0
-
-export function takeVehicleBackdropClick() {
-  if (performance.now() >= vehicleBackdropUntil) {
-    return false
-  }
-  vehicleBackdropUntil = 0
-  return true
-}
-
-export function holdVehicleBackdrop() {
-  vehicleBackdropUntil = performance.now() + 500
-  const stop = (event: MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    vehicleBackdropUntil = 0
-    document.removeEventListener('click', stop, true)
-  }
-  document.addEventListener('click', stop, true)
-  window.setTimeout(() => document.removeEventListener('click', stop, true), 500)
-}
-
-const photoSwipeIgnore = 'button, a, input, textarea, select, label'
-const photoBlankControl = `${photoSwipeIgnore}, img, .vehicle-photo-bars, .dispatcher-filters, .dispatcher-card-lift`
-const photoTapSlop = 8
-const photoSwipeDistance = 48
 
 type PendingPhoto = {
   id: string
@@ -41,10 +16,7 @@ type PendingPhoto = {
   url: string
 }
 
-type ShownPhoto = {
-  key: string
-  src: string
-  name: string
+type ShownPhoto = ViewerPhoto & {
   photoId?: string
   pendingId?: string
 }
@@ -422,12 +394,29 @@ function VehicleDetail({
   const [editing, setEditing] = useState(vehicle == null)
   const [armed, setArmed] = useState(false)
   const [stopArmed, setStopArmed] = useState(false)
-  const [photoArmed, setPhotoArmed] = useState(false)
-  const [photoIndex, setPhotoIndex] = useState(0)
-  const [large, setLarge] = useState(false)
   const [pending, setPending] = useState<PendingPhoto[]>([])
-  const swipe = useRef<{ x: number; y: number } | null>(null)
+  const photosRef = useRef<HTMLDivElement>(null)
   const largeWas = useRef(false)
+
+  const photos = vehicle?.photos ?? []
+  const shown: ShownPhoto[] = (vehicle
+    ? photos.map((photo) => ({
+        key: photo.id,
+        src: vehiclesApi.photoUrl(vehicle.id, photo.id),
+        label: '',
+        fileName: photo.fileName || 'vehicle.jpg',
+        photoId: photo.id,
+      }))
+    : pending.map((photo) => ({
+        key: photo.id,
+        src: photo.url,
+        label: '',
+        fileName: photo.file.name || 'vehicle.jpg',
+        pendingId: photo.id,
+      }))
+  ).map((photo, index) => ({ ...photo, label: `第 ${index + 1} 张` }))
+  const viewer = usePhotoViewer(shown.length, photosRef, '.dispatcher-overlay')
+  const large = viewer.large
 
   useLayoutEffect(() => {
     if (!largeWas.current || large) {
@@ -440,64 +429,6 @@ function VehicleDetail({
     return () => window.clearTimeout(timer)
   }, [large, onClosePhoto])
 
-  useEffect(() => {
-    if (!large) {
-      return
-    }
-    let start: { x: number; y: number } | null = null
-    function onPointerDown(event: PointerEvent) {
-      const overlay = document.querySelector('.dispatcher-overlay.vehicle-lift')
-      if (!(overlay instanceof HTMLElement)) {
-        return
-      }
-      const box = overlay.getBoundingClientRect()
-      const inside = event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom
-      if (!inside) {
-        return
-      }
-      const target = event.target
-      if (target instanceof Element && target.closest('.dispatcher-overlay') && target.closest(photoBlankControl)) {
-        return
-      }
-      start = { x: event.clientX, y: event.clientY }
-      holdVehicleBackdrop()
-    }
-    function onPointerUp(event: PointerEvent) {
-      if (!start) {
-        return
-      }
-      const dx = event.clientX - start.x
-      const dy = event.clientY - start.y
-      start = null
-      if (Math.abs(dx) < photoTapSlop && Math.abs(dy) < photoTapSlop) {
-        setPhotoArmed(false)
-        setLarge(false)
-      }
-    }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    document.addEventListener('pointerup', onPointerUp, true)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true)
-      document.removeEventListener('pointerup', onPointerUp, true)
-    }
-  }, [large])
-
-  const photos = vehicle?.photos ?? []
-  const shown: ShownPhoto[] = vehicle
-    ? photos.map((photo) => ({
-        key: photo.id,
-        src: vehiclesApi.photoUrl(vehicle.id, photo.id),
-        name: photo.fileName,
-        photoId: photo.id,
-      }))
-    : pending.map((photo) => ({
-        key: photo.id,
-        src: photo.url,
-        name: photo.file.name,
-        pendingId: photo.id,
-      }))
-  const viewIndex = Math.min(photoIndex, Math.max(shown.length - 1, 0))
-  const current = shown[viewIndex]
 
   useEffect(() => {
     setPlate(vehicle?.plate ?? '')
@@ -507,9 +438,7 @@ function VehicleDetail({
     setEditing(vehicle == null)
     setArmed(false)
     setStopArmed(false)
-    setPhotoArmed(false)
-    setPhotoIndex(0)
-    setLarge(false)
+    viewer.close()
     setPending((current) => {
       current.forEach((item) => URL.revokeObjectURL(item.url))
       return []
@@ -545,21 +474,6 @@ function VehicleDetail({
     document.addEventListener('pointerdown', onPointerDown, true)
     return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [stopArmed])
-
-  useEffect(() => {
-    if (!photoArmed) {
-      return
-    }
-    function onPointerDown(event: PointerEvent) {
-      const target = event.target
-      if (target instanceof Element && target.closest('[data-photo-delete]')) {
-        return
-      }
-      setPhotoArmed(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    return () => document.removeEventListener('pointerdown', onPointerDown, true)
-  }, [photoArmed])
 
   async function save() {
     const body = { plate: plate.trim(), sharedNotes, info, available }
@@ -648,8 +562,7 @@ function VehicleDetail({
       }
       return current.filter((item) => item.id !== pendingId)
     })
-    setPhotoArmed(false)
-    setLarge(false)
+    viewer.close()
   }
 
   async function upload(file: File, replaceId?: string) {
@@ -681,45 +594,17 @@ function VehicleDetail({
     try {
       await vehiclesApi.removePhoto(vehicle.id, photoId)
       onUpsert({ ...vehicle, photos: vehicle.photos.filter((item) => item.id !== photoId) })
-      setPhotoArmed(false)
-      setLarge(false)
+      viewer.close()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '删除照片失败')
     }
   }
 
-  async function download(photoId: string, fileName: string) {
-    if (!vehicle) {
-      return
-    }
-    const response = await fetch(vehiclesApi.photoUrl(vehicle.id, photoId), { credentials: 'include' })
-    if (!response.ok) {
-      message.error('下载照片失败')
-      return
-    }
-    const blob = await response.blob()
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName || 'vehicle.jpg'
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  function requestRemovePhoto() {
-    if (!current) {
-      return
-    }
-    if (!photoArmed) {
-      setPhotoArmed(true)
-      return
-    }
-    if (current.photoId) {
-      void removePhoto(current.photoId)
-      return
-    }
-    if (current.pendingId) {
-      dropPending(current.pendingId)
+  function removeShown(photo: ShownPhoto) {
+    if (photo.photoId) {
+      void removePhoto(photo.photoId)
+    } else if (photo.pendingId) {
+      dropPending(photo.pendingId)
     }
   }
 
@@ -789,7 +674,7 @@ function VehicleDetail({
             {vehicle?.sharedNotes ? <p className="dispatcher-notes-preview">{vehicle.sharedNotes}</p> : null}
           </>
         )}
-        <div className="vehicle-photos" onPointerDown={(event) => event.stopPropagation()}>
+        <div ref={photosRef} className="vehicle-photos" onPointerDown={(event) => event.stopPropagation()}>
           {Array.from({ length: 3 }, (_, index) => {
             const photo = shown[index]
             if (!photo) {
@@ -797,7 +682,7 @@ function VehicleDetail({
                 <FileField
                   key={`empty-${index}`}
                   label="添加照片"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept={PHOTO_ACCEPT}
                   disabled={busy}
                   className="vehicle-photo empty"
                   onPick={(file) => void upload(file)}
@@ -811,9 +696,7 @@ function VehicleDetail({
                 className="vehicle-photo"
                 aria-label={`查看照片 ${index + 1}`}
                 onClick={() => {
-                  setPhotoArmed(false)
-                  setPhotoIndex(index)
-                  setLarge(true)
+                  viewer.open(index)
                   onOpenPhoto()
                 }}
               >
@@ -833,94 +716,14 @@ function VehicleDetail({
         >
           {available ? '停用' : '可用'}
         </button>
-        {large && current ? (
-          <div
-            className="vehicle-large"
-            onPointerDown={(event) => {
-              event.stopPropagation()
-              const target = event.target
-              if (target instanceof Element && target.closest(photoSwipeIgnore)) {
-                return
-              }
-              swipe.current = { x: event.clientX, y: event.clientY }
-              try {
-                event.currentTarget.setPointerCapture(event.pointerId)
-              } catch {
-                // 指针已经离开时不再抓住触点。
-              }
-            }}
-            onPointerUp={(event) => {
-              const start = swipe.current
-              swipe.current = null
-              if (!start) {
-                return
-              }
-              const dx = event.clientX - start.x
-              const dy = event.clientY - start.y
-              if (Math.abs(dx) > photoSwipeDistance && Math.abs(dx) > Math.abs(dy)) {
-                setPhotoArmed(false)
-                setPhotoIndex((index) => (dx > 0 ? Math.max(0, index - 1) : Math.min(shown.length - 1, index + 1)))
-              }
-            }}
-            onPointerCancel={() => {
-              swipe.current = null
-            }}
-          >
-            <div className="vehicle-large-stage">
-              <img src={current.src} alt="" draggable={false} />
-            </div>
-            <div className="vehicle-photo-bars">
-              {shown.map((photo, index) => (
-                <button
-                  key={photo.key}
-                  type="button"
-                  aria-label={`第 ${index + 1} 张`}
-                  aria-current={index === viewIndex ? 'true' : undefined}
-                  onClick={() => {
-                    setPhotoArmed(false)
-                    setPhotoIndex(index)
-                  }}
-                />
-              ))}
-            </div>
-            <div className="dispatcher-filters">
-              <button
-                type="button"
-                className="dispatcher-chip"
-                onClick={() => {
-                  if (current.photoId && vehicle) {
-                    void download(current.photoId, current.name)
-                    return
-                  }
-                  const link = document.createElement('a')
-                  link.href = current.src
-                  link.download = current.name || 'vehicle.jpg'
-                  link.click()
-                }}
-              >
-                下载
-              </button>
-              <button
-                type="button"
-                className={`dispatcher-chip${photoArmed ? ' release' : ''}`}
-                disabled={busy}
-                data-photo-delete={photoArmed ? 'true' : undefined}
-                aria-pressed={photoArmed}
-                aria-label={photoArmed ? '确认删除照片' : '删除照片'}
-                onClick={requestRemovePhoto}
-              >
-                删除
-              </button>
-              <FileField
-                label="更新照片"
-                accept="image/jpeg,image/png,image/webp"
-                disabled={busy}
-                className="dispatcher-chip"
-                onPick={(file) => void upload(file, current.photoId ?? current.pendingId)}
-              />
-            </div>
-          </div>
-        ) : null}
+        <PhotoLargeView
+          photos={shown}
+          viewer={viewer}
+          busy={busy}
+          onDownload={(photo) => void downloadPhoto(photo.src, photo.fileName)}
+          onRemove={(photo) => removeShown(photo)}
+          onReplace={(photo, file) => void upload(file, photo.photoId ?? photo.pendingId)}
+        />
           </>
         }
       />
@@ -928,15 +731,3 @@ function VehicleDetail({
   )
 }
 
-function PinIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M9 4h6l-1 6 3 3v2h-5l-1 5-1-5H5v-2l3-3-1-6z"
-        fill={filled ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-    </svg>
-  )
-}

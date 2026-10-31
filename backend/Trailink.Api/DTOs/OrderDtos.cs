@@ -16,6 +16,10 @@ public class OrderReadDto
     public Guid Id { get; set; }
     public string OrderNo { get; set; } = string.Empty;
     public string? PlatformOrderNo { get; set; }
+
+    /// <summary>订单显示名：公司订单号第一行，否则共用备注第一行。</summary>
+    public string? Label { get; set; }
+
     public DateOnly StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public int DayCount { get; set; }
@@ -32,6 +36,21 @@ public class OrderReadDto
     public string? AssignedDispatcherName { get; set; }
     public string? AssignedDispatcherContact { get; set; }
     public int AssignedDayCount { get; set; }
+
+    /// <summary>拆单：多位司导、多个派出人，或派了一部分。</summary>
+    public bool IsSplit { get; set; }
+
+    /// <summary>结束日期早于今天（新西兰日期）。</summary>
+    public bool IsFinished { get; set; }
+
+    public bool IsInProgress { get; set; }
+
+    /// <summary>历史单：已派完且已结束。</summary>
+    public bool IsHistorical { get; set; }
+
+    /// <summary>有某一天的司导同一天还有别的订单。</summary>
+    public bool HasDriverConflict { get; set; }
+
     public List<ItineraryDayReadDto> Days { get; set; } = [];
     public List<OrderFileReadDto> Files { get; set; } = [];
 }

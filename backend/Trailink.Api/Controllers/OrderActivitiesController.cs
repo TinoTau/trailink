@@ -28,7 +28,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
             .ThenBy(activity => activity.Id)
             .ToListAsync(cancellationToken);
 
-        return Ok(activities.Select(ToRead).ToList());
+        return Ok(activities.Select(OrderPresenter.ToRead).ToList());
     }
 
     [HttpPost]
@@ -46,7 +46,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
         var error = Validate(request);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         var nextOrder = await db.OrderActivities
@@ -67,7 +67,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
 
         db.OrderActivities.Add(activity);
         await db.SaveChangesAsync(cancellationToken);
-        return Created($"/api/orders/{orderId}/days/{dayId}/activities/{activity.Id}", ToRead(activity));
+        return Created($"/api/orders/{orderId}/days/{dayId}/activities/{activity.Id}", OrderPresenter.ToRead(activity));
     }
 
     [HttpPut("{activityId:guid}")]
@@ -89,7 +89,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
         var error = Validate(request);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         activity.Content = request.Content.Trim();
@@ -97,7 +97,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
         activity.BookingTime = AsUnspecified(request.BookingTime);
         activity.CheckinTime = AsUnspecified(request.CheckinTime);
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(ToRead(activity));
+        return Ok(OrderPresenter.ToRead(activity));
     }
 
     [HttpDelete("{activityId:guid}")]
@@ -147,12 +147,12 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
             cancellationToken);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         activity.TicketPath = path;
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(ToRead(activity));
+        return Ok(OrderPresenter.ToRead(activity));
     }
 
     [HttpGet("{activityId:guid}/ticket")]
@@ -163,8 +163,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
         CancellationToken cancellationToken)
     {
         var activity = await LoadActivityAsync(orderId, dayId, activityId, cancellationToken);
-        var opened = files.Open(activity?.TicketPath);
-        return opened is null ? NotFound() : PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+        return this.StoredFile(files, activity?.TicketPath);
     }
 
     [HttpDelete("{activityId:guid}/ticket")]
@@ -207,7 +206,7 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
             ids.Distinct().Count() != ids.Count ||
             !activities.Select(activity => activity.Id).ToHashSet().SetEquals(ids))
         {
-            return Problem(title: "Validation error", detail: "活动排序必须包含当天全部活动，且不能重复。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("活动排序必须包含当天全部活动，且不能重复。");
         }
 
         for (var index = 0; index < ids.Count; index++)
@@ -216,20 +215,9 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(activities.OrderBy(activity => activity.SortOrder).ThenBy(activity => activity.Id).Select(ToRead).ToList());
+        return Ok(activities.OrderBy(activity => activity.SortOrder).ThenBy(activity => activity.Id).Select(OrderPresenter.ToRead).ToList());
     }
 
-    internal static OrderActivityReadDto ToRead(OrderActivity activity) => new()
-    {
-        Id = activity.Id,
-        ItineraryDayId = activity.ItineraryDayId,
-        Content = activity.Content,
-        Provider = activity.Provider,
-        BookingTime = activity.BookingTime,
-        CheckinTime = activity.CheckinTime,
-        TicketPath = activity.TicketPath,
-        SortOrder = activity.SortOrder
-    };
 
     private async Task<OrderActivity?> LoadActivityAsync(
         Guid orderId,

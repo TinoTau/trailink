@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { isStoredFile, itineraryDayWrite, ordersApi } from '../../api/orders'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { FileField } from '../FileField'
-import { OrderInfoEditor, TrashIcon } from '../OrderInfoFields'
+import { TrashIcon } from '../icons'
+import { OrderInfoEditor } from '../OrderInfoFields'
 import { formatLocalTime } from '../../localDate'
 import { splitOrderHint } from '../../orderFlags'
-import { PLACE_PRESETS, placeMark, presetForLocation } from '../../placeMark'
+import { usePlaces } from '../../api/places'
+import { placeMark, presetForLocation } from '../../placeMark'
 import { contactLabel } from '../../text'
 import type { DriverCalendarDay, ItineraryDay, Order, OrderActivity, OrderActivityWrite } from '../../types'
 
@@ -286,12 +288,13 @@ function PlaceMarkBar({
 }) {
   const [customOpen, setCustomOpen] = useState(false)
   const [draft, setDraft] = useState('')
-  const preset = presetForLocation(value)
+  const places = usePlaces()
+  const preset = presetForLocation(places, value)
   const customMark = value && !preset ? placeMark(value) : undefined
 
   return (
     <div className="place-mark-bar" aria-label="住宿位置">
-      {PLACE_PRESETS.map((item) => (
+      {places.map((item) => (
         <button
           key={item.mark}
           type="button"

@@ -134,7 +134,7 @@ public class LicensePhotosController(TrailinkDbContext db, AuthSession session, 
 
         if (user.DriverId is null)
         {
-            return Problem(title: "Validation error", detail: "只有司导账号可以上传驾照。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("只有司导账号可以上传驾照。");
         }
 
         DriverLicensePhoto? existing = null;
@@ -151,14 +151,14 @@ public class LicensePhotosController(TrailinkDbContext db, AuthSession session, 
         {
             if (side is not (Front or Back))
             {
-                return Problem(title: "Validation error", detail: "请指定驾照正面或反面。", statusCode: StatusCodes.Status400BadRequest);
+                return this.Invalid("请指定驾照正面或反面。");
             }
 
             var taken = await db.DriverLicensePhotos
                 .AnyAsync(item => item.UserId == user.Id && item.Side == side, cancellationToken);
             if (taken)
             {
-                return Problem(title: "Validation error", detail: "这一面已经有照片，请更新或先删除。", statusCode: StatusCodes.Status400BadRequest);
+                return this.Invalid("这一面已经有照片，请更新或先删除。");
             }
         }
 
@@ -174,22 +174,16 @@ public class LicensePhotosController(TrailinkDbContext db, AuthSession session, 
             cancellationToken);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         if (existing is null)
         {
-            var name = Path.GetFileName(file.FileName);
-            if (name.Length > 255)
-            {
-                name = name[..255];
-            }
-
             existing = new DriverLicensePhoto
             {
                 Id = storedId,
                 UserId = user.Id,
-                FileName = name,
+                FileName = AppFileStore.StoredName(file),
                 FilePath = path!,
                 Side = side!.Value
             };
@@ -198,10 +192,9 @@ public class LicensePhotosController(TrailinkDbContext db, AuthSession session, 
         else
         {
             existing.FilePath = path!;
-            var name = Path.GetFileName(file.FileName);
-            if (!string.IsNullOrWhiteSpace(name))
+            if (AppFileStore.StoredName(file) is { Length: > 0 } name)
             {
-                existing.FileName = name.Length > 255 ? name[..255] : name;
+                existing.FileName = name;
             }
         }
 
@@ -235,8 +228,7 @@ public class LicensePhotosController(TrailinkDbContext db, AuthSession session, 
             return NotFound();
         }
 
-        var opened = files.Open(photo.FilePath);
-        return opened is null ? NotFound() : PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+        return this.StoredFile(files, photo.FilePath);
     }
 
     private static LicensePhotoReadDto ToRead(DriverLicensePhoto photo) => new()

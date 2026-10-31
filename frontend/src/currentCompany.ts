@@ -1,9 +1,9 @@
-const KEY = 'trailink.currentCompanyId'
+import { PREF_KEYS, readPref, writePref } from './localPrefs'
 
 export function readCurrentCompanyId() {
-  return localStorage.getItem(KEY) ?? undefined
+  return readPref(PREF_KEYS.currentCompanyId) ?? undefined
 }
 
 export function writeCurrentCompanyId(companyId: string) {
-  localStorage.setItem(KEY, companyId)
+  writePref(PREF_KEYS.currentCompanyId, companyId)
 }

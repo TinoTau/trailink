@@ -72,6 +72,19 @@ public static class CompanyNotes
         return DefaultForNewUser(userId, companyId, companyName, owners, ownerNotes);
     }
 
+    /// <summary>写当前用户给这家公司起的简称，已有则覆盖。</summary>
+    public static Task UpsertAsync(
+        TrailinkDbContext db,
+        Guid companyId,
+        Guid userId,
+        string notes,
+        CancellationToken cancellationToken) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO company_notes (id, company_id, user_id, notes)
+            VALUES ({Guid.NewGuid()}, {companyId}, {userId}, {notes})
+            ON CONFLICT (company_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
+            """, cancellationToken);
+
     private static async Task<(List<(Guid UserId, Guid CompanyId)> Owners, List<(Guid CompanyId, Guid UserId, string Notes)> Notes)> LoadOwnerNotesAsync(
         TrailinkDbContext db,
         IReadOnlyCollection<Guid> companyIds,

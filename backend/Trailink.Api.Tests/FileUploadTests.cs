@@ -221,7 +221,7 @@ public class FileUploadTests : IClassFixture<ApiFactory>
         registered.EnsureSuccessStatusCode();
         (await client.PostAsync("/api/auth/avatar", ImageForm("avatar.png"))).EnsureSuccessStatusCode();
 
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessDate.Today;
         var expired = await CreateOrderWithFiles(client, today.AddDays(-OrderScheduling.AttachmentKeepDays));
         var recent = await CreateOrderWithFiles(client, today.AddDays(1 - OrderScheduling.AttachmentKeepDays));
         var extended = await CreateOrderWithFiles(client, today.AddDays(-30));

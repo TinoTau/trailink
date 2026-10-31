@@ -1,13 +1,6 @@
-export const PLACE_PRESETS = [
-  { mark: '基', name: '基督城' },
-  { mark: '凯', name: '凯库拉' },
-  { mark: '特', name: '特卡波' },
-  { mark: '瓦', name: '瓦纳卡' },
-  { mark: '皇', name: '皇后镇' },
-  { mark: '蒂', name: '蒂阿瑙' },
-  { mark: '但', name: '但尼丁' },
-] as const
+import type { Place } from './types'
 
+/** 日历浮雕字：住宿位置的第一个字。 */
 export function placeMark(value?: string | null) {
   const text = value?.trim()
   if (!text) {
@@ -16,10 +9,11 @@ export function placeMark(value?: string | null) {
   return [...text][0]
 }
 
-export function presetForLocation(value?: string | null) {
+/** 住宿位置对应的常用地点：写的是全名或浮雕字都算（与后端 Places.Find 一致）。 */
+export function presetForLocation(places: Place[], value?: string | null) {
   const text = value?.trim()
   if (!text) {
     return undefined
   }
-  return PLACE_PRESETS.find((item) => item.name === text || item.mark === text)
+  return places.find((item) => item.name === text || item.mark === text)
 }

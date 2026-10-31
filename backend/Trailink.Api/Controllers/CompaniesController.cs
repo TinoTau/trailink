@@ -50,18 +50,18 @@ public class CompaniesController(TrailinkDbContext db, AuthSession session) : Co
 
         if (user.Role == UserRoles.Company)
         {
-            return Problem(title: "Validation error", detail: "公司账户不能申请加入其他公司。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("公司账户不能申请加入其他公司。");
         }
 
         if (user.Memberships.Any(member =>
                 member.CompanyId == request.CompanyId && member.Role == UserRoles.Dispatcher))
         {
-            return Problem(title: "Validation error", detail: "已经是这家公司的调度员。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("已经是这家公司的调度员。");
         }
 
         if (user.Applications.Any(item => item.CompanyId == request.CompanyId))
         {
-            return Problem(title: "Validation error", detail: "已经申请过这家公司。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("已经申请过这家公司。");
         }
 
         var company = await db.Companies.FirstOrDefaultAsync(item => item.Id == request.CompanyId, cancellationToken);

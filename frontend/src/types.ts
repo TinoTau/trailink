@@ -22,13 +22,14 @@ import type {
   OrderFileReadDto,
   OrderReadDto,
   OrderWriteDto,
+  PlaceDto,
   PendingApplicationDto,
   PendingDriverApplicationDto,
   SessionUserDto,
+  WeatherSourceDto,
 } from './api/generated'
 
 type RequiredApi<T> = { [K in keyof T]-?: T[K] }
-type WithNumbers<T, K extends keyof T> = Omit<RequiredApi<T>, K> & { [P in K]-?: number }
 
 export type UserRole = 'company' | 'dispatcher' | 'driver'
 
@@ -50,10 +51,7 @@ export type SessionUser = Omit<
   pendingDriverApplications: PendingDriverApplication[]
 }
 
-export type CompanyOrderSummary = Omit<
-  WithNumbers<CompanyOrderDto, 'dayCount'>,
-  'kind'
-> & {
+export type CompanyOrderSummary = Omit<RequiredApi<CompanyOrderDto>, 'kind'> & {
   kind: 'company' | 'assigned' | 'driven'
 }
 
@@ -74,10 +72,7 @@ export type CompanyHome = Omit<RequiredApi<CompanyHomeDto>, 'companies' | 'desk'
 export type Driver = RequiredApi<DriverReadDto>
 export type DriverNoteWrite = RequiredApi<DriverNoteWriteDto>
 
-export type OrderActivity = Omit<
-  WithNumbers<OrderActivityReadDto, 'sortOrder'>,
-  'bookingTime' | 'checkinTime'
-> & {
+export type OrderActivity = Omit<RequiredApi<OrderActivityReadDto>, 'bookingTime' | 'checkinTime'> & {
   bookingTime: string | null
   checkinTime: string | null
 }
@@ -109,11 +104,10 @@ export type VehicleBindResult = RequiredApi<VehicleBindResultDto>
 export type LicensePhoto = RequiredApi<LicensePhotoReadDto>
 
 export type OrderFile = RequiredApi<OrderFileReadDto>
+export type Place = RequiredApi<PlaceDto>
+export type WeatherSource = RequiredApi<WeatherSourceDto>
 
-export type Order = Omit<
-  WithNumbers<OrderReadDto, 'dayCount' | 'guestCount' | 'assignedDayCount'>,
-  'days' | 'files'
-> & {
+export type Order = Omit<RequiredApi<OrderReadDto>, 'days' | 'files'> & {
   days: ItineraryDay[]
   files: OrderFile[]
 }
@@ -123,10 +117,7 @@ export type OrderWrite = Omit<OrderWriteDto, 'startDate' | 'guestCount'> & {
   guestCount: number
 }
 
-export type AssignmentResult = Omit<
-  WithNumbers<AssignmentResultDto, 'updatedDayCount'>,
-  'warnings'
-> & {
+export type AssignmentResult = Omit<RequiredApi<AssignmentResultDto>, 'warnings'> & {
   warnings: string[]
 }
 
@@ -135,6 +126,8 @@ export interface DriverCalendarTrip {
   label: string
   itineraryDayId: string
   endLocation: string | null
+  /** 这一天住宿地的天气短词，只有常用地点、且在预报范围内才有。 */
+  weather: string | null
 }
 
 export interface DriverCalendarDay {

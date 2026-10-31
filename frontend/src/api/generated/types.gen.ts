@@ -28,7 +28,7 @@ export type AssignedColorWriteDto = {
 export type AssignmentResultDto = {
     orderId?: string;
     driverId?: null | string;
-    updatedDayCount?: number | string;
+    updatedDayCount?: number;
     warnings?: Array<string>;
 };
 
@@ -89,11 +89,12 @@ export type CompanyOrderDto = {
     id?: string;
     orderNo?: string;
     platformOrderNo?: null | string;
+    label?: null | string;
     notes?: null | string;
     driverNotes?: null | string;
     sharedNotes?: null | string;
     startDate?: string;
-    dayCount?: number | string;
+    dayCount?: number;
     kind?: string;
 };
 
@@ -149,11 +150,14 @@ export type ItineraryDayReadDto = {
     driverName?: null | string;
     assignedByUserId?: null | string;
     assignedByName?: null | string;
-    assignedByContact?: null | string;
     vehicleId?: null | string;
     vehiclePlate?: null | string;
     vehicleInfo?: null | string;
     vehicleSharedNotes?: null | string;
+    assignedByContact?: null | string;
+    hasDriverConflict?: boolean;
+    hasVehicleConflict?: boolean;
+    weather?: null | string;
     activities?: Array<OrderActivityReadDto>;
     warnings?: Array<string>;
 };
@@ -166,38 +170,10 @@ export type ItineraryDayWriteDto = {
     failOnConflict?: boolean;
 };
 
-export type VehiclePhotoReadDto = {
-    id?: string;
-    fileName?: string;
-    sortOrder?: number;
-};
-
 export type LicensePhotoReadDto = {
     id?: string;
     side?: number;
     fileName?: string;
-};
-
-export type VehicleReadDto = {
-    id?: string;
-    plate?: string;
-    sharedNotes?: null | string;
-    info?: null | string;
-    available?: boolean;
-    photos?: Array<VehiclePhotoReadDto>;
-};
-
-export type VehicleWriteDto = {
-    plate?: string;
-    sharedNotes?: null | string;
-    info?: null | string;
-    available?: boolean;
-};
-
-export type VehicleBindResultDto = {
-    orderId?: string;
-    vehicleId?: null | string;
-    dayIds?: Array<string>;
 };
 
 export type LoginDto = {
@@ -213,7 +189,7 @@ export type OrderActivityReadDto = {
     bookingTime?: unknown;
     checkinTime?: unknown;
     ticketPath?: null | string;
-    sortOrder?: number | string;
+    sortOrder?: number;
 };
 
 export type OrderActivityReorderDto = {
@@ -237,10 +213,11 @@ export type OrderReadDto = {
     id?: string;
     orderNo?: string;
     platformOrderNo?: null | string;
+    label?: null | string;
     startDate?: string;
     endDate?: null | string;
-    dayCount?: number | string;
-    guestCount?: number | string;
+    dayCount?: number;
+    guestCount?: number;
     notes?: null | string;
     driverNotes?: null | string;
     sharedNotes?: null | string;
@@ -252,7 +229,12 @@ export type OrderReadDto = {
     assignedDispatcherUserId?: null | string;
     assignedDispatcherName?: null | string;
     assignedDispatcherContact?: null | string;
-    assignedDayCount?: number | string;
+    assignedDayCount?: number;
+    isSplit?: boolean;
+    isFinished?: boolean;
+    isInProgress?: boolean;
+    isHistorical?: boolean;
+    hasDriverConflict?: boolean;
     days?: Array<ItineraryDayReadDto>;
     files?: Array<OrderFileReadDto>;
 };
@@ -260,7 +242,7 @@ export type OrderReadDto = {
 export type OrderWriteDto = {
     platformOrderNo?: null | string;
     startDate?: string;
-    guestCount?: number | string;
+    guestCount?: number;
     notes?: null | string;
     driverNotes?: null | string;
     sharedNotes?: null | string;
@@ -277,6 +259,11 @@ export type PendingDriverApplicationDto = {
     id?: string;
     dispatcherUserId?: string;
     dispatcherName?: string;
+};
+
+export type PlaceDto = {
+    mark?: string;
+    name?: string;
 };
 
 export type ProfileContactWriteDto = {
@@ -318,6 +305,44 @@ export type SessionUserDto = {
     companies?: Array<CompanyBriefDto>;
     pendingApplications?: Array<PendingApplicationDto>;
     pendingDriverApplications?: Array<PendingDriverApplicationDto>;
+};
+
+export type VehicleBindDto = {
+    vehicleId?: null | string;
+    onlyDay?: boolean;
+};
+
+export type VehicleBindResultDto = {
+    orderId?: string;
+    vehicleId?: null | string;
+    dayIds?: Array<string>;
+};
+
+export type VehiclePhotoReadDto = {
+    id?: string;
+    fileName?: string;
+    sortOrder?: number;
+};
+
+export type VehicleReadDto = {
+    id?: string;
+    plate?: string;
+    sharedNotes?: null | string;
+    info?: null | string;
+    available?: boolean;
+    photos?: Array<VehiclePhotoReadDto>;
+};
+
+export type VehicleWriteDto = {
+    plate?: string;
+    sharedNotes?: null | string;
+    info?: null | string;
+    available?: boolean;
+};
+
+export type WeatherSourceDto = {
+    name?: string;
+    url?: string;
 };
 
 export type PostApiAuthRegisterData = {
@@ -1006,6 +1031,148 @@ export type PutApiOrdersByOrderIdDaysByDayIdResponses = {
 
 export type PutApiOrdersByOrderIdDaysByDayIdResponse = PutApiOrdersByOrderIdDaysByDayIdResponses[keyof PutApiOrdersByOrderIdDaysByDayIdResponses];
 
+export type PutApiOrdersByOrderIdDaysByDayIdVehicleData = {
+    body: VehicleBindDto;
+    path: {
+        orderId: string;
+        dayId: string;
+    };
+    query?: never;
+    url: '/api/orders/{orderId}/days/{dayId}/vehicle';
+};
+
+export type PutApiOrdersByOrderIdDaysByDayIdVehicleResponses = {
+    /**
+     * OK
+     */
+    200: VehicleBindResultDto;
+};
+
+export type PutApiOrdersByOrderIdDaysByDayIdVehicleResponse = PutApiOrdersByOrderIdDaysByDayIdVehicleResponses[keyof PutApiOrdersByOrderIdDaysByDayIdVehicleResponses];
+
+export type GetApiAuthLicensePhotosData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/auth/license-photos';
+};
+
+export type GetApiAuthLicensePhotosResponses = {
+    /**
+     * OK
+     */
+    200: Array<LicensePhotoReadDto>;
+};
+
+export type GetApiAuthLicensePhotosResponse = GetApiAuthLicensePhotosResponses[keyof GetApiAuthLicensePhotosResponses];
+
+export type PostApiAuthLicensePhotosData = {
+    body: {
+        file?: IFormFile;
+    };
+    path?: never;
+    query?: {
+        side?: number;
+    };
+    url: '/api/auth/license-photos';
+};
+
+export type PostApiAuthLicensePhotosResponses = {
+    /**
+     * OK
+     */
+    200: LicensePhotoReadDto;
+};
+
+export type PostApiAuthLicensePhotosResponse = PostApiAuthLicensePhotosResponses[keyof PostApiAuthLicensePhotosResponses];
+
+export type DeleteApiAuthLicensePhotosByPhotoIdData = {
+    body?: never;
+    path: {
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/auth/license-photos/{photoId}';
+};
+
+export type DeleteApiAuthLicensePhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetApiAuthLicensePhotosByPhotoIdData = {
+    body?: never;
+    path: {
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/auth/license-photos/{photoId}';
+};
+
+export type GetApiAuthLicensePhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PutApiAuthLicensePhotosByPhotoIdData = {
+    body: {
+        file?: IFormFile;
+    };
+    path: {
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/auth/license-photos/{photoId}';
+};
+
+export type PutApiAuthLicensePhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: LicensePhotoReadDto;
+};
+
+export type PutApiAuthLicensePhotosByPhotoIdResponse = PutApiAuthLicensePhotosByPhotoIdResponses[keyof PutApiAuthLicensePhotosByPhotoIdResponses];
+
+export type GetApiDriversByDriverIdLicensePhotosData = {
+    body?: never;
+    path: {
+        driverId: string;
+    };
+    query?: never;
+    url: '/api/drivers/{driverId}/license-photos';
+};
+
+export type GetApiDriversByDriverIdLicensePhotosResponses = {
+    /**
+     * OK
+     */
+    200: Array<LicensePhotoReadDto>;
+};
+
+export type GetApiDriversByDriverIdLicensePhotosResponse = GetApiDriversByDriverIdLicensePhotosResponses[keyof GetApiDriversByDriverIdLicensePhotosResponses];
+
+export type GetApiDriversByDriverIdLicensePhotosByPhotoIdData = {
+    body?: never;
+    path: {
+        driverId: string;
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/drivers/{driverId}/license-photos/{photoId}';
+};
+
+export type GetApiDriversByDriverIdLicensePhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
 export type GetApiOrdersByOrderIdDaysByDayIdActivitiesData = {
     body?: never;
     path: {
@@ -1355,3 +1522,182 @@ export type PutApiOrdersByOrderIdDispatcherResponses = {
 };
 
 export type PutApiOrdersByOrderIdDispatcherResponse = PutApiOrdersByOrderIdDispatcherResponses[keyof PutApiOrdersByOrderIdDispatcherResponses];
+
+export type GetApiPlacesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/places';
+};
+
+export type GetApiPlacesResponses = {
+    /**
+     * OK
+     */
+    200: Array<PlaceDto>;
+};
+
+export type GetApiPlacesResponse = GetApiPlacesResponses[keyof GetApiPlacesResponses];
+
+export type GetApiVehiclesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/vehicles';
+};
+
+export type GetApiVehiclesResponses = {
+    /**
+     * OK
+     */
+    200: Array<VehicleReadDto>;
+};
+
+export type GetApiVehiclesResponse = GetApiVehiclesResponses[keyof GetApiVehiclesResponses];
+
+export type PostApiVehiclesData = {
+    body: VehicleWriteDto;
+    path?: never;
+    query?: never;
+    url: '/api/vehicles';
+};
+
+export type PostApiVehiclesResponses = {
+    /**
+     * OK
+     */
+    200: VehicleReadDto;
+};
+
+export type PostApiVehiclesResponse = PostApiVehiclesResponses[keyof PostApiVehiclesResponses];
+
+export type DeleteApiVehiclesByIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/vehicles/{id}';
+};
+
+export type DeleteApiVehiclesByIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PutApiVehiclesByIdData = {
+    body: VehicleWriteDto;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/vehicles/{id}';
+};
+
+export type PutApiVehiclesByIdResponses = {
+    /**
+     * OK
+     */
+    200: VehicleReadDto;
+};
+
+export type PutApiVehiclesByIdResponse = PutApiVehiclesByIdResponses[keyof PutApiVehiclesByIdResponses];
+
+export type PostApiVehiclesByIdPhotosData = {
+    body: {
+        file?: IFormFile;
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/vehicles/{id}/photos';
+};
+
+export type PostApiVehiclesByIdPhotosResponses = {
+    /**
+     * OK
+     */
+    200: VehicleReadDto;
+};
+
+export type PostApiVehiclesByIdPhotosResponse = PostApiVehiclesByIdPhotosResponses[keyof PostApiVehiclesByIdPhotosResponses];
+
+export type DeleteApiVehiclesByIdPhotosByPhotoIdData = {
+    body?: never;
+    path: {
+        id: string;
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/vehicles/{id}/photos/{photoId}';
+};
+
+export type DeleteApiVehiclesByIdPhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: VehicleReadDto;
+};
+
+export type DeleteApiVehiclesByIdPhotosByPhotoIdResponse = DeleteApiVehiclesByIdPhotosByPhotoIdResponses[keyof DeleteApiVehiclesByIdPhotosByPhotoIdResponses];
+
+export type GetApiVehiclesByIdPhotosByPhotoIdData = {
+    body?: never;
+    path: {
+        id: string;
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/vehicles/{id}/photos/{photoId}';
+};
+
+export type GetApiVehiclesByIdPhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PutApiVehiclesByIdPhotosByPhotoIdData = {
+    body: {
+        file?: IFormFile;
+    };
+    path: {
+        id: string;
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/vehicles/{id}/photos/{photoId}';
+};
+
+export type PutApiVehiclesByIdPhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: VehicleReadDto;
+};
+
+export type PutApiVehiclesByIdPhotosByPhotoIdResponse = PutApiVehiclesByIdPhotosByPhotoIdResponses[keyof PutApiVehiclesByIdPhotosByPhotoIdResponses];
+
+export type GetApiWeatherSourceData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/weather/source';
+};
+
+export type GetApiWeatherSourceResponses = {
+    /**
+     * OK
+     */
+    200: WeatherSourceDto;
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type GetApiWeatherSourceResponse = GetApiWeatherSourceResponses[keyof GetApiWeatherSourceResponses];

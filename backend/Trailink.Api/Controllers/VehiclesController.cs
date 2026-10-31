@@ -16,7 +16,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
     [HttpGet]
     public async Task<ActionResult<List<VehicleReadDto>>> List(CancellationToken cancellationToken)
     {
-        var user = await OwnAsync(cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
         if (user is null)
         {
             return Unauthorized();
@@ -34,7 +34,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
     [HttpPost]
     public async Task<ActionResult<VehicleReadDto>> Create(VehicleWriteDto request, CancellationToken cancellationToken)
     {
-        var user = await OwnAsync(cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
         if (user is null)
         {
             return Unauthorized();
@@ -43,12 +43,12 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
         var plate = TextValue.NullIfBlank(request.Plate);
         if (plate is null || plate.Length > 20)
         {
-            return Problem(title: "Validation error", detail: "请填写 20 字以内的车牌号。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("请填写 20 字以内的车牌号。");
         }
 
         if (await PlateTaken(user.Id, plate, null, cancellationToken))
         {
-            return Problem(title: "Validation error", detail: "这个车牌号已经有了。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("这个车牌号已经有了。");
         }
 
         var vehicle = new Vehicle
@@ -69,7 +69,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<VehicleReadDto>> Update(Guid id, VehicleWriteDto request, CancellationToken cancellationToken)
     {
-        var user = await OwnAsync(cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
         if (user is null)
         {
             return Unauthorized();
@@ -84,12 +84,12 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
         var plate = TextValue.NullIfBlank(request.Plate);
         if (plate is null || plate.Length > 20)
         {
-            return Problem(title: "Validation error", detail: "请填写 20 字以内的车牌号。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("请填写 20 字以内的车牌号。");
         }
 
         if (await PlateTaken(user.Id, plate, vehicle.Id, cancellationToken))
         {
-            return Problem(title: "Validation error", detail: "这个车牌号已经有了。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("这个车牌号已经有了。");
         }
 
         vehicle.Plate = plate;
@@ -103,7 +103,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var user = await OwnAsync(cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
         if (user is null)
         {
             return Unauthorized();
@@ -142,7 +142,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
     [HttpDelete("{id:guid}/photos/{photoId:guid}")]
     public async Task<ActionResult<VehicleReadDto>> DeletePhoto(Guid id, Guid photoId, CancellationToken cancellationToken)
     {
-        var user = await OwnAsync(cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
         if (user is null)
         {
             return Unauthorized();
@@ -178,8 +178,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
             return NotFound();
         }
 
-        var opened = files.Open(photo.FilePath);
-        return opened is null ? NotFound() : PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+        return this.StoredFile(files, photo.FilePath);
     }
 
     private async Task<ActionResult<VehicleReadDto>> SavePhoto(
@@ -188,7 +187,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
         IFormFile file,
         CancellationToken cancellationToken)
     {
-        var user = await OwnAsync(cancellationToken);
+        var user = await session.GetUserAsync(cancellationToken);
         if (user is null)
         {
             return Unauthorized();
@@ -211,7 +210,7 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
         }
         else if (vehicle.Photos.Count >= PhotoLimit)
         {
-            return Problem(title: "Validation error", detail: "一辆车最多三张照片。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("一辆车最多三张照片。");
         }
 
         var storedId = existing?.Id ?? Guid.NewGuid();
@@ -226,22 +225,16 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
             cancellationToken);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         if (existing is null)
         {
-            var name = Path.GetFileName(file.FileName);
-            if (name.Length > 255)
-            {
-                name = name[..255];
-            }
-
             existing = new VehiclePhoto
             {
                 Id = storedId,
                 VehicleId = vehicle.Id,
-                FileName = name,
+                FileName = AppFileStore.StoredName(file),
                 FilePath = path!,
                 SortOrder = vehicle.Photos.Count == 0 ? 0 : vehicle.Photos.Max(item => item.SortOrder) + 1
             };
@@ -251,20 +244,14 @@ public class VehiclesController(TrailinkDbContext db, AuthSession session, AppFi
         else
         {
             existing.FilePath = path!;
-            var name = Path.GetFileName(file.FileName);
-            if (!string.IsNullOrWhiteSpace(name))
+            if (AppFileStore.StoredName(file) is { Length: > 0 } name)
             {
-                existing.FileName = name.Length > 255 ? name[..255] : name;
+                existing.FileName = name;
             }
         }
 
         await db.SaveChangesAsync(cancellationToken);
         return Ok(ToRead(vehicle));
-    }
-
-    private Task<User?> OwnAsync(CancellationToken cancellationToken)
-    {
-        return session.GetUserAsync(cancellationToken);
     }
 
     private Task<Vehicle?> LoadOwned(Guid id, Guid userId, CancellationToken cancellationToken)

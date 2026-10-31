@@ -1,7 +1,7 @@
 # Trailink V1 数据库契约
 
 版本：V1 MVP 第一阶段  
-日期：2026-10-23  
+日期：2026-10-23（2026-11-01 补上 `orders.shared_notes`）  
 数据库：PostgreSQL  
 迁移：EF Core Migrations
 
@@ -36,7 +36,14 @@ hidden     BOOLEAN NOT NULL DEFAULT false
 - `driver_id` → `drivers.id`（删除司导时级联删除）
 - `user_id` → `users.id`（删除用户时级联删除）
 
-唯一约束：`(driver_id, user_id)`。`GET /api/drivers` 返回当前登录用户自己的 `notes` 和 `hidden`。`PUT /api/drivers/{id}/notes` 只改备注；备注清空且未隐藏时删除这一行，已隐藏时保留空备注。`PUT /api/drivers/{id}/hidden` 只改 `hidden`。没有备注又取消隐藏时删除这一行。不是派单表。调度台隐藏司导写在这一列，换浏览器仍然有效。排序和置顶不写在这里。
+- 唯一约束：`(driver_id, user_id)`。
+- `GET /api/drivers` 返回当前登录用户自己的 `notes` 和 `hidden`。
+- `PUT /api/drivers/{id}/notes` 只改备注；备注清空且未隐藏时删除这一行，已隐藏时保留空备注。
+- `PUT /api/drivers/{id}/hidden` 只改 `hidden`。
+- 没有备注又取消隐藏时删除这一行。
+- 不是派单表。
+- 调度台隐藏司导写在这一列，换浏览器仍然有效。
+- 排序和置顶不写在这里。
 
 ---
 
@@ -55,7 +62,13 @@ hidden               BOOLEAN NOT NULL DEFAULT false
 - `dispatcher_user_id` → `users.id`（删除该调度员账号时级联删除）
 - `user_id` → `users.id`（删除写备注的公司账户时级联删除）
 
-唯一约束：`(dispatcher_user_id, user_id)`。`GET /api/company` 的 `dispatchers[].notes` 与 `PUT /api/company/dispatchers/{userId}/notes` 只读写当前公司账户这一行，不改 `hidden`。`hidden` 由 `PUT /api/company/dispatchers/{userId}/hidden` 写入。没有这一行时视为显示。清空备注且未隐藏则删除这一行。调度员读不到。不是派单表，也不复用 `driver_notes` / `order_notes`。
+- 唯一约束：`(dispatcher_user_id, user_id)`。
+- `GET /api/company` 的 `dispatchers[].notes` 与 `PUT /api/company/dispatchers/{userId}/notes` 只读写当前公司账户这一行，不改 `hidden`。
+- `hidden` 由 `PUT /api/company/dispatchers/{userId}/hidden` 写入。
+- 没有这一行时视为显示。
+- 清空备注且未隐藏则删除这一行。
+- 调度员读不到。
+- 不是派单表，也不复用 `driver_notes` / `order_notes`。
 
 ---
 
@@ -68,6 +81,7 @@ platform_order_no  VARCHAR(100) NULL
 start_date         DATE NOT NULL
 guest_count        INTEGER NOT NULL
 driver_notes       TEXT NULL
+shared_notes       TEXT NULL
 company_id                      UUID NULL
 created_by_user_id              UUID NULL
 assigned_dispatcher_user_id     UUID NULL
@@ -204,7 +218,17 @@ contact  VARCHAR(200) NULL
 qr_path  VARCHAR(500) NULL
 ```
 
-公司账户注册时创建。`name` 与 `contact` 都由公司账户经 `PUT /api/company` 编辑。名称 1 到 200 字，不能与其他公司重复。`contact` 可以是手机号或微信号。每人给公司的缩写不写在 `companies` 上，改全名也不会改写已有简称，见 `company_notes`。`qr_path` 指向统一本地存储的相对路径 `files/qr/{companyId}{ext}`；旧值 `company-qr/...` 仍可读取。调度台订单列表不按公司过滤，但已派完且结束日早于今天的单不出现在调度台。公司信息页按 `orders.company_id` 列订单。公司账户只看已派完且最后一天早于今天的历史单。司导看当前 `driver_id` 是自己的单，调度员还看当前 `assigned_by_user_id` 是自己的单；已结束和尚未结束都在内。改派后按当前行程日消失，不另记一份历史。
+- 公司账户注册时创建。
+- `name` 与 `contact` 都由公司账户经 `PUT /api/company` 编辑。
+- 名称 1 到 200 字，不能与其他公司重复。
+- `contact` 可以是手机号或微信号。
+- 每人给公司的缩写不写在 `companies` 上，改全名也不会改写已有简称，见 `company_notes`。
+- `qr_path` 指向统一本地存储的相对路径 `files/qr/{companyId}{ext}`；旧值 `company-qr/...` 仍可读取。
+- 调度台订单列表不按公司过滤，但已派完且结束日早于今天的单不出现在调度台。
+- 公司信息页按 `orders.company_id` 列订单。
+- 公司账户只看已派完且最后一天早于今天的历史单。
+- 司导看当前 `driver_id` 是自己的单，调度员还看当前 `assigned_by_user_id` 是自己的单；已结束和尚未结束都在内。
+- 改派后按当前行程日消失，不另记一份历史。
 
 ---
 
@@ -222,7 +246,15 @@ notes       VARCHAR(20) NOT NULL
 - `company_id` → `companies.id`（删除公司时级联删除）
 - `user_id` → `users.id`（删除用户时级联删除）
 
-唯一约束：`(company_id, user_id)`。这是当前用户自己给这家公司起的缩写，只自己可见。还没有这一行时，默认写成公司账户已保存的简称；公司账户还没有简称时，写成公司名前两个字。`GET /api/company` 的 `companies[].notes`、`desk.notes` 与 `PUT /api/company/notes` 读写这一行。用户改自己的简称不会回写公司账户，公司之后再改也不会覆盖已有的个人简称。清空个人简称则回到公司当前保存的简称；公司账户清空则回到公司名前两个字。下拉用简称，页内公司名称用公司全名。订单列表里的 `companyNote` 也是这一行。不复用 `driver_notes`、`dispatcher_notes` 或 `company_members`。
+- 唯一约束：`(company_id, user_id)`。
+- 这是当前用户自己给这家公司起的缩写，只自己可见。
+- 还没有这一行时，默认写成公司账户已保存的简称；公司账户还没有简称时，写成公司名前两个字。
+- `GET /api/company` 的 `companies[].notes`、`desk.notes` 与 `PUT /api/company/notes` 读写这一行。
+- 用户改自己的简称不会回写公司账户，公司之后再改也不会覆盖已有的个人简称。
+- 清空个人简称则回到公司当前保存的简称；公司账户清空则回到公司名前两个字。
+- 下拉用简称，页内公司名称用公司全名。
+- 订单列表里的 `companyNote` 也是这一行。
+- 不复用 `driver_notes`、`dispatcher_notes` 或 `company_members`。
 
 ---
 
@@ -263,7 +295,15 @@ company_id  UUID NOT NULL
 role        VARCHAR(20) NOT NULL
 ```
 
-唯一约束：`(user_id, company_id)`。公司批准调度员后 `role=dispatcher`，公司的调度员名单和「派给调度」只看这一行。公司账户注册时为自己写一条 `role=dispatcher`，登录或 `me` 会给旧账号补上，账号角色仍是公司。不能删除自己这一行。调度员批准司导申请后写入 `role=driver`。公司账户或该公司的调度员把公司订单派给有账号的司导时，若还没有成员行，也写入 `role=driver`；已有行不改角色。公司账户的调度台不看这一行，只看向该账户申请并已批准的 `driver_applications`。调度员批准时仍按他所属公司写入 `role=driver`，司导资源跟着调度员进公司；派单也可能补这一行。这两处都不等于公司账户自己的司导。
+- 唯一约束：`(user_id, company_id)`。
+- 公司批准调度员后 `role=dispatcher`，公司的调度员名单和「派给调度」只看这一行。
+- 公司账户注册时为自己写一条 `role=dispatcher`，登录或 `me` 会给旧账号补上，账号角色仍是公司。
+- 不能删除自己这一行。
+- 调度员批准司导申请后写入 `role=driver`。
+- 公司账户或该公司的调度员把公司订单派给有账号的司导时，若还没有成员行，也写入 `role=driver`；已有行不改角色。
+- 公司账户的调度台不看这一行，只看向该账户申请并已批准的 `driver_applications`。
+- 调度员批准时仍按他所属公司写入 `role=driver`，司导资源跟着调度员进公司；派单也可能补这一行。
+- 这两处都不等于公司账户自己的司导。
 
 ---
 
@@ -290,7 +330,21 @@ created_at           TIMESTAMPTZ NOT NULL
 approved_at          TIMESTAMPTZ NULL
 ```
 
-同一用户对同一调度员或公司账户只能有一条。注册时每个账号都有一条已批准的自指行：`user_id` 与 `dispatcher_user_id` 都是本人。已有账号在登录或 `me` 时补上。这条不能被解除绑定。对外申请接口仍拒绝向自己申请。`dispatcher_user_id` 可以指向调度员，也可以指向公司账户。`approved_at` 为空表示待批准，对方调度台还看不到这位司导。批准后写入 `approved_at`，行保留，作为「这位调度员或公司账户能看到这位司导」的依据。向调度员申请时，再按该调度员当前所属公司写入 `company_members`。同公司的另一位调度员看不到，公司账户也看不到，除非司导也向对方申请并被批准。没有 `driver_notes` 行时隐藏为 false。调度员解除绑定即删除自己这一行。未完成订单里由他派出或挂在他名下、且分给这位司导的日期清空 `driver_id`，有几天清几天。最后一天早于今天的行程保留。公司成员不动。
+- 同一用户对同一调度员或公司账户只能有一条。
+- 注册时每个账号都有一条已批准的自指行：`user_id` 与 `dispatcher_user_id` 都是本人。
+- 已有账号在登录或 `me` 时补上。
+- 这条不能被解除绑定。
+- 对外申请接口仍拒绝向自己申请。
+- `dispatcher_user_id` 可以指向调度员，也可以指向公司账户。
+- `approved_at` 为空表示待批准，对方调度台还看不到这位司导。
+- 批准后写入 `approved_at`，行保留，作为「这位调度员或公司账户能看到这位司导」的依据。
+- 向调度员申请时，再按该调度员当前所属公司写入 `company_members`。
+- 同公司的另一位调度员看不到，公司账户也看不到，除非司导也向对方申请并被批准。
+- 没有 `driver_notes` 行时隐藏为 false。
+- 调度员解除绑定即删除自己这一行。
+- 未完成订单里由他派出或挂在他名下、且分给这位司导的日期清空 `driver_id`，有几天清几天。
+- 最后一天早于今天的行程保留。
+- 公司成员不动。
 
 ---
 
@@ -314,7 +368,13 @@ file_path    TEXT NOT NULL
 sort_order   INT NOT NULL
 ```
 
-外键：`vehicles.owner_user_id` → `users.id`（删除用户时级联删除）。`vehicle_photos.vehicle_id` → `vehicles.id`（删除车辆时级联删除）。唯一约束：`(owner_user_id, plate)`，车牌入库前去掉首尾空白。一辆车最多三张照片，jpg、png、webp，单张 8MB，文件在 `App_Data/files/vehicles/`。调度台写入的是压缩后的 jpg，最长边 1600。`available` 为 false 表示停用，行仍在，可用车辆列表不显示。排序和置顶不落库。
+- 外键：`vehicles.owner_user_id` → `users.id`（删除用户时级联删除）。
+- `vehicle_photos.vehicle_id` → `vehicles.id`（删除车辆时级联删除）。
+- 唯一约束：`(owner_user_id, plate)`，车牌入库前去掉首尾空白。
+- 一辆车最多三张照片，jpg、png、webp，单张 8MB，文件在 `App_Data/files/vehicles/`。
+- 调度台写入的是压缩后的 jpg，最长边 1600。
+- `available` 为 false 表示停用，行仍在，可用车辆列表不显示。
+- 排序和置顶不落库。
 
 ---
 

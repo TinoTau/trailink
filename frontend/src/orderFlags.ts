@@ -1,4 +1,4 @@
-import type { Order } from './types'
+import type { DriverCalendarTrip, ItineraryDay, Order } from './types'
 
 const TILE_LABEL_MAX = 12
 
@@ -6,16 +6,20 @@ function clipTileLabel(raw: string) {
   return raw.length > TILE_LABEL_MAX ? raw.slice(0, TILE_LABEL_MAX) : raw
 }
 
-function firstLine(value?: string | null) {
-  return (value ?? '').split(/\r?\n/, 1)[0].trim()
+/** 订单显示名由后端给出（`label`），这里只按图标宽度截断。 */
+export function orderDisplayLabel(order: { label?: string | null }) {
+  return clipTileLabel((order.label ?? '').trim())
 }
 
-export function orderDisplayLabel(order: {
-  platformOrderNo?: string | null
-  sharedNotes?: string | null
-}) {
-  const raw = firstLine(order.platformOrderNo) || firstLine(order.sharedNotes)
-  return clipTileLabel(raw)
+/** 日历格子里的一条行程：我的行程和调度台当日编辑共用。 */
+export function calendarTrip(order: Order, day: ItineraryDay): DriverCalendarTrip {
+  return {
+    orderId: order.id,
+    label: orderDisplayLabel(order),
+    itineraryDayId: day.id,
+    endLocation: day.endLocation,
+    weather: day.weather,
+  }
 }
 
 const ACTIVITY_JOIN = '-'
@@ -41,29 +45,16 @@ export function driverDisplayLabel(driver: { name?: string | null; notes?: strin
   return clipTileLabel((driver.notes ?? '').trim() || (driver.name ?? '').trim())
 }
 
-function dayAssigner(
-  order: { createdByUserId?: string | null; createdByName?: string | null },
-  day?: { assignedByUserId?: string | null; assignedByName?: string | null },
-) {
-  const id = day?.assignedByUserId || order.createdByUserId || undefined
-  const name = (day?.assignedByName || order.createdByName)?.trim() || undefined
-  return { id, name }
-}
-
-export function isOwnAssignment(
-  order: { createdByUserId?: string | null },
-  day: { assignedByUserId?: string | null } | undefined,
-  userId: string | undefined,
-) {
-  const assignerId = dayAssigner(order, day).id
-  return Boolean(assignerId && userId && assignerId === userId)
+/** 派出人由后端按「派出人，否则建单人」回退后给出，前端只比较。 */
+export function isOwnAssignment(day: { assignedByUserId?: string | null } | undefined, userId: string | undefined) {
+  return Boolean(day?.assignedByUserId && userId && day.assignedByUserId === userId)
 }
 
 export function orderAssignerName(
   order: { createdByName?: string | null },
   day?: { assignedByName?: string | null },
 ) {
-  return dayAssigner(order, day).name
+  return (day ? day.assignedByName : order.createdByName)?.trim() || undefined
 }
 
 const DRIVER_ASSIGNER_MAX = 6
@@ -109,24 +100,6 @@ export function assignedDriverFocus(order: Order, today: string) {
       .map((day) => day.serviceDate)
       .sort()[0] ?? null
   return { driverId: first.driverId, date }
-}
-
-export function assignedAssignerIds(order: Order) {
-  return new Set(
-    order.days
-      .filter((day) => day.driverId)
-      .map((day) => day.assignedByUserId || order.createdByUserId)
-      .filter((id): id is string => Boolean(id)),
-  )
-}
-
-export function isPartiallyAssigned(order: Order) {
-  const assigned = order.assignedDayCount
-  return assigned > 0 && assigned < order.dayCount
-}
-
-export function isSplitOrder(order: Order) {
-  return assignedDriverIds(order).size > 1 || assignedAssignerIds(order).size > 1 || isPartiallyAssigned(order)
 }
 
 export const CONFLICT_RED = '#ff4d4f'
@@ -217,44 +190,18 @@ export function conflictPatternStyle(pattern: ConflictPattern, size = PATTERN_SI
   }
 }
 
-function orderIdsSharingKey(orders: Order[], keyFor: (day: Order['days'][number]) => string | null) {
-  const groups = new Map<string, Set<string>>()
-  for (const order of orders) {
-    for (const day of order.days) {
-      const key = keyFor(day)
-      if (!key) {
-        continue
-      }
-      const ids = groups.get(key) ?? new Set<string>()
-      ids.add(order.id)
-      groups.set(key, ids)
-    }
-  }
-  const conflicted = new Set<string>()
-  for (const ids of groups.values()) {
-    if (ids.size > 1) {
-      for (const id of ids) {
-        conflicted.add(id)
-      }
-    }
-  }
-  return conflicted
+/** 有司导冲突的订单（后端判定），用来排定冲突图案的顺序。 */
+export function conflictingOrderIds(orders: Order[]) {
+  return new Set(orders.filter((order) => order.hasDriverConflict).map((order) => order.id))
 }
 
-export function conflictingOrderIds(orders: Order[], driverId?: string | null) {
-  if (driverId === null) {
-    return new Set<string>()
-  }
-  return orderIdsSharingKey(orders, (day) => {
-    if (!day.driverId || (driverId && day.driverId !== driverId)) {
-      return null
-    }
-    return `${day.driverId}|${day.serviceDate}`
-  })
-}
-
+/** 这辆车有冲突日期的订单（后端判定）。 */
 export function conflictingVehicleOrderIds(orders: Order[], vehicleId: string) {
-  return orderIdsSharingKey(orders, (day) => (day.vehicleId === vehicleId ? day.serviceDate : null))
+  return new Set(
+    orders
+      .filter((order) => order.days.some((day) => day.vehicleId === vehicleId && day.hasVehicleConflict))
+      .map((order) => order.id),
+  )
 }
 
 export function dateSpan(dates: string[]) {
@@ -327,31 +274,11 @@ export function hasDispatcherAssignment(order: Order) {
   return Boolean(order.assignedDispatcherUserId)
 }
 
-export function orderEndDate(order: { startDate: string; endDate?: string | null }) {
-  return order.endDate || order.startDate
-}
-
-export function isIncomplete(order: Order, today: string) {
-  return orderEndDate(order) >= today
-}
-
-export function isInProgress(order: Order, today: string) {
-  const end = orderEndDate(order)
-  return order.startDate <= today && end >= today
-}
-
-export function isHistoricalOrder(order: Order, today: string) {
-  if (order.dayCount <= 0) {
-    return false
-  }
-  return orderEndDate(order) < today && !hasUnassignedDays(order)
-}
-
 export function splitOrderHint(orders: Order[]) {
   if (orders.some((order) => assignedDriverIds(order).size > 1)) {
     return '此单部分日期由其他司导负责'
   }
-  if (orders.some(isPartiallyAssigned)) {
+  if (orders.some((order) => order.assignedDayCount > 0 && hasUnassignedDays(order))) {
     return '此单尚未派完所有日期'
   }
   return null

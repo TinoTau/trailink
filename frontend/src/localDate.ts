@@ -8,9 +8,19 @@ export function formatLocalDate(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
+/** 业务只在新西兰，「今天」按 Pacific/Auckland 的日期算，与后端一致，不看手机或电脑的时区。 */
+export const BUSINESS_TIME_ZONE = 'Pacific/Auckland'
+
+const businessDateFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
 export function todayLocal() {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const [year, month, day] = businessDateFormat.format(new Date()).split('-').map(Number)
+  return new Date(year, month - 1, day)
 }
 
 export const CALENDAR_MONTH_SPAN = 6

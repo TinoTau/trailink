@@ -366,6 +366,14 @@
   gap: 8px;
 }
 
+/* 注明天气数据来源（来源的使用条款要求）。 */
+.driver-weather-credit {
+  margin-right: auto;
+  color: #bfbfbf;
+  font-size: 11px;
+  text-decoration: none;
+}
+
 .driver-color-chip {
   display: inline-flex;
   align-items: center;

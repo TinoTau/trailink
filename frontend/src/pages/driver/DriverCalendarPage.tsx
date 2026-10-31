@@ -13,27 +13,19 @@ import {
   formatMonthDay,
   monthCells,
   monthKey,
-  orderedRange,
   parseYmd,
   todayLocal,
   toDateOnly,
 } from '../../localDate'
-import {
-  CALENDAR_DATE_ATTR,
-  CALENDAR_HOLD_MS,
-  CalendarDayCaption,
-  type CalendarHold,
-  calendarHoldShifted,
-  captureCalendarPointer,
-  followCalendarDrag,
-  pointFromDragEvent,
-} from '../../calendarDay'
+import { CALENDAR_DATE_ATTR, CalendarDayCaption, captureCalendarPointer } from '../../calendarDay'
 import { conflictDateChoices, ConflictDatePopover } from '../../ConflictDatePopover'
-import { dateOrderEdges, driverAssignerCaption, orderDisplayLabel, CONFLICT_RED } from '../../orderFlags'
+import { calendarTrip, dateOrderEdges, driverAssignerCaption, orderDisplayLabel, CONFLICT_RED } from '../../orderFlags'
 import { placeMark } from '../../placeMark'
 import type { DriverCalendarDay, DriverCalendarTrip, Order } from '../../types'
 import { CalendarInkBar, useCalendarInk } from '../../calendarInk'
 import { DriverDayEditor } from './DriverDayEditor'
+import { useCalendarRangePick } from '../../useCalendarRangePick'
+import { useWeatherSource } from '../../api/weather'
 import './driver-calendar.css'
 
 function monthsAroundDate(dateText: string, today: Date) {
@@ -76,12 +68,7 @@ function daysByDriver(orders: Order[], driverId: string | null): Record<string, 
       }
       const bucket = next[day.serviceDate] ?? { date: day.serviceDate, items: [] }
       const assignerName = driverAssignerCaption(order, day)
-      bucket.items.push({
-        orderId: order.id,
-        label: orderDisplayLabel(order),
-        itineraryDayId: day.id,
-        endLocation: day.endLocation,
-      })
+      bucket.items.push(calendarTrip(order, day))
       if (!bucket.assignerName) {
         bucket.assignerName = assignerName
       }
@@ -94,6 +81,7 @@ function daysByDriver(orders: Order[], driverId: string | null): Record<string, 
 export function DriverCalendarPage() {
   const { user } = useAuthenticatedAuth()
   const ink = useCalendarInk()
+  const weatherSource = useWeatherSource()
   const driverId = user.driverId
   const today = useMemo(() => todayLocal(), [])
   const todayKey = formatLocalDate(today)
@@ -110,15 +98,14 @@ export function DriverCalendarPage() {
   const [armedRelease, setArmedRelease] = useState<{ date: string; orderId: string } | null>(null)
   const [pendingCancelTrips, setPendingCancelTrips] = useState<DriverCalendarTrip[]>([])
   const [orderNo, setOrderNo] = useState('')
-  const [rangeStart, setRangeStart] = useState<string | null>(null)
-  const [rangeEnd, setRangeEnd] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const expandingRef = useRef(false)
   const didScrollToToday = useRef(false)
   const pendingRevealDate = useRef<string | null>(null)
-  const rangeDragging = useRef(false)
-  const rangeHoldRef = useRef<CalendarHold | null>(null)
+  const range = useCalendarRangePick(scrollRef, () => setSelectedDate(null))
+  const rangeFrom = range.from
+  const rangeTo = range.to
   const unbindLock = useRef(false)
 
   const daysByDate = useMemo(() => daysByDriver(orders, driverId), [orders, driverId])
@@ -126,7 +113,6 @@ export function DriverCalendarPage() {
   const selectedDay = visibleSelectedDate ? daysByDate[visibleSelectedDate] : undefined
   const [detailBelow, setDetailBelow] = useState(false)
   const [detailHintBox, setDetailHintBox] = useState<{ left: number; top: number } | null>(null)
-  const [rangeFrom, rangeTo] = rangeStart ? orderedRange(rangeStart, rangeEnd) : [null, null]
   const addingTrip = menuOpen && !canceling
 
   async function loadBoard() {
@@ -209,93 +195,6 @@ export function DriverCalendarPage() {
     }
   }, [visibleSelectedDate, orders, months])
 
-  useEffect(() => {
-    function cancelHold() {
-      const hold = rangeHoldRef.current
-      if (!hold) {
-        return
-      }
-      window.clearTimeout(hold.timer)
-      rangeHoldRef.current = null
-    }
-    let followFrame = 0
-    const followPoint = { current: null as { x: number; y: number } | null }
-    function stopRangeFollow() {
-      if (followFrame) {
-        window.cancelAnimationFrame(followFrame)
-        followFrame = 0
-      }
-      followPoint.current = null
-    }
-    function tickRangeFollow() {
-      followFrame = 0
-      const point = followPoint.current
-      if (!rangeDragging.current || !point) {
-        return
-      }
-      const date = followCalendarDrag(scrollRef.current, point.x, point.y)
-      if (date) {
-        setRangeEnd((current) => (current === date ? current : date))
-      }
-      followFrame = window.requestAnimationFrame(tickRangeFollow)
-    }
-    function onMove(event: PointerEvent | TouchEvent) {
-      const hold = rangeHoldRef.current
-      const point = pointFromDragEvent(event)
-      if (hold && point && calendarHoldShifted(hold, point.x, point.y)) {
-        cancelHold()
-        return
-      }
-      if (!rangeDragging.current || !point) {
-        return
-      }
-      if (window.TouchEvent && event instanceof TouchEvent && event.cancelable) {
-        event.preventDefault()
-      }
-      followPoint.current = point
-      if (!followFrame) {
-        followFrame = window.requestAnimationFrame(tickRangeFollow)
-      }
-    }
-    function finishHold(event: PointerEvent | TouchEvent, selectIfTap: boolean) {
-      const hold = rangeHoldRef.current
-      if (hold) {
-        const point = pointFromDragEvent(event)
-        const shifted = point ? calendarHoldShifted(hold, point.x, point.y) : false
-        cancelHold()
-        if (selectIfTap && !shifted) {
-          setRangeStart(hold.date)
-          setRangeEnd(hold.date)
-          setSelectedDate(null)
-        }
-      }
-      rangeDragging.current = false
-      stopRangeFollow()
-    }
-    function onFinish(event: PointerEvent | TouchEvent) {
-      finishHold(event, true)
-    }
-    function onCancel(event: PointerEvent | TouchEvent) {
-      finishHold(event, false)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('touchmove', onMove, { passive: false })
-    window.addEventListener('pointerup', onFinish)
-    window.addEventListener('touchend', onFinish)
-    window.addEventListener('pointercancel', onCancel)
-    window.addEventListener('touchcancel', onCancel)
-    return () => {
-      cancelHold()
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('touchmove', onMove)
-      window.removeEventListener('pointerup', onFinish)
-      window.removeEventListener('touchend', onFinish)
-      window.removeEventListener('pointercancel', onCancel)
-      window.removeEventListener('touchcancel', onCancel)
-      stopRangeFollow()
-    }
-  }, [])
-
   function persistColors(next: DriverCalendarColors) {
     setColors(next)
     writeDriverCalendarColors(next)
@@ -367,58 +266,12 @@ export function DriverCalendarPage() {
     return driverCalendarFill(dateText, todayKey, colors)
   }
 
-  function clearRangeHold() {
-    const hold = rangeHoldRef.current
-    if (!hold) {
-      return
-    }
-    window.clearTimeout(hold.timer)
-    rangeHoldRef.current = null
-  }
-
-  function beginTouchHold(dateText: string, x: number, y: number, target: HTMLElement, pointerId: number) {
-    const existing = rangeHoldRef.current
-    if (existing) {
-      existing.x = x
-      existing.y = y
-      existing.target = target
-      if (pointerId >= 0) {
-        existing.pointerId = pointerId
-      }
-      return
-    }
-    const hold: CalendarHold = {
-      pointerId,
-      x,
-      y,
-      date: dateText,
-      target,
-      timer: window.setTimeout(() => {
-        if (rangeHoldRef.current !== hold) {
-          return
-        }
-        rangeHoldRef.current = null
-        rangeDragging.current = true
-        setRangeStart(hold.date)
-        setRangeEnd(hold.date)
-        setSelectedDate(null)
-        if (hold.pointerId >= 0) {
-          captureCalendarPointer(hold.target, hold.pointerId)
-        }
-      }, CALENDAR_HOLD_MS),
-    }
-    rangeHoldRef.current = hold
-  }
-
   function resetMenu() {
-    clearRangeHold()
-    rangeDragging.current = false
+    range.clear()
     setMenuOpen(false)
     setCanceling(false)
     setArmedRelease(null)
     setPendingCancelTrips([])
-    setRangeStart(null)
-    setRangeEnd(null)
     setOrderNo('')
   }
 
@@ -445,10 +298,7 @@ export function DriverCalendarPage() {
     if (unbindLock.current || !addingTrip) {
       return
     }
-    rangeDragging.current = true
-    setRangeStart(dateText)
-    setRangeEnd(dateText)
-    setSelectedDate(null)
+    range.press(dateText)
   }
 
   function onDayClick(dateText: string) {
@@ -517,8 +367,8 @@ export function DriverCalendarPage() {
   }
 
   function onDayPointerEnter(dateText: string) {
-    if (addingTrip && rangeDragging.current) {
-      setRangeEnd(dateText)
+    if (addingTrip) {
+      range.enter(dateText)
     }
   }
 
@@ -709,8 +559,7 @@ export function DriverCalendarPage() {
             setCanceling(false)
             setArmedRelease(null)
             setPendingCancelTrips([])
-            setRangeStart(null)
-            setRangeEnd(null)
+            range.clear()
             setSelectedDate(null)
           }}
         >
@@ -743,8 +592,7 @@ export function DriverCalendarPage() {
                 setCanceling((current) => !current)
                 setArmedRelease(null)
                 setPendingCancelTrips([])
-                setRangeStart(null)
-                setRangeEnd(null)
+                range.clear()
                 setSelectedDate(null)
               }}
             >
@@ -825,7 +673,7 @@ export function DriverCalendarPage() {
             onDayPointerDown={onDayPointerDown}
             onDayPointerEnter={onDayPointerEnter}
             onDayClick={onDayClick}
-            onTouchHold={beginTouchHold}
+            onTouchHold={range.hold}
           >
             {selectedDay && visibleSelectedDate && visibleSelectedDate.startsWith(monthKey(month)) ? (
               <DriverDayEditor
@@ -870,6 +718,11 @@ export function DriverCalendarPage() {
         </div>
       )}
       <section className="driver-calendar-colors">
+        {weatherSource ? (
+          <a className="driver-weather-credit" href={weatherSource.url} target="_blank" rel="noreferrer">
+            天气数据：{weatherSource.name}
+          </a>
+        ) : null}
         <div className="driver-color-actions">
           <button
             type="button"
@@ -1042,11 +895,7 @@ function MonthSection({
             >
               {cell.inMonth ? (
                 hasTrip ? (
-                  <CalendarDayCaption
-                    day={cell.date.getDate()}
-                    label={daysByDate[dateText].assignerName}
-                    place={placeMark(daysByDate[dateText].items.find((item) => item.endLocation)?.endLocation)}
-                  />
+                  <TripDayCaption day={cell.date.getDate()} trips={daysByDate[dateText]} />
                 ) : (
                   <b>{cell.date.getDate()}</b>
                 )
@@ -1059,5 +908,18 @@ function MonthSection({
       </div>
       {children}
     </section>
+  )
+}
+
+/** 有行程的日期格：浮雕字和天气都取这一天第一张写了住宿位置的单。 */
+function TripDayCaption({ day, trips }: { day: number; trips: DriverCalendarDay }) {
+  const stay = trips.items.find((item) => item.endLocation)
+  return (
+    <CalendarDayCaption
+      day={day}
+      label={trips.assignerName}
+      place={placeMark(stay?.endLocation)}
+      weather={stay?.weather}
+    />
   )
 }

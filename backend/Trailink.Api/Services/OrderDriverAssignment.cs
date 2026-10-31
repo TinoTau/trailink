@@ -8,9 +8,6 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
 {
     public const string CannotClearOthers = "只能取消自己派出的订单。";
 
-    public static Guid? AssignerId(Order order, ItineraryDay day) =>
-        day.AssignedByUserId ?? order.CreatedByUserId;
-
     public static void SetDayDriver(ItineraryDay day, Guid? driverId, Guid? assignedByUserId)
     {
         day.DriverId = driverId;
@@ -31,18 +28,13 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
         Guid dispatcherUserId,
         CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessDate.Today;
         var orders = await db.Orders
             .Include(order => order.Days)
             .Where(order => order.CompanyId == companyId && order.AssignedDispatcherUserId == dispatcherUserId)
             .ToListAsync(cancellationToken);
-        foreach (var order in orders)
+        foreach (var order in orders.Where(order => !OrderRules.IsFinished(order, today)))
         {
-            if (OrderScheduling.EndDate(order.Days) is DateOnly end && end < today)
-            {
-                continue;
-            }
-
             ReturnToCompanyPool(order);
         }
     }
@@ -78,7 +70,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
             return true;
         }
 
-        return assigned.TrueForAll(day => AssignerId(order, day) == user.Id);
+        return assigned.TrueForAll(day => OrderRules.AssignerId(order, day) == user.Id);
     }
 
     public async Task RemoveDriverPlaceholdersAsync(
@@ -87,7 +79,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
         IEnumerable<DateOnly> dates,
         CancellationToken cancellationToken)
     {
-        if (!OrderScheduling.IsRealOrder(incoming))
+        if (!OrderRules.IsRealOrder(incoming))
         {
             return;
         }
@@ -193,7 +185,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
 
     public async Task ReclaimUnfinishedDaysAsync(User dispatcher, Guid driverId, CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessDate.Today;
         var orderIds = await db.ItineraryDays
             .Where(day => day.DriverId == driverId)
             .Select(day => day.OrderId)
@@ -210,7 +202,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
             .ToListAsync(cancellationToken);
         foreach (var order in orders)
         {
-            if (OrderScheduling.EndDate(order.Days) is not DateOnly end || end < today)
+            if (OrderRules.IsFinished(order, today))
             {
                 continue;
             }
@@ -222,7 +214,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
                     continue;
                 }
 
-                if (order.AssignedDispatcherUserId != dispatcher.Id && AssignerId(order, day) != dispatcher.Id)
+                if (order.AssignedDispatcherUserId != dispatcher.Id && OrderRules.AssignerId(order, day) != dispatcher.Id)
                 {
                     continue;
                 }

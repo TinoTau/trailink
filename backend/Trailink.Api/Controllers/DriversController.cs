@@ -57,14 +57,7 @@ public class DriversController(TrailinkDbContext db, AuthSession session, AppFil
             .Where(item => item.DriverId == id)
             .Select(item => item.AvatarPath)
             .FirstOrDefaultAsync(cancellationToken);
-        var opened = files.Open(path);
-        if (opened is null)
-        {
-            return NotFound();
-        }
-
-        Response.Headers.CacheControl = "private, no-cache";
-        return PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+        return this.StoredFile(files, path, "private, no-cache");
     }
 
     [HttpGet("{id:guid}")]
@@ -85,7 +78,7 @@ public class DriversController(TrailinkDbContext db, AuthSession session, AppFil
         var error = Validate(request);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         var driver = new Driver
@@ -106,7 +99,7 @@ public class DriversController(TrailinkDbContext db, AuthSession session, AppFil
         var error = Validate(request);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         var driver = await db.Drivers.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);

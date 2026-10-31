@@ -10,7 +10,7 @@ public sealed class ExpiredAttachmentCleanup(IServiceScopeFactory scopes, ILogge
             {
                 await using var scope = scopes.CreateAsyncScope();
                 var scheduling = scope.ServiceProvider.GetRequiredService<OrderScheduling>();
-                await scheduling.PurgeExpiredAttachmentsAsync(DateOnly.FromDateTime(DateTime.Today), stoppingToken);
+                await scheduling.PurgeExpiredAttachmentsAsync(BusinessDate.Today, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

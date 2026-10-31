@@ -1,8 +1,10 @@
 # Trailink V1 技术架构文档
 
 版本：V1 MVP 第一阶段  
-日期：2026-10-23  
+日期：2026-10-23（2026-11-01 重排，补上实际部署方式）  
 状态：当前架构基线
+
+业务规则见 `PRD.md`，界面交互见 `FRONTEND_DESIGN.md`，表结构见 `DATABASE_CONTRACT.md`，接口见 `API_CONTRACT.md`。本文只写技术结构，以及每个业务概念由哪段代码负责。
 
 ---
 
@@ -10,169 +12,193 @@
 
 后端：
 
-- C#
-- ASP.NET Core 10 Web API
-- .NET 10 LTS（net10.0），不使用 .NET 9
-- SDK：10.0.402（`global.json` 锁定，允许同 feature band 滚动升级）
-- Entity Framework Core 10.0.13
-- Npgsql.EntityFrameworkCore.PostgreSQL 10.0.3
+- C# / ASP.NET Core 10 Web API，.NET 10 LTS（`net10.0`），不使用 .NET 9
+- SDK 10.0.402（`global.json` 锁定，允许同 feature band 滚动升级）
+- Entity Framework Core 10.0.13，Npgsql.EntityFrameworkCore.PostgreSQL 10.0.3
 - Microsoft.AspNetCore.OpenApi 10.0.13
+- SkiaSharp（服务端头像压缩）
 - PostgreSQL 16
+- NuGet 只用稳定正式版，不用 Preview / RC
 
 前端：
 
-- React
-- TypeScript
-- Vite
-- Ant Design
-- Ant Design Calendar
-- API transport types 由后端 `/openapi/v1.json` 生成；`types.ts` 只做生成类型别名与纯前端视图模型
-- 页面路径、菜单可见性和角色准入统一由 `navigation.ts` 定义
-
-云平台：
-
-- AWS
-
-计划使用的云服务：
-
-- Amazon RDS for PostgreSQL
-- Amazon S3
-- AWS App Runner（优先评估）或其他适合 .NET 容器的托管服务
-- Amazon CloudWatch（基础日志）
-
-本地开发：
-
-- Docker Compose + `postgres:16`
-- .NET 10 SDK
-- Node.js LTS
-
-部署：
-
-- Docker 容器
-- 应用镜像：`mcr.microsoft.com/dotnet/sdk:10.0`、`mcr.microsoft.com/dotnet/aspnet:10.0`
-- AWS 托管部署，优先评估 App Runner
-
-AWS 服务选型以简单、低成本、易维护为原则。正式创建收费云资源前，必须提交部署方案、预计成本和资源清单供确认。
+- React 19、TypeScript、Vite、React Router
+- Ant Design 6（不用它的顶栏和第三方日历组件，日历是自绘的）
+- dayjs
+- 接口类型由 `@hey-api/openapi-ts` 从后端 `/openapi/v1.json` 生成，`npm run api:types`
+- 代码检查 `oxlint`
 
 ---
 
 ## 2. 架构原则
 
-采用单体架构：
+单体应用：
 
 ```text
-React Frontend → ASP.NET Core Web API → PostgreSQL
+浏览器（React） → Caddy（静态文件 + 反向代理 /api） → ASP.NET Core Web API → PostgreSQL
+                                                       └→ 本地文件目录 App_Data/files/
 ```
 
-文件存储：
+不使用：微服务、Kubernetes、Redis、消息队列（Kafka / RabbitMQ）、CQRS、Event Sourcing、DDD 复杂分层、通用工作流引擎、AI Agent / LLM、GraphQL、时区管理框架。
 
-```text
-ASP.NET Core Web API → Amazon S3
-```
+后端简单分层：`Controllers`、`Services`（只在有实际业务逻辑时）、`Data`、`Models`、`DTOs`。不为每张表机械创建 Repository / Service / Interface。
 
-本地开发可将 S3 替换为本地文件系统，通过配置切换。
-
-不使用：
-
-- 微服务
-- Kubernetes
-- Redis
-- Kafka
-- RabbitMQ
-- CQRS
-- Event Sourcing
-- DDD 复杂分层
-- 通用工作流引擎
-- AI Agent
-- LLM
-- GraphQL
-
-调度台 `/dispatcher` 与司机日历一样是独立前端页。进入页面或从其他窗口回到当前页时，重新读取该页数据，未保存的输入保留。读写仍走现有 `orders` / `drivers` / `itinerary_days.driver_id`，不建派单表或日历表。公司把整单交给调度员写 `orders.assigned_dispatcher_user_id`，页面复用 `/company/assign` 的同一套调度台，不另开订单系统。订单所属公司只写 `orders.company_id`：公司建单即本公司，调度员和司导建单都不默认绑所属公司，即使只属于一家；调度员须搜索点选后立即绑定、改绑，或明确传 `null` 解绑。调度员给司导的备注写 `driver_notes`（`user_id` + `driver_id`），由 `/api/drivers/{id}/notes` 独立于司导档案写入。同一行的 `hidden` 表示当前用户在调度台隐藏了这位司导。公司给调度员的备注写 `dispatcher_notes`（`user_id` + `dispatcher_user_id`），只在派给调度里读写，调度员看不到。两个页面都从订单列表取行程日。调度台点开司导时，同一 `GET /api/orders` 带上这位司导的 `driverId`，画出他的全部行程，包括已完成和进行中已过的日期，不限本公司，别人的日期不写公司名或调度员姓名。点开司导图标时，订单日历未打开则滚到今天；订单日历已经打开时，订单日历保持原位，司导日历滚到订单日历当前的日期位置。着色与我的行程相同：早于今天用已完成色，今天和之后用未完成色。订单、司导、车辆和创建订单日历都画出半年前到半年后，已有行程超出这个范围时仍画出来。订单区仍不带这个参数。调度台「所有订单」排除已派完且已结束的历史单，本人日历保留这些日期并显示为已完成。`/company` 的订单：公司账户只看已派完且已结束的历史单；司导看自己当前接的单，调度员看自己当前接的和分配的单，已结束和尚未结束都在内。分配以当前行程日为准，改派后原经手人不再看到。日历按登录用户本人 `driver_id` 过滤。按天拆单只改各行程日的 `driver_id`；多分配人也按拆单处理。司导取消本人行程不看分配人。已绑定 `company_id` 的真实订单派给司导时，现有 `OrderScheduling` / `OrderDriverAssignment` 覆盖并删除该司导自建且未绑公司的占位单；未绑定公司的单不覆盖占位单。与其他真实订单重叠的日期仍写入同一司导，日历标红，点开后按天拆单移除。不另建占位表或覆盖接口。车辆只在调度台订单区的车辆标签里维护，属于当前登录用户：`vehicles.owner_user_id`，公司账户和调度员各自一份。照片在 `vehicle_photos`，页面先压成 jpg 再上传。详情并排三张小图，点小图时详情撑到页面底部再看大图，左右滑动换一张，大图按横向比例固定展示，竖图也缩到这个高度；下方横杠一样长，当前这张更深，点详情框里照片和按钮以外的空白处关闭大图，详情还在并缩回打开时的高度；删除照片先套红框。拉长横条固定在详情框底部，打开时至少高到停用按钮下方，离框底再留 8 像素。详情框可以向下超出车辆区，盖住司导区。点车辆图标先开日历，编辑才进入详情。绑定只写 `itinerary_days.vehicle_id`：整单写入还没有车的日期，拆单只写入这一段还没有车的日期，都已经有车则不写入。车辆管理时，司导日历的拖动只解除车辆，不改司导。司导日历滑动带动车辆日历。车辆日历的日期写司导名字。点日期在两张日历之间对跳。同一天两单用同一辆车时，车辆日历标红，按订单冲突的图案选择解除当天绑定。可用时只显示停用，先套红框再点一次才写入 `available`。停用时只显示可用，点一下就恢复。点弹框外没有按钮的空白处关闭，与订单详情同一套。垃圾桶删除车辆。置顶在本机 `trailink.dispatcher.vehicleLayout`，未置顶的按车牌字母顺序，只在置顶组内拖动排序。订单列表和车辆列表分开请求。派给调度没有车辆标签。订单和车辆是同一行标签。触屏拖车辆与拖订单图标相同，先按住约 0.5 秒。
-
-后端采用简单分层：
-
-- Controllers
-- Services（仅在存在实际业务逻辑时使用）
-- Data
-- Models
-- DTOs
-
-不为每张表机械创建 Repository、Service、Interface 等多层抽象。
+单一事实来源（SSOT）规则见 `.cursor/rules/ssot.mdc`，代码风格见根目录 `vibe coding代码规范`。要点：一个业务概念只有一个权威定义、一条实现路径；改现有代码，不另开平行的 Controller、表、页面或文档。
 
 ---
 
 ## 3. 项目目录
 
 ```text
-Trailink/
+trailink/
 ├── backend/
+│   ├── Trailink.slnx
 │   ├── Trailink.Api/
-│   │   ├── Controllers/
-│   │   ├── Models/
-│   │   ├── DTOs/
-│   │   ├── Data/
-│   │   ├── Services/
+│   │   ├── Controllers/     每个资源一个控制器
+│   │   ├── DTOs/            请求 / 响应结构
+│   │   ├── Data/            DbContext、增量 Migrations、演示数据与清库命令
+│   │   ├── Models/          EF 实体
+│   │   ├── Services/        有业务逻辑的部分（见第 4 节）
+│   │   ├── Dockerfile
 │   │   └── Program.cs
-│   └── Trailink.slnx
+│   └── Trailink.Api.Tests/  xUnit 集成测试（连本地 PostgreSQL）
 ├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   ├── components/
-│   │   ├── api/
-│   │   └── types/
-│   └── package.json
-├── docs/
-│   ├── PRD.md
-│   ├── ARCHITECTURE.md
-│   ├── DATABASE_CONTRACT.md
-│   ├── API_CONTRACT.md
-│   ├── FRONTEND_DESIGN.md
-│   ├── DEVELOPMENT_PLAN.md
-│   └── reports/
-├── docker-compose.yml
+│   └── src/
+│       ├── api/             接口调用；generated/ 为自动生成的类型，不手改
+│       ├── auth/            登录状态
+│       ├── pages/           页面；dispatcher/、driver/ 两个大页面各自一个目录
+│       ├── navigation.ts    路由、菜单、角色准入的唯一定义
+│       ├── types.ts         生成类型的别名和纯前端视图模型
+│       └── *.ts(x)          日历格子、浮雕、冲突弹框、日期工具等共用模块
+├── docs/                    六份基线文档 + reports/ 执行报告
+├── docker-compose.yml       只用于本机 PostgreSQL
 └── README.md
 ```
 
-允许根据实际 .NET SDK 和项目模板进行少量调整，但不得无故增加架构层次。
+---
+
+## 4. 业务概念由哪段代码负责
+
+| 概念 | 后端 | 前端 |
+|------|------|------|
+| 登录、当前用户 | `AuthSession`、`AuthController` | `auth/`、`api/auth.ts` |
+| 「今天」 | `BusinessDate`（`Pacific/Auckland`） | `localDate.todayLocal`（同一时区） |
+| 订单规则：派出人、结束、进行中、历史单、拆单、占位单、显示名 | `OrderRules` | 读后端返回的 `label` / `isSplit` / `isFinished` / `isInProgress` / `isHistorical` / `hasDriverConflict` |
+| 订单接口响应（字段映射、规则结果、各人备注、按身份隐藏） | `OrderPresenter` | — |
+| 订单和行程日要带出的关联数据 | `Data/OrderQueries`（`WithSummary` / `WithDetails`） | — |
+| 错误响应和文件响应格式 | `Controllers/ControllerResults` | `api/client.ts` |
+| 本人司导身份、自指批准记录 | `DriverIdentity`（注册、登录、`me` 时补齐） | — |
+| 调度台能看到哪些司导 | `DriverRoster.Visible`（已批准的 `driver_applications`） | `api/drivers.ts` |
+| 公司成员与调度员 | `CompanyMembership`、`CompanyDeskController`、`CompaniesController` | `pages/CompanyPage.tsx` |
+| 司导申请与解除 | `DispatchersController` | `pages/ProfilePage.tsx` |
+| 订单与行程 CRUD | `OrdersController`、`ItineraryDaysController`、`OrderActivitiesController` | `api/orders.ts`、`OrderInfoFields`、`DriverDayEditor` |
+| 派单、取消、拆单权限、退回公司池 | `OrderDriverAssignment` | `orderFlags.isOwnAssignment`（只比较后端给出的派出人） |
+| 冲突检测、同日占用、占位单覆盖、附件过期 | `OrderScheduling` | `ConflictDatePopover`（只负责弹出选择） |
+| 各人备注（订单 / 司导 / 调度员） | `ViewerNotes` | `OrderInfoFields`、`pages/dispatcher/useOrderInfoDraft` |
+| 公司简称 | `CompanyNotes`（含写入） | `CompanyPage`、`currentCompany.ts` |
+| 车辆与车辆绑定 | `VehiclesController`、`ItineraryDaysController`（`/vehicle`） | `pages/dispatcher/VehicleBoard.tsx`、`api/vehicles.ts` |
+| 驾照照片 | `LicensePhotosController` | `pages/LicenseGallery.tsx`、`api/license.ts` |
+| 照片大图查看（车辆、驾照共用） | — | `pages/PhotoViewer.tsx` |
+| 文件存储 | `AppFileStore`、`AvatarImage` | `photoImage.ts` + `photoImage.worker.ts`（只在后台线程压缩，没有后备） |
+| 附件定时清理 | `ExpiredAttachmentCleanup`（启动后每 6 小时） | — |
+| 常用住宿地点（名称、浮雕字） | `Services/Weather/Places`，`GET /api/places` | `api/places.ts`（`usePlaces`） |
+| 天气（查询地点、按活动选地点、定时刷新、文字） | `Services/Weather/`：`ForecastPoints`、`WeatherRules`、`WeatherOptions`（选来源）、`MetNorwayClient`、`MetServiceClient`、`OpenMeteoClient`、`WeatherRefresh`、`WeatherForecasts`、`WeatherText` | 日期格 `CalendarDayCaption` 的 `weather` |
+| 日历格子、浮雕、日期 | — | `calendarDay.tsx`、`calendarInk.tsx`、`placeMark.ts`、`localDate.ts` |
+| 日历框选起止日期 | — | `useCalendarRangePick.ts`（我的行程和调度台创建订单共用） |
+| 调度台图标排列、拖拽落点、日历对齐、卡片拉高 | — | `pages/dispatcher/boardLayout.ts`、`boardDrag.ts`、`boardCalendar.ts`、`paneLift.ts` |
+| 本机偏好（键名统一在这里） | — | `localPrefs.ts` |
+| 共用图标 | — | `pages/icons.tsx` |
+| 页面数据刷新 | — | `usePageLoad.ts`（进入页面、回到窗口时重新读取，保留未保存输入） |
+
+不建立的东西（防止出现第二个事实来源）：
+
+- 派单表、派单历史表：派单只写 `itinerary_days.driver_id` + `assigned_by_user_id`；车辆只写 `itinerary_days.vehicle_id`。
+- 日历表：所有日历都从 `GET /api/orders` 的行程日画出。调度台点开司导时，同一接口带 `driverId` 参数。
+- 订单状态、结束日期列：由行程日期计算。
+- 占位单表、覆盖接口：占位单就是普通订单（`company_id` 为空、建单人是这位司导本人），覆盖逻辑在 `OrderDriverAssignment` 里。
+- 角色表、权限表：角色是 `users.role`。
+- 第二套前端 DTO：类型全部来自 OpenAPI 生成。
 
 ---
 
-## 4. 数据与文件
+## 5. 数据与文件
 
-- 使用 EF Core Migrations 管理数据库结构。
-- 第一阶段核心表：`drivers`、`driver_notes`、`dispatcher_notes`、`orders`、`order_notes`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`company_notes`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`、`vehicles`、`vehicle_photos`、`driver_license_photos`。订单共用备注是 `orders.shared_notes` 这一列，不另建表。车辆绑定是 `itinerary_days.vehicle_id`，不另建派单表。行程日读取带出这辆车的车牌、型号和共用备注，不复制到行程日。驾照正反面挂在本人 `users` 上，不复制到行程日。
-- 每人给公司的缩写只写 `company_notes`（`company_id` + `user_id`）。还没有记录时默认写入公司账户已保存的简称，没有则写入公司名前两个字。个人简称写好后不会被公司后来的修改覆盖。公司信息页下拉包含所属公司，以及创建过、被指派、派出或跑过的订单所属公司。司导日历在「公司名+调度员名」超过 6 个字时使用这条缩写。
-- 人员名单不跨公司共享。调度台司导只来自当前登录账户已批准的 `driver_applications`（`approved_at` 非空），其中包含注册时自动批准的自指行，公司和调度员可以给自己派单。公司账户和调度员用同一张表：公司只看到向本公司账户申请并批准的司导，看不到调度员带来的司导。调度员解除绑定即删除自己这一行，不另建关系表。未完成订单中由他派出或挂在他名下的日期清空这位司导的 `driver_id`，已结束的行程保留。公司的调度员名单和派给调度只来自本公司 `company_members.role=dispatcher`，其中包含公司账户自己的那一行。注册时写入，旧账号在登录或 `me` 时补上。不能解除自己。派给调度可以隐藏调度员，隐藏写在 `dispatcher_notes.hidden`。解除别人时，未完成且分给他的本公司订单退回公司池。调度员批准司导，或公司订单派给有账号的司导时，可以写入 `company_members.role=driver`，表示司导跟着调度员进了这家公司。这不把司导放进公司账户的调度台。批准前双方都看不到对方。隐藏只读 `driver_notes.hidden`，没有记录就是显示。
-- 四种上传（公司头像、用户头像、电子票、订单截图）共用 `AppFileStore`，根目录 `App_Data/files/{qr,avatars,tickets,orders,vehicles,licenses}/`。库里只存相对路径：`companies.qr_path`、`users.avatar_path`、`order_activities.ticket_path`、`order_files.file_path`。不进 `wwwroot`，不另开第二套存储。旧路径 `company-qr/` 仍可读取。头像在写入前经 `AvatarImage`（SkiaSharp）缩到最长边 256 并压成 JPEG，覆盖时删掉该用户旧文件。调度台通过 `GET /api/drivers/{id}/avatar` 读取能看到的司导头像，公司派给调度通过 `GET /api/company/dispatchers/{userId}/avatar` 读取本公司调度员头像，都打开同一份 `users.avatar_path`。公司头像 / 电子票 / 订单截图保持原图。订单最后一天起满 7 天后，删掉该单电子票文件和订单截图文件，并清掉 `ticket_path` 与 `order_files` 对应行。活动内容、订单、用户头像、公司头像都留下。程序启动后每 6 小时清一次。
-- 订单起始日期和行程日期使用 PostgreSQL `DATE` / `DateOnly`。活动预订与签到时间使用 `TIMESTAMP WITHOUT TIME ZONE` / `DateTime`（`Kind=Unspecified`），表示当地钟表时间。
-- 司机日历查询和领取/按日期建稿都写现有 `orders` / `itinerary_days`，不建日历表。框选建单与调度台创建订单共用前端 `createOrderWithDays`，一次最多三个月。领取与调度台派单共用 `PUT /api/orders/{id}/driver` 和同一套占位单覆盖。不提供 `claim` / `range` / preview 日历接口。分配只更新 `driver_id`。公司、调度员、司导登录后都只看自己的 `driver_id`。
-- 不引入时区管理框架。正式创建收费云资源前必须另行确认。
-
----
-
-## 5. 安全与配置
-
-- 保护数据库连接字符串和 AWS 密钥。
-- 不将真实密钥提交到 Git。
-- 使用环境变量或本地未入库配置文件。
-- 需要基本错误处理、输入校验和基础日志。
-- 暂不实现业务审计日志。
-- Cookie 登录。`users.role` 为 `company` / `dispatcher` / `driver`。不建角色表或权限表。角色变化以数据库为准，不依赖 Cookie 里的角色声明。本人可在个人信息修改 `users.username`、`password_hash` 和 `users.contact`，不另建账号表。公司信息的待批准申请、公司调度员名单、个人信息的司导申请、调度台司导详情，以及我的行程点开日期后的调度员姓名旁，都读 `users.contact`。调度台已分配颜色写 `users.assigned_color`，每人一条，不另建颜色表。
+- 库结构只通过 EF Core 增量 Migration 改。禁止改写已应用的 Migration，禁止重建库来绕开迁移。
+- 订单起始日期、行程日期：PostgreSQL `DATE` / C# `DateOnly`。
+- 活动预订、签到时间：`TIMESTAMP WITHOUT TIME ZONE` / `DateTime`（`Kind=Unspecified`），表示当地钟表时间。前端禁止用 `toISOString()` 提交。
+- 文件根目录 `App_Data/files/`，子目录 `qr`（公司头像）、`avatars`、`tickets`、`orders`（订单截图）、`vehicles`、`licenses`。库里只存相对路径，不进 `wwwroot`，不存二进制。旧路径 `company-qr/` 仍可读取。
+  - 用户头像：服务端用 SkiaSharp 缩到最长边 256 并压成 JPEG，覆盖时删掉旧文件。
+  - 车辆、驾照照片：页面里压成 jpg、最长边 1600 后上传。
+  - 公司头像、电子票、订单截图：保持原图。
+- 附件过期：订单最后一天起满 7 天后，删除电子票文件和订单截图文件，清掉 `ticket_path` 与 `order_files` 对应行。
 
 ---
 
-## 6. 日志与观测
+## 6. 日期与「今天」
 
-- 本地使用 ASP.NET Core 默认日志。
-- 云端使用 Amazon CloudWatch 收集基础应用日志。
-- 不引入独立日志平台或 APM。
+- 业务只在新西兰，「今天」统一按 `Pacific/Auckland` 计算，不依赖服务器或容器的时区（云端容器默认是 UTC）。
+- 后端判断已结束、历史单、附件过期、解除绑定时保留哪些行程，都用同一个「业务今天」。
+- 前端的「今天」同样按新西兰日期计算。
+- 后端统一从 `Services/BusinessDate.cs` 取，前端统一从 `localDate.todayLocal()` 取，两边都按 `Pacific/Auckland`。
 
 ---
 
-## 7. 本阶段记录的假设
+## 7. 安全与配置
 
-1. 前端通过 Vite 开发服务器访问后端 API，开发环境开启 CORS。
-2. 生产环境可由同一容器或反向代理托管前端静态文件与 API；具体部署方式在 Phase 4 说明中确定，不提前拆分服务。
-3. 文件存储先用可替换的本地 `AppFileStore`，不创建正式 AWS 资源。四种文件同一根目录。
-4. 技术版本已锁定为 .NET 10 LTS。NuGet 只使用稳定正式版：EF Core 10.0.13、Npgsql EF 10.0.3。不使用 Preview 或 RC。
-5. 本机系统 PATH 中可能仍有 .NET 9；开发与 CI 必须以 `global.json` 指定的 .NET 10 SDK 为准。
+- 登录：Cookie `trailink.auth`，HttpOnly、SameSite=Lax、滑动过期 14 天。未登录返回 401，不重定向。
+- 默认所有接口都需要登录，只有健康检查、注册、登录、OpenAPI 文档例外。
+- 密码：PBKDF2（HMAC-SHA256，10 万次迭代）加盐哈希。
+- 角色以数据库为准，不读 Cookie 里的角色声明。
+- 本阶段不做按订单归属的数据权限（见 PRD 第 2 节），下一阶段统一补上。
+- 连接字符串和密钥不进 Git。仓库里的 `appsettings.json` 只有本机开发用的占位连接串；云端通过环境变量配置。
+- 开发环境 CORS 只允许 `localhost:5173` / `127.0.0.1:5173`。
+
+---
+
+## 8. 部署（实际情况）
+
+- 域名 `trailink.cc`，DNS 在 Cloudflare，只做 DNS 解析（`DNS only`，不走 Cloudflare 代理）。
+- 一台 Google Cloud 虚拟机：e2-micro，us-west1，1 GB 内存 + 2 GB 交换空间。
+- 虚拟机上用 Docker Compose 跑三个容器：
+  - `postgres`：数据卷 `trailink_pgdata`，端口不对公网开放
+  - `api`：用 `backend/Trailink.Api/Dockerfile` 构建，监听 8080，不对公网开放；`App_Data` 和登录密钥（Data Protection）各有数据卷
+  - `web`：Caddy，提供 `frontend/dist` 静态文件并把 `/api` 反向代理到 `api`；80/443 对外，自动申请 HTTPS 证书
+- 生产用的 compose 文件、Caddyfile 和发布脚本都是一次性的，不放进仓库。
+- 发布方式：本机打包，通过浏览器 SSH 上传到虚拟机家目录再执行脚本。
+  - 只改前端：上传 `frontend/dist` 压缩包，只重建 `web` 容器。
+  - 改了后端：上传改动的后端文件，重建 `api` 镜像。
+  - 改了库结构：只有用户明确说明需要时才处理云端库。到时单独写一个只新增表或列、可以重复执行的 SQL 脚本，并补写迁移历史记录；不和前端发布混在同一个脚本里。
+- 本机开发和测试只用本机库，不连云端库。
+- 发布红线（线上是真实用户和真实订单）：
+  - 发布不动云端库：不连接、不迁移、不导入、不导出。只有用户明确说明需要备份或导入数据时才操作。
+  - 不执行 `docker compose down -v`，不删除任何数据卷。
+  - 不在云端运行 `--seed-demo`、`--wipe-data`、`--wipe-orders`。
+  - 不导入本机数据库，不改写或删除已有业务数据。
+
+---
+
+## 9. 外部服务：天气
+
+- 来源由 `Weather:Source` 选择。三种来源都实现 `IWeatherSource`，都返回（地点，新西兰日期）→ 短词，前端照原样显示：
+  - `MetNorway`（默认，线上使用）：MET Norway Locationforecast 2.0（`https://api.met.no/weatherapi/locationforecast/2.0/compact`）。
+    - 免费，CC BY 4.0 / NLOD，允许商用，不需要密钥。
+    - 使用条款：User-Agent 写应用名和网站（`Trailink/1.0 (+https://trailink.cc)`，在 `Program.cs` 设置）；坐标最多 4 位小数；每秒不超过 20 次；不在 `Expires` 之前重复请求。每 3 小时一轮，每个地点 1 次请求，满足条款。
+    - 前约 60 小时为逐小时，之后每 6 小时一段，共约 9–10 天。6 小时段的降水平均摊到每小时，和 MetService 共用 `WeatherText.Summarize` 汇总。符号含 `thunder` 记雷暴，`fog` 记雾。
+    - 在新西兰没有降水概率。
+  - `MetService`（需要密钥）：MetService Point Forecast API（`https://forecast-v2.metoceanapi.com`，`POST /point/time`，请求头 `x-api-key`）。免费 Starter 档每月 5 万单位，只允许原型测试；正式使用至少 Basic 档（30 美元/月）。
+    - 一次请求查全部地点、从新西兰今天 0 点起 240 小时、4 个变量：`precipitation.rate`、`cloud.cover`、`air.temperature.at-2m`、`air.visibility`。
+    - 计费 = 变量数 × 地点数 = 40 单位/次，一天 8 次，一个月约 1 万单位。
+  - `OpenMeteo`（需要密钥）：Open-Meteo Forecast API 商用版（`https://customer-api.open-meteo.com`），14 天、`weather_code` 和 `precipitation_probability_max`，短词写概率（如「降雨50%」）。免费版禁止商用，不使用。
+- 页面底部注明来源：前端读 `GET /api/weather/source`。
+- 配置：`appsettings.json` 的 `Weather` 节放来源（`Source`，默认 `MetNorway`）和可选地址（`BaseUrl`，留空用来源的正式地址）；密钥只放服务器环境变量 `Weather__ApiKey`，不进 Git。需要密钥的来源没有密钥时不查询，日历不显示天气。
+- 后端测试（`ApiFactory`）移除定时刷新，跑测试不会请求外部接口。
+- 查询地点：10 个（7 个常用地点、奥马鲁、库克山机场、米尔福德峡湾游客中心，清单在 `ForecastPoints`），一次请求查全部。
+- 刷新时间：启动后 1 分钟内一次；之后新西兰时间 02:17、05:17、08:17、11:17、14:17、17:17、20:17、23:17，再加 0–5 分钟随机偏移，避开整点高峰。一天 8 次。
+- 失败时 5、15、45 分钟后重试，仍失败就等下一个时段，期间保留上一批数据。
+- 结果只存在接口进程内存里（`WeatherForecasts`），不写数据库；订单接口在行程日上带出 `weather`。
+- 一天显示哪里的天气由 `WeatherRules` 决定：住宿地，或当天的库克山、峡湾项目（见 PRD 第 8 节）。
+
+## 10. 日志与观测
+
+- ASP.NET Core 默认日志，云端用 `docker compose logs` 查看。
+- 不引入独立日志平台或 APM，暂不做业务审计日志。

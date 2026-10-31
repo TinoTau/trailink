@@ -9,26 +9,24 @@ namespace Trailink.Api.Controllers;
 
 [ApiController]
 [Route("api/orders/{orderId:guid}/days")]
-public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling scheduling, OrderDriverAssignment assignment, AuthSession session) : ControllerBase
+public class ItineraryDaysController(
+    TrailinkDbContext db,
+    OrderScheduling scheduling,
+    OrderDriverAssignment assignment,
+    OrderPresenter presenter,
+    AuthSession session) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<ItineraryDayReadDto>>> List(Guid orderId, CancellationToken cancellationToken)
     {
-        if (!await db.Orders.AnyAsync(order => order.Id == orderId, cancellationToken))
+        var order = await db.Orders.WithDetails().AsSplitQuery().FirstOrDefaultAsync(item => item.Id == orderId, cancellationToken);
+        if (order is null)
         {
             return NotFound();
         }
 
-        var days = await db.ItineraryDays
-            .Include(day => day.Driver)
-            .Include(day => day.Activities)
-            .Include(day => day.AssignedBy)
-            .Include(day => day.Vehicle)
-            .Where(day => day.OrderId == orderId)
-            .OrderBy(day => day.ServiceDate)
-            .ToListAsync(cancellationToken);
-
-        return Ok(days.Select(ToRead).ToList());
+        var user = await session.GetUserAsync(cancellationToken);
+        return Ok((await presenter.PresentAsync(order, user, cancellationToken)).Days);
     }
 
     [HttpPost]
@@ -43,10 +41,9 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return NotFound();
         }
 
-        var error = await ValidateAsync(order, null, request, cancellationToken);
-        if (error is not null)
+        if (await ValidateAsync(order, null, request, cancellationToken) is string error)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         var user = await session.GetUserAsync(cancellationToken);
@@ -67,10 +64,9 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             await assignment.RemoveDriverPlaceholdersAsync(order, createdDriverId, [request.ServiceDate], cancellationToken);
             await assignment.LinkDriverToCompanyAsync(order, createdDriverId, day.AssignedByUserId, cancellationToken);
         }
-        await db.SaveChangesAsync(cancellationToken);
 
-        var created = await LoadDayAsync(day.Id, cancellationToken);
-        var dto = ToRead(created!);
+        await db.SaveChangesAsync(cancellationToken);
+        var dto = await PresentDayAsync(day.Id, cancellationToken);
         dto.Warnings = warnings;
         return Created($"/api/orders/{orderId}/days/{day.Id}", dto);
     }
@@ -91,31 +87,22 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return NotFound();
         }
 
-        var error = await ValidateAsync(order, day.Id, request, cancellationToken);
-        if (error is not null)
+        if (await ValidateAsync(order, day.Id, request, cancellationToken) is string error)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         var user = await session.GetUserAsync(cancellationToken);
-        if (request.DriverId is null && day.DriverId is not null)
+        if (request.DriverId is null && day.DriverId is not null &&
+            !OrderDriverAssignment.CanClearAssignment(user, order, [day]))
         {
-            if (!OrderDriverAssignment.CanClearAssignment(user, order, [day]))
-            {
-                return Problem(
-                    title: "Forbidden",
-                    detail: OrderDriverAssignment.CannotClearOthers,
-                    statusCode: StatusCodes.Status403Forbidden);
-            }
+            return this.Forbidden(OrderDriverAssignment.CannotClearOthers);
         }
 
         var warnings = await CollectWarningsAsync(order, request.DriverId, request.ServiceDate, cancellationToken);
         if (request.FailOnConflict && warnings.Count > 0)
         {
-            return Problem(
-                title: "Schedule conflict",
-                detail: string.Join("；", warnings),
-                statusCode: StatusCodes.Status409Conflict);
+            return this.ScheduleConflict(warnings);
         }
 
         var driverChanged = day.DriverId != request.DriverId;
@@ -137,13 +124,15 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         }
 
         await db.SaveChangesAsync(cancellationToken);
-
-        var updated = await LoadDayAsync(day.Id, cancellationToken);
-        var dto = ToRead(updated!);
+        var dto = await PresentDayAsync(day.Id, cancellationToken);
         dto.Warnings = warnings;
         return Ok(dto);
     }
 
+    /// <summary>
+    /// 绑定或解除车辆，只动自己派出的日期。
+    /// 绑定：整单填所有还没有车的日期；拆单只填这位司导这一段还没有车的日期。
+    /// </summary>
     [HttpPut("{dayId:guid}/vehicle")]
     public async Task<ActionResult<VehicleBindResultDto>> BindVehicle(
         Guid orderId,
@@ -166,48 +155,27 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return NotFound();
         }
 
-        if (day.DriverId is null)
+        if (day.DriverId is not Guid driverId)
         {
-            return Problem(title: "Validation error", detail: "这一天还没有司导。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("这一天还没有司导。");
         }
 
-        var assignerId = day.AssignedByUserId ?? order.CreatedByUserId;
-        if (assignerId != user.Id)
+        if (OrderRules.AssignerId(order, day) != user.Id)
         {
-            return Problem(title: "Forbidden", detail: "只能给自己分配的日期绑定车辆。", statusCode: StatusCodes.Status403Forbidden);
+            return this.Forbidden("只能给自己分配的日期绑定车辆。");
         }
 
+        var ownDays = order.Days
+            .Where(item => item.DriverId is not null && OrderRules.AssignerId(order, item) == user.Id)
+            .ToList();
         if (request.VehicleId is null)
         {
-            var cleared = new List<Guid>();
-            foreach (var item in order.Days)
-            {
-                if (request.OnlyDay && item.Id != day.Id)
-                {
-                    continue;
-                }
-
-                var itemAssigner = item.AssignedByUserId ?? order.CreatedByUserId;
-                if (itemAssigner != user.Id || item.VehicleId is null)
-                {
-                    continue;
-                }
-
-                item.VehicleId = null;
-                cleared.Add(item.Id);
-            }
-
-            if (cleared.Count > 0)
-            {
-                await db.SaveChangesAsync(cancellationToken);
-            }
-
-            return Ok(new VehicleBindResultDto
-            {
-                OrderId = order.Id,
-                VehicleId = null,
-                DayIds = cleared
-            });
+            var cleared = ownDays
+                .Where(item => item.VehicleId is not null && (!request.OnlyDay || item.Id == day.Id))
+                .ToList();
+            cleared.ForEach(item => item.VehicleId = null);
+            await db.SaveChangesAsync(cancellationToken);
+            return Ok(new VehicleBindResultDto { OrderId = order.Id, VehicleId = null, DayIds = cleared.Select(item => item.Id).ToList() });
         }
 
         var vehicle = await db.Vehicles.FirstOrDefaultAsync(
@@ -218,59 +186,18 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return NotFound();
         }
 
-        var driverId = day.DriverId.Value;
-        var split = VehicleOrderSplit(order);
-        var scope = order.Days.Where(item =>
-        {
-            if (item.DriverId is null)
-            {
-                return false;
-            }
-
-            var itemAssigner = item.AssignedByUserId ?? order.CreatedByUserId;
-            if (itemAssigner != user.Id)
-            {
-                return false;
-            }
-
-            return !split || item.DriverId == driverId;
-        }).ToList();
-        var free = scope.Where(item => item.VehicleId is null).ToList();
+        var split = OrderRules.IsSplit(order);
+        var free = ownDays
+            .Where(item => item.VehicleId is null && (!split || item.DriverId == driverId))
+            .ToList();
         if (free.Count == 0)
         {
-            return Problem(
-                title: "Validation error",
-                detail: "该订单已经绑定了其他车辆。",
-                statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("该订单已经绑定了其他车辆。");
         }
 
-        var bound = new List<Guid>();
-        foreach (var item in free)
-        {
-            item.VehicleId = vehicle.Id;
-            bound.Add(item.Id);
-        }
-
+        free.ForEach(item => item.VehicleId = vehicle.Id);
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(new VehicleBindResultDto
-        {
-            OrderId = order.Id,
-            VehicleId = vehicle.Id,
-            DayIds = bound
-        });
-    }
-
-    private static bool VehicleOrderSplit(Order order)
-    {
-        var assigned = order.Days.Where(item => item.DriverId is not null).ToList();
-        if (assigned.Count == 0)
-        {
-            return false;
-        }
-
-        var drivers = assigned.Select(item => item.DriverId).Distinct().Count();
-        var assigners = assigned.Select(item => item.AssignedByUserId ?? order.CreatedByUserId).Distinct().Count();
-        return drivers > 1 || assigners > 1 || assigned.Count < order.Days.Count;
+        return Ok(new VehicleBindResultDto { OrderId = order.Id, VehicleId = vehicle.Id, DayIds = free.Select(item => item.Id).ToList() });
     }
 
     [HttpDelete("{dayId:guid}")]
@@ -289,37 +216,10 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         return NoContent();
     }
 
-    internal static ItineraryDayReadDto ToRead(ItineraryDay day) => new()
+    private async Task<ItineraryDayReadDto> PresentDayAsync(Guid dayId, CancellationToken cancellationToken)
     {
-        Id = day.Id,
-        OrderId = day.OrderId,
-        ServiceDate = day.ServiceDate,
-        Description = day.Description,
-        EndLocation = day.EndLocation,
-        DriverId = day.DriverId,
-        DriverName = day.Driver?.Name,
-        AssignedByUserId = day.AssignedByUserId,
-        AssignedByName = day.AssignedBy?.Name,
-        AssignedByContact = day.AssignedBy?.Contact,
-        VehicleId = day.VehicleId,
-        VehiclePlate = day.Vehicle?.Plate,
-        VehicleInfo = day.Vehicle?.Info,
-        VehicleSharedNotes = day.Vehicle?.SharedNotes,
-        Activities = (day.Activities ?? [])
-            .OrderBy(activity => activity.SortOrder)
-            .ThenBy(activity => activity.Id)
-            .Select(OrderActivitiesController.ToRead)
-            .ToList()
-    };
-
-    private async Task<ItineraryDay?> LoadDayAsync(Guid dayId, CancellationToken cancellationToken)
-    {
-        return await db.ItineraryDays
-            .Include(day => day.Driver)
-            .Include(day => day.Activities)
-            .Include(day => day.AssignedBy)
-            .Include(day => day.Vehicle)
-            .FirstOrDefaultAsync(day => day.Id == dayId, cancellationToken);
+        var day = await db.ItineraryDays.WithDetails().FirstAsync(item => item.Id == dayId, cancellationToken);
+        return await presenter.PresentDayAsync(day, cancellationToken);
     }
 
     private async Task<string?> ValidateAsync(
@@ -338,13 +238,10 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             return "同一订单同一天只能有一条行程。";
         }
 
-        if (request.DriverId is Guid driverId)
+        if (request.DriverId is Guid driverId &&
+            !await db.Drivers.AnyAsync(driver => driver.Id == driverId, cancellationToken))
         {
-            var exists = await db.Drivers.AnyAsync(driver => driver.Id == driverId, cancellationToken);
-            if (!exists)
-            {
-                return "指定的司机不存在。";
-            }
+            return "指定的司机不存在。";
         }
 
         return null;
@@ -354,18 +251,8 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         Order order,
         Guid? driverId,
         DateOnly serviceDate,
-        CancellationToken cancellationToken)
-    {
-        if (driverId is not Guid assignedId)
-        {
-            return [];
-        }
-
-        return await scheduling.FindDriverConflictsAsync(
-            assignedId,
-            [serviceDate],
-            order.Id,
-            cancellationToken,
-            order.CompanyId);
-    }
+        CancellationToken cancellationToken) =>
+        driverId is Guid assignedId
+            ? await scheduling.FindDriverConflictsAsync(assignedId, [serviceDate], order.Id, cancellationToken, order.CompanyId)
+            : [];
 }

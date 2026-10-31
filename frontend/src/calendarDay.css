@@ -23,11 +23,49 @@
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
+/*
+ * 有天气时：浮雕字缩小贴上沿，天气贴下沿，两者都在背景层，
+ * 和浮雕字同一个透明度（跟着滑条变）；日期和派出人照常叠在上面，位置不变。
+ */
+.calendar-day-backdrop {
+  position: absolute;
+  inset: 1px 1px 2px;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.calendar-day-backdrop .calendar-day-place {
+  position: static;
+  transform: none;
+  font-size: 20px;
+}
+
+.calendar-day-weather {
+  max-width: 100%;
+  overflow: hidden;
+  color: rgb(0 0 0 / var(--calendar-place-opacity, 0.22));
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
 .calendar-day-caption b,
 .calendar-day-caption em,
 .calendar-day > b {
   position: relative;
   z-index: 1;
+}
+
+/* 透明度滑条只淡化有浮雕字（住宿地点）的格子里的日期和派出人，好露出背景；其他日期始终清楚，用来认时间。 */
+.calendar-day-caption.has-place b,
+.calendar-day-caption.has-place em {
   opacity: var(--calendar-text-opacity, 1);
 }
 

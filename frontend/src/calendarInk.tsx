@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { CALENDAR_HOLD_MS, calendarHoldShifted } from './calendarDay'
 import './calendarDay.css'
+import { PREF_KEYS, readPref, writePref } from './localPrefs'
 
-const STORAGE_KEY = 'trailink.calendar.inkBalance'
-const SIDE_KEY = 'trailink.calendar.inkSide'
 const EDGE_PX = 20
 const SIDE_COMMIT_PX = 48
-const PLACE_LOW = 0.62
+const PLACE_LOW = 0.7
 const PLACE_HIGH = 0.06
-const TEXT_LOW = 0.45
+const TEXT_LOW = 0.08
 const TEXT_HIGH = 1
 
 export const CALENDAR_INK_DEFAULT = 0.5
@@ -23,20 +22,12 @@ export function clampCalendarInk(value: number) {
 }
 
 export function readCalendarInk() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw == null ? CALENDAR_INK_DEFAULT : clampCalendarInk(Number(raw))
-  } catch {
-    return CALENDAR_INK_DEFAULT
-  }
+  const raw = readPref(PREF_KEYS.calendarInkBalance)
+  return raw == null ? CALENDAR_INK_DEFAULT : clampCalendarInk(Number(raw))
 }
 
 export function readCalendarInkSide(): CalendarInkSide {
-  try {
-    return localStorage.getItem(SIDE_KEY) === 'left' ? 'left' : 'right'
-  } catch {
-    return 'right'
-  }
+  return readPref(PREF_KEYS.calendarInkSide) === 'left' ? 'left' : 'right'
 }
 
 export function calendarInkOpacities(balance: number) {
@@ -61,19 +52,11 @@ export function useCalendarInk() {
   function change(next: number) {
     const value = clampCalendarInk(next)
     setBalance(value)
-    try {
-      localStorage.setItem(STORAGE_KEY, String(value))
-    } catch {
-      // 浏览器拒绝写入时，这次拖动仍然改当前页面。
-    }
+    writePref(PREF_KEYS.calendarInkBalance, String(value))
   }
   function changeSide(next: CalendarInkSide) {
     setSide(next)
-    try {
-      localStorage.setItem(SIDE_KEY, next)
-    } catch {
-      // 浏览器拒绝写入时，这次拖动仍然改当前页面。
-    }
+    writePref(PREF_KEYS.calendarInkSide, next)
   }
   return { balance, setBalance: change, side, setSide: changeSide, style: calendarInkStyle(balance) }
 }

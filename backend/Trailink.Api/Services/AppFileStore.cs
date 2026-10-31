@@ -90,6 +90,13 @@ public sealed class AppFileStore(IWebHostEnvironment env)
         return (relative, null);
     }
 
+    /// <summary>上传文件的原始文件名，去掉路径，最多 255 个字符。</summary>
+    public static string StoredName(IFormFile file)
+    {
+        var name = Path.GetFileName(file.FileName);
+        return name.Length > 255 ? name[..255] : name;
+    }
+
     public (string FullPath, string ContentType)? Open(string? relativePath)
     {
         var full = Resolve(relativePath);

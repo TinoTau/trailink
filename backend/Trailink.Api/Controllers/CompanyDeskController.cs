@@ -70,7 +70,7 @@ public class CompanyDeskController(
             var name = request.Name.Trim();
             if (await AccountText.CompanyNameErrorAsync(db, name, company.Id, cancellationToken) is string companyError)
             {
-                return Problem(title: "Validation error", detail: companyError, statusCode: StatusCodes.Status400BadRequest);
+                return this.Invalid(companyError);
             }
 
             company.Name = name;
@@ -110,7 +110,7 @@ public class CompanyDeskController(
             cancellationToken);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         company.QrPath = path;
@@ -134,8 +134,7 @@ public class CompanyDeskController(
         }
 
         var company = await db.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-        var opened = files.Open(company?.QrPath);
-        return opened is null ? NotFound() : PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+        return this.StoredFile(files, company?.QrPath);
     }
 
     [HttpPost("applications/{applicationId:guid}/approve")]
@@ -202,14 +201,7 @@ public class CompanyDeskController(
             .Where(item => item.Id == userId)
             .Select(item => item.AvatarPath)
             .FirstOrDefaultAsync(cancellationToken);
-        var opened = files.Open(path);
-        if (opened is null)
-        {
-            return NotFound();
-        }
-
-        Response.Headers.CacheControl = "private, no-cache";
-        return PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+        return this.StoredFile(files, path, "private, no-cache");
     }
 
     [HttpDelete("dispatchers/{userId:guid}")]
@@ -224,7 +216,7 @@ public class CompanyDeskController(
         var actor = await session.GetUserAsync(cancellationToken);
         if (actor?.Id == userId)
         {
-            return Problem(title: "Validation error", detail: "不能解除自己的调度员身份。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("不能解除自己的调度员身份。");
         }
 
         var member = await db.CompanyMembers
@@ -305,7 +297,7 @@ public class CompanyDeskController(
         var trimmed = request.Notes?.Trim();
         if (trimmed is { Length: > 20 })
         {
-            return Problem(title: "Validation error", detail: "公司简称不能超过 20 个字。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("公司简称不能超过 20 个字。");
         }
 
         if (string.IsNullOrEmpty(trimmed))
@@ -324,11 +316,7 @@ public class CompanyDeskController(
 
         if (!string.IsNullOrEmpty(trimmed))
         {
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
-                INSERT INTO company_notes (id, company_id, user_id, notes)
-                VALUES ({Guid.NewGuid()}, {request.CompanyId}, {user.Id}, {trimmed})
-                ON CONFLICT (company_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
-                """, cancellationToken);
+            await Services.CompanyNotes.UpsertAsync(db, request.CompanyId, user.Id, trimmed, cancellationToken);
         }
 
         return await Get(request.CompanyId, cancellationToken);
@@ -349,7 +337,7 @@ public class CompanyDeskController(
         var isDispatcher = await CompanyMembership.IsDispatcherAsync(db, company.Id, userId, cancellationToken);
         if (!isDispatcher)
         {
-            return Problem(title: "Validation error", detail: "只能给本公司的调度员写备注。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("只能给本公司的调度员写备注。");
         }
 
         if (session.UserId is not Guid actorId)
@@ -449,15 +437,12 @@ public class CompanyDeskController(
         var dispatcherNotes = noteRows.ToDictionary(note => note.DispatcherUserId, note => note.Notes);
         var dispatcherHidden = noteRows.ToDictionary(note => note.DispatcherUserId, note => note.Hidden);
 
-        var today = DateOnly.FromDateTime(DateTime.Today);
         var ordersQuery = db.Orders.Where(order =>
             order.CompanyId == company.Id &&
             order.Days.Count > 0);
         if (isOwner)
         {
-            ordersQuery = ordersQuery.Where(order =>
-                order.Days.All(day => day.DriverId != null) &&
-                order.Days.Max(day => day.ServiceDate) < today);
+            ordersQuery = ordersQuery.Where(OrderRules.Historical(BusinessDate.Today));
         }
         else
         {
@@ -476,11 +461,7 @@ public class CompanyDeskController(
             .Take(80)
             .ToListAsync(cancellationToken);
         var orderIds = orders.Select(order => order.Id).ToList();
-        var viewerNotes = user.Role == UserRoles.Driver
-            ? new Dictionary<Guid, string>()
-            : await db.OrderNotes
-                .Where(note => note.UserId == user.Id && orderIds.Contains(note.OrderId))
-                .ToDictionaryAsync(note => note.OrderId, note => note.Notes, cancellationToken);
+        var viewerNotes = await ViewerNotes.OrderNotesAsync(db, user, orderIds, cancellationToken);
 
         return new CompanyDeskDto
         {
@@ -528,6 +509,7 @@ public class CompanyDeskController(
                 Id = order.Id,
                 OrderNo = order.OrderNo,
                 PlatformOrderNo = order.PlatformOrderNo,
+                Label = OrderRules.Label(order.PlatformOrderNo, order.SharedNotes),
                 Notes = viewerNotes.GetValueOrDefault(order.Id),
                 DriverNotes = user.Role == UserRoles.Driver ? order.DriverNotes : null,
                 SharedNotes = order.SharedNotes,

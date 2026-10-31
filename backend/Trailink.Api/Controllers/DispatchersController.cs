@@ -53,12 +53,12 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session, Or
 
         if (user.Role == UserRoles.Company)
         {
-            return Problem(title: "Validation error", detail: "公司账户不能申请成为司导。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("公司账户不能申请成为司导。");
         }
 
         if (user.Id == request.DispatcherUserId)
         {
-            return Problem(title: "Validation error", detail: "不能向自己申请。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("不能向自己申请。");
         }
 
         var dispatcher = await db.Users
@@ -67,24 +67,24 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session, Or
             .FirstOrDefaultAsync(item => item.Id == request.DispatcherUserId, cancellationToken);
         if (dispatcher is null || dispatcher.Role is not (UserRoles.Dispatcher or UserRoles.Company))
         {
-            return Problem(title: "Validation error", detail: "没有找到这位调度员或公司账户。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("没有找到这位调度员或公司账户。");
         }
 
         var companyIds = HostCompanyIds(dispatcher);
         if (companyIds.Count == 0)
         {
-            return Problem(title: "Validation error", detail: "这位调度员还没有所属公司。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("这位调度员还没有所属公司。");
         }
 
         var existing = user.DriverApplications.FirstOrDefault(item => item.DispatcherUserId == dispatcher.Id);
         if (existing?.ApprovedAt is not null)
         {
-            return Problem(title: "Validation error", detail: "已经是这位调度员的司导。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("已经是这位调度员的司导。");
         }
 
         if (existing is not null)
         {
-            return Problem(title: "Validation error", detail: "已经向这位调度员申请过。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("已经向这位调度员申请过。");
         }
 
         var application = new DriverApplication
@@ -164,7 +164,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session, Or
         var companyIds = HostCompanyIds(user);
         if (companyIds.Count == 0)
         {
-            return Problem(title: "Validation error", detail: "还没有所属公司，无法批准司导。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("还没有所属公司，无法批准司导。");
         }
 
         var applicant = application.User;
@@ -216,7 +216,7 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session, Or
 
         if (user.DriverId == driverId)
         {
-            return Problem(title: "Validation error", detail: "不能解除自己的司导身份。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("不能解除自己的司导身份。");
         }
 
         await assignment.ReclaimUnfinishedDaysAsync(user, driverId, cancellationToken);

@@ -21,27 +21,27 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         var accountType = request.AccountType.Trim().ToLowerInvariant();
         if (AccountText.UsernameError(username) is string usernameError)
         {
-            return Problem(title: "Validation error", detail: usernameError, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(usernameError);
         }
 
         if (AccountText.PasswordError(request.Password) is string passwordError)
         {
-            return Problem(title: "Validation error", detail: passwordError, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(passwordError);
         }
 
         if (AccountText.NameError(name) is string nameError)
         {
-            return Problem(title: "Validation error", detail: nameError, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(nameError);
         }
 
         if (accountType is not ("driver" or "company"))
         {
-            return Problem(title: "Validation error", detail: "只能注册司导或公司账户。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("只能注册司导或公司账户。");
         }
 
         if (await AccountText.UsernameTakenAsync(db, username, null, cancellationToken))
         {
-            return Problem(title: "Validation error", detail: "用户名已被使用。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("用户名已被使用。");
         }
 
         var user = new User
@@ -58,7 +58,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
             var companyName = request.CompanyName?.Trim() ?? "";
             if (await AccountText.CompanyNameErrorAsync(db, companyName, null, cancellationToken) is string companyError)
             {
-                return Problem(title: "Validation error", detail: companyError, statusCode: StatusCodes.Status400BadRequest);
+                return this.Invalid(companyError);
             }
 
             var company = new Company { Id = Guid.NewGuid(), Name = companyName };
@@ -134,7 +134,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
             cancellationToken);
         if (error is not null)
         {
-            return Problem(title: "Validation error", detail: error, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(error);
         }
 
         user.AvatarPath = path;
@@ -156,7 +156,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         var name = request.Name?.Trim() ?? "";
         if (AccountText.NameError(name) is string nameError)
         {
-            return Problem(title: "Validation error", detail: nameError, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(nameError);
         }
 
         user.Name = name;
@@ -186,14 +186,14 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         var username = request.Username?.Trim() ?? "";
         if (AccountText.UsernameError(username) is string usernameError)
         {
-            return Problem(title: "Validation error", detail: usernameError, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(usernameError);
         }
 
         if (!string.Equals(user.Username, username, StringComparison.Ordinal))
         {
             if (await AccountText.UsernameTakenAsync(db, username, user.Id, cancellationToken))
             {
-                return Problem(title: "Validation error", detail: "用户名已被使用。", statusCode: StatusCodes.Status400BadRequest);
+                return this.Invalid("用户名已被使用。");
             }
 
             user.Username = username;
@@ -217,12 +217,12 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
 
         if (string.IsNullOrEmpty(request.CurrentPassword) || !PasswordHashing.Verify(request.CurrentPassword, user.PasswordHash))
         {
-            return Problem(title: "Validation error", detail: "当前密码不正确。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("当前密码不正确。");
         }
 
         if (AccountText.ReplacementPasswordError(request.Password) is string passwordError)
         {
-            return Problem(title: "Validation error", detail: passwordError, statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid(passwordError);
         }
 
         user.PasswordHash = PasswordHashing.Hash(request.Password);
@@ -244,7 +244,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
         var contact = request.Contact?.Trim() ?? "";
         if (contact.Length > 200)
         {
-            return Problem(title: "Validation error", detail: "联系方式不能超过 200 个字。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("联系方式不能超过 200 个字。");
         }
 
         user.Contact = contact.Length == 0 ? null : contact;
@@ -265,7 +265,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
 
         if (!AssignedColors.IsAllowed(request.AssignedColor))
         {
-            return Problem(title: "Validation error", detail: "只能选择已提供的已分配颜色。", statusCode: StatusCodes.Status400BadRequest);
+            return this.Invalid("只能选择已提供的已分配颜色。");
         }
 
         user.AssignedColor = AssignedColors.Resolve(request.AssignedColor);
@@ -282,14 +282,7 @@ public class AuthController(TrailinkDbContext db, AuthSession session, AppFileSt
             return Unauthorized();
         }
 
-        var opened = files.Open(user.AvatarPath);
-        if (opened is null)
-        {
-            return NotFound();
-        }
-
-        Response.Headers.CacheControl = "private, max-age=86400";
-        return PhysicalFile(opened.Value.FullPath, opened.Value.ContentType);
+        return this.StoredFile(files, user.AvatarPath, "private, max-age=86400");
     }
 
     internal static SessionUserDto ToSession(User user)

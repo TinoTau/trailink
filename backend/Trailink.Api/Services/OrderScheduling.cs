@@ -4,28 +4,15 @@ using Trailink.Api.Models;
 
 namespace Trailink.Api.Services;
 
+/// <summary>冲突检测、占位单查找和附件过期清理。</summary>
 public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
 {
     public const int AttachmentKeepDays = 7;
-    public static bool IsRealOrder(Order order) => order.CompanyId is not null;
 
-    public static bool IsDriverPlaceholder(Order order, Guid driverId) =>
-        order.CompanyId is null && order.CreatedBy?.DriverId == driverId;
-
-    public static DateOnly? EndDate(IEnumerable<ItineraryDay> days)
-    {
-        DateOnly? end = null;
-        foreach (var day in days)
-        {
-            if (end is null || day.ServiceDate > end.Value)
-            {
-                end = day.ServiceDate;
-            }
-        }
-
-        return end;
-    }
-
+    /// <summary>
+    /// 派单前的冲突提示：这位司导在这些日期上已经有其他订单。
+    /// 真实订单派单时，这位司导自己的占位单会被覆盖，不算冲突。
+    /// </summary>
     public async Task<List<string>> FindDriverConflictsAsync(
         Guid driverId,
         IEnumerable<DateOnly> dates,
@@ -40,15 +27,13 @@ public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
         }
 
         var ignorePlaceholders = incomingCompanyId is not null;
+        var placeholderIds = db.Orders.Where(OrderRules.PlaceholderOf(driverId)).Select(order => order.Id);
         var conflicts = await db.ItineraryDays
             .Where(day =>
                 day.DriverId == driverId &&
                 dateList.Contains(day.ServiceDate) &&
                 (excludeOrderId == null || day.OrderId != excludeOrderId) &&
-                (!ignorePlaceholders ||
-                 day.Order.CompanyId != null ||
-                 day.Order.CreatedBy == null ||
-                 day.Order.CreatedBy.DriverId != driverId))
+                (!ignorePlaceholders || !placeholderIds.Contains(day.OrderId)))
             .Select(day => new
             {
                 day.ServiceDate,
@@ -60,24 +45,13 @@ public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
         return conflicts
             .Select(item =>
             {
-                var label = FirstLine(item.PlatformOrderNo) ?? FirstLine(item.SharedNotes);
-                return string.IsNullOrEmpty(label)
+                var label = OrderRules.Label(item.PlatformOrderNo, item.SharedNotes);
+                return label is null
                     ? $"司机在 {item.ServiceDate:yyyy-MM-dd} 已有其他行程"
                     : $"司机在 {item.ServiceDate:yyyy-MM-dd} 已有其他行程：{label}";
             })
             .Distinct()
             .ToList();
-    }
-
-    private static string? FirstLine(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var line = value.Trim().Split(['\r', '\n'], 2)[0].Trim();
-        return string.IsNullOrEmpty(line) ? null : line;
     }
 
     public async Task<List<Order>> LoadDriverPlaceholdersAsync(
@@ -93,17 +67,50 @@ public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
         }
 
         return await db.Orders
-            .Include(order => order.CreatedBy)
+            .Where(OrderRules.PlaceholderOf(driverId))
+            .Where(order =>
+                order.Id != excludeOrderId &&
+                order.Days.Any(day => day.DriverId == driverId && dateList.Contains(day.ServiceDate)))
             .Include(order => order.Files)
             .Include(order => order.Days)
             .ThenInclude(day => day.Activities)
-            .Where(order =>
-                order.Id != excludeOrderId &&
-                order.CompanyId == null &&
-                order.CreatedBy != null &&
-                order.CreatedBy.DriverId == driverId &&
-                order.Days.Any(day => day.DriverId == driverId && dateList.Contains(day.ServiceDate)))
             .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 这些行程日里，哪些（司导, 日期）和（车辆, 日期）在全库被两张以上订单同时占用。
+    /// </summary>
+    public async Task<ScheduleOverlaps> FindOverlapsAsync(IEnumerable<ItineraryDay> source, CancellationToken cancellationToken)
+    {
+        var days = source.ToList();
+        var dates = days.Select(day => day.ServiceDate).Distinct().ToList();
+        var driverIds = days.Where(day => day.DriverId != null).Select(day => day.DriverId!.Value).Distinct().ToList();
+        var vehicleIds = days.Where(day => day.VehicleId != null).Select(day => day.VehicleId!.Value).Distinct().ToList();
+        if (dates.Count == 0)
+        {
+            return ScheduleOverlaps.None;
+        }
+
+        var drivers = driverIds.Count == 0
+            ? []
+            : await db.ItineraryDays
+                .Where(day => day.DriverId != null && driverIds.Contains(day.DriverId.Value) && dates.Contains(day.ServiceDate))
+                .GroupBy(day => new { DriverId = day.DriverId!.Value, day.ServiceDate })
+                .Where(group => group.Count() > 1)
+                .Select(group => new { group.Key.DriverId, group.Key.ServiceDate })
+                .ToListAsync(cancellationToken);
+        var vehicles = vehicleIds.Count == 0
+            ? []
+            : await db.ItineraryDays
+                .Where(day => day.VehicleId != null && vehicleIds.Contains(day.VehicleId.Value) && dates.Contains(day.ServiceDate))
+                .GroupBy(day => new { VehicleId = day.VehicleId!.Value, day.ServiceDate })
+                .Where(group => group.Count() > 1)
+                .Select(group => new { group.Key.VehicleId, group.Key.ServiceDate })
+                .ToListAsync(cancellationToken);
+
+        return new ScheduleOverlaps(
+            drivers.Select(item => (item.DriverId, item.ServiceDate)).ToHashSet(),
+            vehicles.Select(item => (item.VehicleId, item.ServiceDate)).ToHashSet());
     }
 
     public async Task PurgeExpiredAttachmentsAsync(DateOnly today, CancellationToken cancellationToken)
@@ -123,7 +130,7 @@ public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
         var changed = false;
         foreach (var order in orders)
         {
-            var end = EndDate(order.Days);
+            var end = OrderRules.EndDate(order.Days);
             if (end is null || end.Value > due)
             {
                 continue;
@@ -154,4 +161,18 @@ public class OrderScheduling(TrailinkDbContext db, AppFileStore files)
             await db.SaveChangesAsync(cancellationToken);
         }
     }
+}
+
+/// <summary>同一司导或同一辆车在同一天被两张以上订单占用的位置。</summary>
+public sealed record ScheduleOverlaps(
+    HashSet<(Guid DriverId, DateOnly Date)> Drivers,
+    HashSet<(Guid VehicleId, DateOnly Date)> Vehicles)
+{
+    public static readonly ScheduleOverlaps None = new([], []);
+
+    public bool DriverOverlaps(ItineraryDay day) =>
+        day.DriverId is Guid driverId && Drivers.Contains((driverId, day.ServiceDate));
+
+    public bool VehicleOverlaps(ItineraryDay day) =>
+        day.VehicleId is Guid vehicleId && Vehicles.Contains((vehicleId, day.ServiceDate));
 }

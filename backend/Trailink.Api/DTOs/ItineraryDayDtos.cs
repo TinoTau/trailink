@@ -27,6 +27,16 @@ public class ItineraryDayReadDto
     public string? VehicleInfo { get; set; }
     public string? VehicleSharedNotes { get; set; }
     public string? AssignedByContact { get; set; }
+
+    /// <summary>这位司导这一天还有别的订单。</summary>
+    public bool HasDriverConflict { get; set; }
+
+    /// <summary>这辆车这一天还有别的订单。</summary>
+    public bool HasVehicleConflict { get; set; }
+
+    /// <summary>住宿位置是常用地点、且在预报范围内时，这一天的天气短词，例如「晴」「多云」「降雨50%」。</summary>
+    public string? Weather { get; set; }
+
     public List<OrderActivityReadDto> Activities { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
 }

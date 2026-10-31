@@ -96,21 +96,6 @@ export function followCalendarDrag(scroller: HTMLElement | null, x: number, y: n
   return dateInsideScroller(scroller, x, y, overX && (below > 0 || above > 0))
 }
 
-export function calendarDateFromDrag(event: PointerEvent | TouchEvent, lockScroll = false) {
-  if (window.TouchEvent && event instanceof TouchEvent) {
-    if (lockScroll && event.cancelable) {
-      event.preventDefault()
-    }
-    const touch = event.touches[0]
-    if (!touch) {
-      return null
-    }
-    return calendarDateAtPoint(touch.clientX, touch.clientY)
-  }
-  const pointer = dragPointer(event)
-  return pointer ? calendarDateAtPoint(pointer.clientX, pointer.clientY) : null
-}
-
 export function captureCalendarPointer(target: HTMLElement, pointerId: number) {
   try {
     target.setPointerCapture(pointerId)
@@ -119,13 +104,36 @@ export function captureCalendarPointer(target: HTMLElement, pointerId: number) {
   }
 }
 
-export function CalendarDayCaption({ day, label, place }: { day?: number | string; label?: string; place?: string }) {
+/**
+ * 日期格里的文字：日期、派出人，背后是住宿地点的浮雕字。
+ * 有天气时，浮雕字缩小贴格子上沿，天气贴下沿，两者同在背景层、透明度一致；日期和派出人的位置不变。
+ * 透明度滑条只淡化有浮雕字的格子里的日期和派出人，其他日期始终清楚。
+ */
+export function CalendarDayCaption({
+  day,
+  label,
+  place,
+  weather,
+}: {
+  day?: number | string
+  label?: string
+  place?: string
+  weather?: string | null
+}) {
   if (day === undefined && !label && !place) {
     return null
   }
+  const showWeather = Boolean(place && weather)
   return (
-    <span className="calendar-day-caption">
-      {place ? <i className="calendar-day-place" aria-hidden>{place}</i> : null}
+    <span className={`calendar-day-caption${place ? ' has-place' : ''}`}>
+      {showWeather ? (
+        <span className="calendar-day-backdrop">
+          <i className="calendar-day-place" aria-hidden>{place}</i>
+          <i className="calendar-day-weather">{weather}</i>
+        </span>
+      ) : place ? (
+        <i className="calendar-day-place" aria-hidden>{place}</i>
+      ) : null}
       {day !== undefined ? <b>{day}</b> : null}
       {label ? <em>{label}</em> : null}
     </span>

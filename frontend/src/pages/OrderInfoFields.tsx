@@ -8,6 +8,7 @@ import { orderDisplayLabel } from '../orderFlags'
 import type { CompanySearch, Order } from '../types'
 import { OrderFilesBlock } from './OrderFilesBlock'
 import './dispatcher/dispatcher.css'
+import { NoteIcon } from './icons'
 
 export function privateOrderNoteCopy(role: string) {
   if (role === 'driver') {
@@ -250,24 +251,6 @@ function OrderCompanyField({
   )
 }
 
-export function NoteIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M5 5h10l4 4v10H5V5z" />
-      <path d="M15 5v4h4M8 12h8M8 16h6" />
-    </svg>
-  )
-}
-
-export function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 7h16" />
-      <path d="M9 7V5h6v2" />
-      <path d="M7 7l1 12h8l1-12" />
-    </svg>
-  )
-}
 
 function OrderNotesPreview({ sharedNotes, notes }: { sharedNotes?: string | null; notes?: string | null }) {
   if (!sharedNotes && !notes) {

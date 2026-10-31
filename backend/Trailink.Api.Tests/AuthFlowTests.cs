@@ -1,3 +1,4 @@
+using Trailink.Api.Services;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -353,7 +354,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
     public async Task Dispatcher_unbind_reclaims_unfinished_days_only()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessDate.Today;
         var companyClient = _factory.CreateClient();
         await companyClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
         {
@@ -444,7 +445,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
     public async Task Company_desk_lists_only_handled_historical_orders()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessDate.Today;
         var companyClient = _factory.CreateClient();
         await companyClient.PostAsJsonAsync("/api/auth/register", new RegisterDto
         {

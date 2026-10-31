@@ -151,6 +151,10 @@ public class CompanyOrderDto
     public Guid Id { get; set; }
     public string OrderNo { get; set; } = string.Empty;
     public string? PlatformOrderNo { get; set; }
+
+    /// <summary>订单显示名，规则同 <see cref="OrderReadDto.Label"/>。</summary>
+    public string? Label { get; set; }
+
     public string? Notes { get; set; }
     public string? DriverNotes { get; set; }
     public string? SharedNotes { get; set; }

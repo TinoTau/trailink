@@ -82,6 +82,47 @@ public static class ViewerNotes
             cancellationToken);
     }
 
+    /// <summary>当前用户给这些订单写的调度备注。司导没有调度备注。</summary>
+    public static async Task<Dictionary<Guid, string>> OrderNotesAsync(
+        TrailinkDbContext db,
+        User? user,
+        IReadOnlyCollection<Guid> orderIds,
+        CancellationToken cancellationToken)
+    {
+        if (user is null || user.Role == UserRoles.Driver || orderIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await db.OrderNotes
+            .Where(note => note.UserId == user.Id && orderIds.Contains(note.OrderId))
+            .ToDictionaryAsync(note => note.OrderId, note => note.Notes, cancellationToken);
+    }
+
+    /// <summary>写当前用户这张订单的调度备注；清空即删除这一行。</summary>
+    public static async Task UpsertOrderAsync(
+        TrailinkDbContext db,
+        Guid orderId,
+        Guid userId,
+        string? notes,
+        CancellationToken cancellationToken)
+    {
+        var trimmed = notes?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            await db.OrderNotes
+                .Where(note => note.OrderId == orderId && note.UserId == userId)
+                .ExecuteDeleteAsync(cancellationToken);
+            return;
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO order_notes (id, order_id, user_id, notes)
+            VALUES ({Guid.NewGuid()}, {orderId}, {userId}, {trimmed})
+            ON CONFLICT (order_id, user_id) DO UPDATE SET notes = EXCLUDED.notes
+            """, cancellationToken);
+    }
+
     private static async Task UpsertAsync<TNote>(
         IQueryable<TNote> own,
         string? notes,

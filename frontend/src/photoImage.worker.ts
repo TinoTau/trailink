@@ -2,13 +2,17 @@ const photoMaxEdge = 1600
 const photoJpegQuality = 0.8
 const photoMaxBytes = 8_000_000
 
-type Request = { file: File; fallback: string }
+type Request = { file: File; fallbackName: string }
 type Response = { buffer?: ArrayBuffer; name?: string; error?: string }
 
-const scope = self as DedicatedWorkerGlobalScope
+// 只用到后台线程的这两个接口；项目的 TypeScript 设置面向页面，不引入整套 webworker 类型。
+const scope = self as unknown as {
+  onmessage: ((event: MessageEvent<Request>) => void) | null
+  postMessage(message: Response, options?: { transfer?: Transferable[] }): void
+}
 
 scope.onmessage = async (event: MessageEvent<Request>) => {
-  const { file, fallback } = event.data
+  const { file, fallbackName } = event.data
   try {
     if (file.type && !file.type.startsWith('image/')) {
       throw new Error('请选择 jpg、png 或 webp')
@@ -29,7 +33,7 @@ scope.onmessage = async (event: MessageEvent<Request>) => {
       if (blob.size > photoMaxBytes) {
         throw new Error('压缩后仍超过 8MB，请换一张照片')
       }
-      const base = file.name.replace(/\.[^.]+$/, '') || fallback
+      const base = file.name.replace(/\.[^.]+$/, '') || fallbackName
       const buffer = await blob.arrayBuffer()
       const response: Response = { buffer, name: `${base}.jpg` }
       scope.postMessage(response, { transfer: [buffer] })

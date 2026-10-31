@@ -1,6 +1,6 @@
-export const PRESET_COLORS = ['#C6F0E0', '#D6E4FF', '#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#8c8c8c', '#262626']
+import { PREF_KEYS, readJsonPref, writeJsonPref } from './localPrefs'
 
-export const DRIVER_CALENDAR_COLOR_KEY = 'trailink.driverCalendar.colors.v2'
+export const PRESET_COLORS = ['#C6F0E0', '#D6E4FF', '#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#8c8c8c', '#262626']
 
 export interface DriverCalendarColors {
   past: string
@@ -13,23 +13,14 @@ export const DEFAULT_DRIVER_CALENDAR_COLORS: DriverCalendarColors = {
 }
 
 export function readDriverCalendarColors(): DriverCalendarColors {
-  try {
-    const raw = localStorage.getItem(DRIVER_CALENDAR_COLOR_KEY)
-    if (!raw) {
-      return DEFAULT_DRIVER_CALENDAR_COLORS
-    }
-    const parsed = JSON.parse(raw) as DriverCalendarColors
-    return {
-      past: parsed.past || DEFAULT_DRIVER_CALENDAR_COLORS.past,
-      upcoming: parsed.upcoming || DEFAULT_DRIVER_CALENDAR_COLORS.upcoming,
-    }
-  } catch {
-    return DEFAULT_DRIVER_CALENDAR_COLORS
-  }
+  return readJsonPref(PREF_KEYS.driverCalendarColors, DEFAULT_DRIVER_CALENDAR_COLORS, (parsed) => ({
+    past: parsed.past || DEFAULT_DRIVER_CALENDAR_COLORS.past,
+    upcoming: parsed.upcoming || DEFAULT_DRIVER_CALENDAR_COLORS.upcoming,
+  }))
 }
 
 export function writeDriverCalendarColors(colors: DriverCalendarColors) {
-  localStorage.setItem(DRIVER_CALENDAR_COLOR_KEY, JSON.stringify(colors))
+  writeJsonPref(PREF_KEYS.driverCalendarColors, colors)
 }
 
 export function driverCalendarFill(date: string, today: string, colors: DriverCalendarColors) {
