@@ -19,6 +19,9 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
     public DbSet<CompanyMember> CompanyMembers => Set<CompanyMember>();
     public DbSet<DispatcherApplication> DispatcherApplications => Set<DispatcherApplication>();
     public DbSet<DriverApplication> DriverApplications => Set<DriverApplication>();
+    public DbSet<Vehicle> Vehicles => Set<Vehicle>();
+    public DbSet<VehiclePhoto> VehiclePhotos => Set<VehiclePhoto>();
+    public DbSet<DriverLicensePhoto> DriverLicensePhotos => Set<DriverLicensePhoto>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -262,6 +265,7 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.EndLocation).HasColumnName("end_location").HasMaxLength(200);
             entity.Property(x => x.DriverId).HasColumnName("driver_id");
             entity.Property(x => x.AssignedByUserId).HasColumnName("assigned_by_user_id");
+            entity.Property(x => x.VehicleId).HasColumnName("vehicle_id");
             entity.HasIndex(x => new { x.OrderId, x.ServiceDate }).IsUnique();
 
             entity.HasOne(x => x.Order)
@@ -278,6 +282,63 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
                 .WithMany()
                 .HasForeignKey(x => x.AssignedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(x => x.Vehicle)
+                .WithMany(x => x.ItineraryDays)
+                .HasForeignKey(x => x.VehicleId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<Vehicle>(entity =>
+        {
+            entity.ToTable("vehicles");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.OwnerUserId).HasColumnName("owner_user_id");
+            entity.Property(x => x.Plate).HasColumnName("plate").HasMaxLength(20).IsRequired();
+            entity.Property(x => x.SharedNotes).HasColumnName("shared_notes");
+            entity.Property(x => x.Info).HasColumnName("info");
+            entity.Property(x => x.Available).HasColumnName("available");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(x => new { x.OwnerUserId, x.Plate }).IsUnique();
+
+            entity.HasOne(x => x.Owner)
+                .WithMany()
+                .HasForeignKey(x => x.OwnerUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<VehiclePhoto>(entity =>
+        {
+            entity.ToTable("vehicle_photos");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.VehicleId).HasColumnName("vehicle_id");
+            entity.Property(x => x.FileName).HasColumnName("file_name").HasMaxLength(255).IsRequired();
+            entity.Property(x => x.FilePath).HasColumnName("file_path").IsRequired();
+            entity.Property(x => x.SortOrder).HasColumnName("sort_order");
+
+            entity.HasOne(x => x.Vehicle)
+                .WithMany(x => x.Photos)
+                .HasForeignKey(x => x.VehicleId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DriverLicensePhoto>(entity =>
+        {
+            entity.ToTable("driver_license_photos");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.FileName).HasColumnName("file_name").HasMaxLength(255).IsRequired();
+            entity.Property(x => x.FilePath).HasColumnName("file_path").IsRequired();
+            entity.Property(x => x.Side).HasColumnName("side");
+            entity.HasIndex(x => new { x.UserId, x.Side }).IsUnique();
+
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.LicensePhotos)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<OrderActivity>(entity =>

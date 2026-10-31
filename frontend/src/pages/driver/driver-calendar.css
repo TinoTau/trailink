@@ -531,6 +531,45 @@
   margin: 0 0 10px;
 }
 
+.place-mark-bar:has(+ .driver-vehicle-brief) {
+  margin-bottom: 4px;
+}
+
+.driver-vehicle-brief {
+  margin: 0 0 8px;
+  color: #262626;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.driver-vehicle-brief p {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.driver-vehicle-brief p + p {
+  display: block;
+  margin-top: 1px;
+  color: #595959;
+}
+
+.driver-vehicle-brief span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.driver-vehicle-brief span:first-child {
+  flex: 0 1 auto;
+}
+
+.driver-vehicle-brief span:last-child {
+  flex: 1 1 auto;
+}
+
 .place-mark-bar button {
   flex: 1 1 0;
   box-sizing: border-box;

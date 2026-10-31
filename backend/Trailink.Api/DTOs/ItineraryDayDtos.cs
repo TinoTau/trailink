@@ -22,6 +22,10 @@ public class ItineraryDayReadDto
     public string? DriverName { get; set; }
     public Guid? AssignedByUserId { get; set; }
     public string? AssignedByName { get; set; }
+    public Guid? VehicleId { get; set; }
+    public string? VehiclePlate { get; set; }
+    public string? VehicleInfo { get; set; }
+    public string? VehicleSharedNotes { get; set; }
     public string? AssignedByContact { get; set; }
     public List<OrderActivityReadDto> Activities { get; set; } = [];
     public List<string> Warnings { get; set; } = [];

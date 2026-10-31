@@ -193,6 +193,7 @@ function TripEditorState({ date, trip, onChanged }: TripEditorProps) {
   return (
     <article className="driver-detail-trip">
       <PlaceMarkBar value={trip.endLocation} disabled={savingPlace} onSelect={savePlace} />
+      <DriverVehicleBrief trip={trip} />
       {placeError ? <p className="driver-edit-error">{placeError}</p> : null}
       {activities.map((activity) => (
         <SavedActivity
@@ -248,6 +249,29 @@ function TripEditorState({ date, trip, onChanged }: TripEditorProps) {
         </div>
       )}
     </article>
+  )
+}
+
+function DriverVehicleBrief({ trip }: { trip: ItineraryDay }) {
+  if (!trip.vehicleId) {
+    return null
+  }
+  const plate = trip.vehiclePlate?.trim()
+  const model = trip.vehicleInfo?.trim()
+  const notes = trip.vehicleSharedNotes?.trim()
+  if (!plate && !model && !notes) {
+    return null
+  }
+  return (
+    <div className="driver-vehicle-brief">
+      {plate || model ? (
+        <p>
+          {plate ? <span>{plate}</span> : null}
+          {model ? <span>{model}</span> : null}
+        </p>
+      ) : null}
+      {notes ? <p>{notes}</p> : null}
+    </div>
   )
 }
 

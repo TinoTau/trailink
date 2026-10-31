@@ -7,7 +7,9 @@ public enum StoredFileKind
     Qr,
     Avatar,
     Ticket,
-    Order
+    Order,
+    Vehicle,
+    License
 }
 
 public sealed class AppFileStore(IWebHostEnvironment env)
@@ -48,6 +50,8 @@ public sealed class AppFileStore(IWebHostEnvironment env)
             StoredFileKind.Avatar => "avatars",
             StoredFileKind.Ticket => "tickets",
             StoredFileKind.Order => "orders",
+            StoredFileKind.Vehicle => "vehicles",
+            StoredFileKind.License => "licenses",
             _ => "other"
         };
 

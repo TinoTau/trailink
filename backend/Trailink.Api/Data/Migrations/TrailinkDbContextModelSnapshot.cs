@@ -236,6 +236,40 @@ namespace Trailink.Api.Data.Migrations
                     b.ToTable("driver_applications", (string)null);
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.DriverLicensePhoto", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("file_path");
+
+                    b.Property<int>("Side")
+                        .HasColumnType("integer")
+                        .HasColumnName("side");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Side")
+                        .IsUnique();
+
+                    b.ToTable("driver_license_photos", (string)null);
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.DriverNote", b =>
                 {
                     b.Property<Guid>("Id")
@@ -304,11 +338,17 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnType("date")
                         .HasColumnName("service_date");
 
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AssignedByUserId");
 
                     b.HasIndex("DriverId");
+
+                    b.HasIndex("VehicleId");
 
                     b.HasIndex("OrderId", "ServiceDate")
                         .IsUnique();
@@ -545,6 +585,80 @@ namespace Trailink.Api.Data.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.Vehicle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Available")
+                        .HasColumnType("boolean")
+                        .HasColumnName("available");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Info")
+                        .HasColumnType("text")
+                        .HasColumnName("info");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<string>("Plate")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("plate");
+
+                    b.Property<string>("SharedNotes")
+                        .HasColumnType("text")
+                        .HasColumnName("shared_notes");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId", "Plate")
+                        .IsUnique();
+
+                    b.ToTable("vehicles", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.VehiclePhoto", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("file_path");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VehicleId");
+
+                    b.ToTable("vehicle_photos", (string)null);
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.CompanyMember", b =>
                 {
                     b.HasOne("Trailink.Api.Models.Company", "Company")
@@ -640,6 +754,17 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.DriverLicensePhoto", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.User", "User")
+                        .WithMany("LicensePhotos")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.DriverNote", b =>
                 {
                     b.HasOne("Trailink.Api.Models.Driver", "Driver")
@@ -677,11 +802,18 @@ namespace Trailink.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Trailink.Api.Models.Vehicle", "Vehicle")
+                        .WithMany("ItineraryDays")
+                        .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("AssignedBy");
 
                     b.Navigation("Driver");
 
                     b.Navigation("Order");
+
+                    b.Navigation("Vehicle");
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.Order", b =>
@@ -766,6 +898,28 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("Driver");
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.Vehicle", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.User", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.VehiclePhoto", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.Vehicle", "Vehicle")
+                        .WithMany("Photos")
+                        .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Vehicle");
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.Company", b =>
                 {
                     b.Navigation("Applications");
@@ -812,11 +966,20 @@ namespace Trailink.Api.Data.Migrations
 
                     b.Navigation("IncomingDriverApplications");
 
+                    b.Navigation("LicensePhotos");
+
                     b.Navigation("Memberships");
 
                     b.Navigation("OrderNotes");
 
                     b.Navigation("WrittenDispatcherNotes");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.Vehicle", b =>
+                {
+                    b.Navigation("ItineraryDays");
+
+                    b.Navigation("Photos");
                 });
 #pragma warning restore 612, 618
         }

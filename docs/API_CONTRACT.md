@@ -93,7 +93,7 @@ DELETE /api/drivers/{id}
 { "notes": "基督城常驻" }
 ```
 
-`PUT /api/drivers/{id}/notes` 只改当前用户自己的备注，其他人读不到。清空备注且未隐藏时删除这一行；已经隐藏时保留空备注。`PUT /api/drivers/{id}/hidden` 只改同一行的 `hidden`。调度台隐藏和恢复走这一条，不另建表。`PUT /api/drivers/{id}` 只改司导档案的姓名和电话；已绑定登录账号时不覆盖其 `users.name`。已绑定账号的司导，`contact` 读该用户自己填写的 `users.contact`，不读 `drivers.phone`。调度台司导详情用这一条。`hasAvatar` 表示该账号是否有头像。`GET /api/drivers/{id}/avatar` 打开 `users.avatar_path` 指向的同一文件。
+`PUT /api/drivers/{id}/notes` 只改当前用户自己的备注，其他人读不到。清空备注且未隐藏时删除这一行；已经隐藏时保留空备注。`PUT /api/drivers/{id}/hidden` 只改同一行的 `hidden`。调度台隐藏和恢复走这一条，不另建表。`PUT /api/drivers/{id}` 只改司导档案的姓名和电话；已绑定登录账号时不覆盖其 `users.name`。已绑定账号的司导，`contact` 读该用户自己填写的 `users.contact`，不读 `drivers.phone`。调度台司导详情用这一条。`hasAvatar` 表示该账号是否有头像。`GET /api/drivers/{id}/avatar` 打开 `users.avatar_path` 指向的同一文件。驾照正反面写 `driver_license_photos`，`side` 为 0（正面）或 1（反面），同一用户同一面唯一。只有带 `driver_id` 的账号可以上传。文件在 `App_Data/files/licenses/`，jpg、png、webp，单张 8MB。`GET/POST /api/auth/license-photos` 管理本人照片，`POST` 带查询 `side`。`PUT/DELETE /api/auth/license-photos/{photoId}` 更新或删除本人某一面。`GET /api/drivers/{driverId}/license-photos` 与 `GET /api/drivers/{driverId}/license-photos/{photoId}` 只给能在司导名单里看到这位司导的登录用户，其他人 404。上级不能改、不能删。
 
 ---
 
@@ -170,6 +170,18 @@ DELETE /api/orders/{orderId}/days/{dayId}
 `endLocation` 是当天住宿位置。常用地点由当日详情点选后写入全名，其他地点写入用户输入的文字。再点已选按钮时写入空值。日历展示这个字段的第一个字。`driverId` 与原来相同才只改地点和描述，不改派单人。不在本调度台范围内的订单，这个字段只返回第一个字。  
 同一订单不同行程日可以绑定不同司机，不另建订单。
 
+绑定车辆：
+
+```http
+PUT /api/orders/{orderId}/days/{dayId}/vehicle
+```
+
+```json
+{ "vehicleId": "UUID 或 null", "onlyDay": false }
+```
+
+登录用户即可读写自己的车，不按角色拒绝。司导没有调度台，所以没有入口。这一天必须已有司导，且分配人（`assignedByUserId`，旧数据回退订单 `createdByUserId`）是当前用户。车辆必须属于当前用户。`vehicleId` 有值时：整单写入这张订单里还没有车、且由当前用户分配的行程日；拆单只写入当前司导这一段里还没有车的日期。这些日期都已经有车时返回 400，不写入。`vehicleId` 为 null 时解除绑定：`onlyDay` 为 false 解除这张订单里当前用户分配且已有车的日期，为 true 只解除这一天。不改 `driverId`。返回 `{ orderId, vehicleId, dayIds }`。别人的车返回 404。不是新的派单表。
+
 ---
 
 ## 4. Driver Assignment API
@@ -199,7 +211,7 @@ PUT /api/orders/{orderId}/driver
 - `assignedDayCount`：已绑定司机的行程日数量
 - `days`：精简行程日（含 `id`、`serviceDate`、`description`、`endLocation`、`driverId`，不含活动）
 
-不提供额外的司导派单记录接口。拆单只改各行程日的 `driverId`。
+不提供额外的司导派单记录接口。拆单只改各行程日的 `driverId`。行程日读取带上 `vehicleId`，以及这辆车的 `vehiclePlate`、`vehicleInfo`（型号，即 `vehicles.info`）、`vehicleSharedNotes`。这三项来自 `vehicles`，不另存。没有绑定车辆时这三项为空。
 
 公司把整单交给调度员：
 
@@ -260,7 +272,7 @@ PUT /api/orders/{orderId}/days/{dayId}/activities/reorder
 
 司机日历页面读 `GET /api/orders`，按登录用户 `driverId` 过滤行程日。调度台另读 `GET /api/drivers` 做派单。不提供 `GET /api/driver-calendar/preview` 或 `GET /api/calendar`。
 
-司机日历写操作复用同一套 `orders` / `itinerary_days`，不另建表。页面上的领取走 `PUT /api/orders/{orderId}/driver`，框选建单走前端共用的 `createOrderWithDays`（内部仍是 `POST /api/orders` 与 `POST /api/orders/{orderId}/days`），取消只把当前司导的行程日 `driverId` 置空。调度台「创建订单」走同一套函数，行程日不传 `driverId`。不提供 `POST /api/driver-calendar/claim`、`/range`。请求不得把 `driverId` 当作登录身份。司导分配只写 `itinerary_days.driver_id`。公司把整单交给调度员另写 `orders.assigned_dispatcher_user_id`，不另建订单表。
+司机日历写操作复用同一套 `orders` / `itinerary_days`，不另建表。页面上的领取走 `PUT /api/orders/{orderId}/driver`，框选建单走前端共用的 `createOrderWithDays`（内部仍是 `POST /api/orders` 与 `POST /api/orders/{orderId}/days`），取消只把当前司导的行程日 `driverId` 置空。调度台「创建订单」走同一套函数，行程日不传 `driverId`。一次最多三个月，结束日不超过开始日三个月后的同一天。不提供 `POST /api/driver-calendar/claim`、`/range`。请求不得把 `driverId` 当作登录身份。司导分配只写 `itinerary_days.driver_id`。公司把整单交给调度员另写 `orders.assigned_dispatcher_user_id`，不另建订单表。
 
 当日行程编辑、电子票、领取和取消走现有：
 
@@ -289,7 +301,26 @@ GET    /api/orders/{orderId}/files/{fileId}
 DELETE /api/orders/{orderId}/files/{fileId}
 ```
 
-上传采用 `multipart/form-data`，字段名 `file`。订单截图写入 `App_Data/files/orders/`，`order_files` 存文件名和相对路径。只接受 8MB 以内的 jpg / png / webp。四种上传（公司头像、用户头像、电子票、订单截图）共用 `AppFileStore`，不另开存储路径。订单最后一天起满 7 天后删除该单截图的文件和 `order_files` 行。用户头像和公司头像不删。
+上传采用 `multipart/form-data`，字段名 `file`。订单截图写入 `App_Data/files/orders/`，`order_files` 存文件名和相对路径。只接受 8MB 以内的 jpg / png / webp。公司头像、用户头像、电子票、订单截图、车辆照片和驾照照片共用 `AppFileStore`。车辆照片在 `App_Data/files/vehicles/`，驾照在 `App_Data/files/licenses/`。订单最后一天起满 7 天后删除该单截图的文件和 `order_files` 行。用户头像、公司头像、车辆照片和驾照照片不按这个规则删。
+
+---
+
+## 7b. Vehicles API
+
+登录即可调用，公司账户、调度员、司导各自只看到自己的车。列表与 `GET /api/orders` 分开，车辆失败不影响订单列表。`available` 区分可用和全部，不另做第二套列表。
+
+```http
+GET    /api/vehicles
+POST   /api/vehicles
+PUT    /api/vehicles/{id}
+DELETE /api/vehicles/{id}
+POST   /api/vehicles/{id}/photos
+PUT    /api/vehicles/{id}/photos/{photoId}
+DELETE /api/vehicles/{id}/photos/{photoId}
+GET    /api/vehicles/{id}/photos/{photoId}
+```
+
+写入：`plate`（去空白，最多 20 字，同一用户不可重复）、`sharedNotes`、`info`、`available`。`available` 为 false 表示停用，行仍在，只是不出现在可用车辆。`DELETE` 删除这辆车的照片文件和记录，行程日 `vehicle_id` 置空。照片最多 3 张，jpg / png / webp，8MB，字段名 `file`。调度台发送前把照片压成 jpg，最长边 1600，不上传原图。接口仍接受 jpg、png、webp。第四张返回 400。替换用 `PUT` 并保持原排序。未登录 401，不是自己的车 404。
 
 ---
 

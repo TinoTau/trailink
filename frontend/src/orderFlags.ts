@@ -217,17 +217,14 @@ export function conflictPatternStyle(pattern: ConflictPattern, size = PATTERN_SI
   }
 }
 
-export function conflictingOrderIds(orders: Order[], driverId?: string | null) {
-  if (driverId === null) {
-    return new Set<string>()
-  }
+function orderIdsSharingKey(orders: Order[], keyFor: (day: Order['days'][number]) => string | null) {
   const groups = new Map<string, Set<string>>()
   for (const order of orders) {
     for (const day of order.days) {
-      if (!day.driverId || (driverId && day.driverId !== driverId)) {
+      const key = keyFor(day)
+      if (!key) {
         continue
       }
-      const key = `${day.driverId}|${day.serviceDate}`
       const ids = groups.get(key) ?? new Set<string>()
       ids.add(order.id)
       groups.set(key, ids)
@@ -244,12 +241,32 @@ export function conflictingOrderIds(orders: Order[], driverId?: string | null) {
   return conflicted
 }
 
-export function orderSpan(order: { days: { serviceDate: string }[] }) {
-  const dates = order.days.map((day) => day.serviceDate).sort()
+export function conflictingOrderIds(orders: Order[], driverId?: string | null) {
+  if (driverId === null) {
+    return new Set<string>()
+  }
+  return orderIdsSharingKey(orders, (day) => {
+    if (!day.driverId || (driverId && day.driverId !== driverId)) {
+      return null
+    }
+    return `${day.driverId}|${day.serviceDate}`
+  })
+}
+
+export function conflictingVehicleOrderIds(orders: Order[], vehicleId: string) {
+  return orderIdsSharingKey(orders, (day) => (day.vehicleId === vehicleId ? day.serviceDate : null))
+}
+
+export function dateSpan(dates: string[]) {
   if (dates.length === 0) {
     return null
   }
-  return { start: dates[0], end: dates[dates.length - 1] }
+  const sorted = [...dates].sort()
+  return { start: sorted[0], end: sorted[sorted.length - 1] }
+}
+
+export function orderSpan(order: { days: { serviceDate: string }[] }) {
+  return dateSpan(order.days.map((day) => day.serviceDate))
 }
 
 export function dateOrderEdges(
@@ -278,12 +295,28 @@ export function dateOrderEdges(
   return { start, end }
 }
 
+function dayOnDate(order: Order, date: string, same: (day: Order['days'][number]) => boolean) {
+  return order.days.find((day) => day.serviceDate === date && same(day))
+}
+
+function ordersOnDate(orders: Order[], date: string, same: (day: Order['days'][number]) => boolean) {
+  return orders.filter((order) => dayOnDate(order, date, same))
+}
+
 export function dayOnDriverDate(order: Order, driverId: string, date: string) {
-  return order.days.find((day) => day.driverId === driverId && day.serviceDate === date)
+  return dayOnDate(order, date, (day) => day.driverId === driverId)
 }
 
 export function ordersOnDriverDate(orders: Order[], driverId: string, date: string) {
-  return orders.filter((order) => dayOnDriverDate(order, driverId, date))
+  return ordersOnDate(orders, date, (day) => day.driverId === driverId)
+}
+
+export function dayOnVehicleDate(order: Order, vehicleId: string, date: string) {
+  return dayOnDate(order, date, (day) => day.vehicleId === vehicleId)
+}
+
+export function ordersOnVehicleDate(orders: Order[], vehicleId: string, date: string) {
+  return ordersOnDate(orders, date, (day) => day.vehicleId === vehicleId)
 }
 
 export function hasUnassignedDays(order: Order) {

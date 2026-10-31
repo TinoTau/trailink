@@ -2,10 +2,12 @@ import { message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { keepDraft, usePageLoad } from '../usePageLoad'
 import { authApi, companyApi, dispatcherApi } from '../api/auth'
+import { licenseApi } from '../api/license'
 import { useAuthenticatedAuth } from '../auth/authState'
 import { AccountMenu } from './AccountMenu'
 import { FileField } from './FileField'
-import type { CompanySearch, DispatcherSearch, DriverApplicant } from '../types'
+import { LicenseGallery } from './LicenseGallery'
+import type { CompanySearch, DispatcherSearch, DriverApplicant, LicensePhoto } from '../types'
 import { contactLabel } from '../text'
 import './account.css'
 
@@ -21,6 +23,8 @@ export function ProfilePage() {
   const [applicantsReady, setApplicantsReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [avatarKey, setAvatarKey] = useState(0)
+  const [licensePhotos, setLicensePhotos] = useState<LicensePhoto[]>([])
+  const [licenseTick, setLicenseTick] = useState(0)
   const [name, setName] = useState(user.name)
   const [contact, setContact] = useState(user.contact ?? '')
   const [username, setUsername] = useState(user.username)
@@ -63,6 +67,13 @@ export function ProfilePage() {
         }
       }
       setApplicantsReady(true)
+      if (next.driverId) {
+        try {
+          setLicensePhotos(await licenseApi.listMine())
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '加载驾照失败')
+        }
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载个人信息失败')
     }
@@ -291,6 +302,33 @@ export function ProfilePage() {
             </div>
           </div>
           <p className="account-hint">上传头像后会自动压缩，页面只加载小图。</p>
+          {user.driverId ? (
+            <div className="profile-license">
+              <h3>驾照</h3>
+              <LicenseGallery
+                photos={licensePhotos}
+                urlFor={(photo) => `${licenseApi.mineUrl(photo.id)}?v=${licenseTick}`}
+                canManage
+                busy={busy}
+                onUpload={async (side, file) => {
+                  await licenseApi.upload(side, file)
+                  setLicensePhotos(await licenseApi.listMine())
+                  setLicenseTick((tick) => tick + 1)
+                }}
+                onReplace={async (photoId, file) => {
+                  await licenseApi.replace(photoId, file)
+                  setLicensePhotos(await licenseApi.listMine())
+                  setLicenseTick((tick) => tick + 1)
+                }}
+                onRemove={async (photoId) => {
+                  await licenseApi.remove(photoId)
+                  setLicensePhotos(await licenseApi.listMine())
+                  setLicenseTick((tick) => tick + 1)
+                }}
+              />
+              <p className="account-hint">上传正面和反面。已通过你申请的调度员和公司可以在调度台看到。</p>
+            </div>
+          ) : null}
           <div className="profile-meta">
             {user.companies?.length ? (
               <p>

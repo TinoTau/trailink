@@ -13,8 +13,17 @@ export function todayLocal() {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate())
 }
 
+export const CALENDAR_MONTH_SPAN = 6
+
 export function addMonths(date: Date, offset: number) {
   return new Date(date.getFullYear(), date.getMonth() + offset, 1)
+}
+
+export function calendarHorizon(anchor: Date = todayLocal()) {
+  return {
+    start: formatLocalDate(monthStart(addMonths(anchor, -CALENDAR_MONTH_SPAN))),
+    end: formatLocalDate(monthEnd(addMonths(anchor, CALENDAR_MONTH_SPAN))),
+  }
 }
 
 export function monthKey(date: Date) {
@@ -65,6 +74,14 @@ export function formatLocalTime(value?: string | null) {
 export function parseYmd(value: string) {
   const [year, month, day] = value.split('-').map(Number)
   return new Date(year, month - 1, day)
+}
+
+export function addCalendarMonths(date: Date, months: number) {
+  const day = date.getDate()
+  const shifted = new Date(date.getFullYear(), date.getMonth() + months, 1)
+  const last = new Date(shifted.getFullYear(), shifted.getMonth() + 1, 0).getDate()
+  shifted.setDate(Math.min(day, last))
+  return shifted
 }
 
 export function toDateOnly(value: string) {

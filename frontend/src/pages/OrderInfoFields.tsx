@@ -32,7 +32,9 @@ export function OrderInfoFields({
   sharedNotes,
   onSharedNotesChange,
   onSave,
+  saveDisabled,
   extra,
+  className,
   autoFocus,
   notesLabel,
   notesPlaceholder,
@@ -49,7 +51,9 @@ export function OrderInfoFields({
   sharedNotes?: string
   onSharedNotesChange?: (value: string) => void
   onSave?: () => void
+  saveDisabled?: boolean
   extra?: ReactNode
+  className?: string
   autoFocus?: boolean
   notesLabel?: string
   notesPlaceholder?: string
@@ -67,23 +71,26 @@ export function OrderInfoFields({
   const resolvedNotesPlaceholder = notesPlaceholder ?? (canEditOrder ? privateCopy.placeholder : '给这个司导写备注')
 
   return (
-    <div className="dispatcher-notes" onPointerDown={(event) => event.stopPropagation()}>
-      <span>
-        {heading}
-        {onSave ? (
-          <button
-            type="button"
-            className="dispatcher-chip"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation()
-              onSave()
-            }}
-          >
-            保存
-          </button>
-        ) : null}
-      </span>
+    <div className={`dispatcher-notes${className ? ` ${className}` : ''}`} onPointerDown={(event) => event.stopPropagation()}>
+      {(heading || onSave) ? (
+        <span>
+          {heading}
+          {onSave ? (
+            <button
+              type="button"
+              className="dispatcher-chip"
+              disabled={saveDisabled}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                onSave()
+              }}
+            >
+              保存
+            </button>
+          ) : null}
+        </span>
+      ) : null}
       {subtitle ? <p className="dispatcher-notes-sub">{subtitle}</p> : null}
       {showCompany ? (
         <OrderCompanyField
@@ -284,6 +291,7 @@ export function OrderInfoPanel({
   onOpenChange,
   editable,
   editLabel = '编辑订单',
+  onEdit,
   onHeadPointerDown,
   extraActions,
   trailing,
@@ -298,6 +306,7 @@ export function OrderInfoPanel({
   onOpenChange?: (open: boolean) => void
   editable?: boolean
   editLabel?: string
+  onEdit?: () => void
   onHeadPointerDown?: (event: PointerEvent<HTMLElement>) => void
   extraActions?: ReactNode
   trailing?: ReactNode
@@ -324,10 +333,10 @@ export function OrderInfoPanel({
             <button
               type="button"
               className="dispatcher-icon-btn note"
-              aria-label={notesOpen ? '收起编辑' : editLabel}
-              aria-expanded={notesOpen}
+              aria-label={onEdit ? editLabel : notesOpen ? '收起编辑' : editLabel}
+              aria-expanded={onEdit ? undefined : notesOpen}
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={toggle}
+              onClick={onEdit ?? toggle}
             >
               <NoteIcon />
             </button>

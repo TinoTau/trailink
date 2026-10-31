@@ -28,9 +28,14 @@ interface DispatcherCalendarCardProps {
   rangeEnd: string
   onClose: () => void
   inkBar?: boolean
+  onEdit?: () => void
+  editLabel?: string
   onCardPointerDown?: (event: PointerEvent<HTMLElement>) => void
+  onFramePointerDown?: (event: PointerEvent<HTMLElement>) => void
+  dragConflict?: boolean
   onDayPointerDown?: (event: PointerEvent<HTMLButtonElement>, mark: CalendarMark) => void
   onDayClick?: (mark: CalendarMark, anchor: HTMLButtonElement) => void
+  dayClicks?: boolean
   selectable?: boolean
   pickFrom?: string | null
   pickTo?: string | null
@@ -55,6 +60,7 @@ interface DispatcherCalendarCardProps {
   notesPlaceholder?: string
   onRemove?: () => void
   removeLabel?: string
+  removeArmed?: boolean
   bodyRef?: Ref<HTMLDivElement>
   bodyKey?: string
   onBodyScroll?: () => void
@@ -69,9 +75,14 @@ export function DispatcherCalendarCard({
   rangeEnd,
   onClose,
   inkBar = false,
+  onEdit,
+  editLabel,
   onCardPointerDown,
+  onFramePointerDown,
+  dragConflict = false,
   onDayPointerDown,
   onDayClick,
+  dayClicks = false,
   selectable,
   pickFrom,
   pickTo,
@@ -96,6 +107,7 @@ export function DispatcherCalendarCard({
   notesPlaceholder,
   onRemove,
   removeLabel = '移除',
+  removeArmed = false,
   bodyRef,
   bodyKey,
   onBodyScroll,
@@ -109,7 +121,7 @@ export function DispatcherCalendarCard({
   const today = formatLocalDate(todayLocal())
   const canEditOrder = Boolean(onPlatformOrderNoChange)
   const canEditNotes = Boolean(onNotesChange)
-  const showEditIcon = canEditNotes || canEditOrder
+  const showEditIcon = Boolean(onEdit) || canEditNotes || canEditOrder
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -128,7 +140,11 @@ export function DispatcherCalendarCard({
   }
 
   return (
-    <article className={`dispatcher-card${inkBar ? ' calendar-ink-host' : ''}`} style={inkBar ? ink.style : undefined}>
+    <article
+      className={`dispatcher-card${inkBar ? ' calendar-ink-host' : ''}`}
+      style={inkBar ? ink.style : undefined}
+      onPointerDown={onFramePointerDown}
+    >
       <OrderInfoPanel
         title={title}
         subtitle={subtitle}
@@ -144,9 +160,10 @@ export function DispatcherCalendarCard({
           }
         }}
         editable={showEditIcon}
-        editLabel={canEditOrder ? '编辑订单' : '备注'}
+        editLabel={onEdit ? (editLabel ?? '编辑') : canEditOrder ? '编辑订单' : '备注'}
+        onEdit={onEdit}
         onHeadPointerDown={onCardPointerDown}
-        extraActions={cardRemoveButton(onRemove, removeLabel)}
+        extraActions={cardRemoveButton(onRemove, removeLabel, removeArmed)}
         trailing={
           <button
             type="button"
@@ -224,7 +241,7 @@ export function DispatcherCalendarCard({
                     {...(cell.inMonth ? { 'data-service-date': date } : {})}
                     {...(selectableDay ? { [CALENDAR_DATE_ATTR]: date } : {})}
                     onClick={
-                      mark?.conflict || mark?.owned === false
+                      mark && (dayClicks || mark.conflict || mark.owned === false)
                         ? (event) => {
                             event.stopPropagation()
                             onDayClick?.(mark, event.currentTarget)
@@ -235,7 +252,7 @@ export function DispatcherCalendarCard({
                       mark || selectableDay
                         ? (event) => {
                             event.stopPropagation()
-                            if (mark?.conflict) {
+                            if (mark?.conflict && !dragConflict) {
                               return
                             }
                             if (selectableDay) {
@@ -303,7 +320,12 @@ export function DispatcherDayCard({
   notesPlaceholder,
   onRemove,
   removeLabel = '移除',
+  removeArmed = false,
+  editOpen = false,
+  onEditOpenChange,
+  editLabel = '备注',
   onHeadPointerDown,
+  footer,
   children,
 }: {
   title: string
@@ -317,11 +339,17 @@ export function DispatcherDayCard({
   notesPlaceholder?: string
   onRemove?: () => void
   removeLabel?: string
+  removeArmed?: boolean
+  editOpen?: boolean
+  onEditOpenChange?: (open: boolean) => void
+  editLabel?: string
   onHeadPointerDown?: (event: PointerEvent<HTMLElement>) => void
+  footer?: ReactNode
   children: ReactNode
 }) {
   const [notesOpen, setNotesOpen] = useState(false)
-  const canEditNotes = Boolean(onNotesChange)
+  const noteEditor = Boolean(onNotesChange)
+  const customEditor = Boolean(onEditOpenChange)
 
   return (
     <article className="dispatcher-card">
@@ -329,12 +357,12 @@ export function DispatcherDayCard({
         title={title}
         subtitle={subtitle}
         notes={notes}
-        open={notesOpen}
-        onOpenChange={setNotesOpen}
-        editable={canEditNotes}
-        editLabel="备注"
+        open={customEditor ? editOpen : notesOpen}
+        onOpenChange={customEditor ? onEditOpenChange : setNotesOpen}
+        editable={noteEditor || customEditor}
+        editLabel={editLabel}
         onHeadPointerDown={onHeadPointerDown}
-        extraActions={cardRemoveButton(onRemove, removeLabel)}
+        extraActions={cardRemoveButton(onRemove, removeLabel, removeArmed)}
         trailing={
           <button type="button" className="dispatcher-icon-btn" aria-label={closeLabel} onClick={onClose}>
             <CloseIcon />
@@ -342,7 +370,7 @@ export function DispatcherDayCard({
         }
       />
       <div className="dispatcher-card-body" onPointerDown={(event) => event.stopPropagation()}>
-        {notesOpen && canEditNotes ? (
+        {notesOpen && noteEditor ? (
           <OrderInfoFields
             heading="备注"
             notes={notes}
@@ -355,19 +383,22 @@ export function DispatcherDayCard({
         ) : null}
         {children}
       </div>
+      {footer}
     </article>
   )
 }
 
-function cardRemoveButton(onRemove: (() => void) | undefined, removeLabel: string) {
+function cardRemoveButton(onRemove: (() => void) | undefined, removeLabel: string, armed = false) {
   if (!onRemove) {
     return null
   }
   return (
     <button
       type="button"
-      className="dispatcher-icon-btn danger dispatcher-card-remove"
-      aria-label={removeLabel}
+      className={`dispatcher-icon-btn danger dispatcher-card-remove${armed ? ' release' : ''}`}
+      aria-label={armed ? `确认${removeLabel}` : removeLabel}
+      aria-pressed={armed}
+      data-vehicle-delete={armed ? 'true' : undefined}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={onRemove}
     >

@@ -1,4 +1,4 @@
-import { eachLocalDate, toDateOnly } from '../localDate'
+import { addCalendarMonths, eachLocalDate, parseYmd, toDateOnly } from '../localDate'
 import type {
   AssignmentResult,
   ItineraryDay,
@@ -11,7 +11,7 @@ import type {
 } from '../types'
 import { api } from './client'
 
-export const MAX_ORDER_RANGE_DAYS = 31
+export const MAX_ORDER_RANGE_MONTHS = 3
 
 export async function createOrderWithDays(input: {
   startDate: string
@@ -25,8 +25,9 @@ export async function createOrderWithDays(input: {
   }
 
   const dates = eachLocalDate(input.startDate, input.endDate)
-  if (dates.length > MAX_ORDER_RANGE_DAYS) {
-    throw new RangeError(`一次最多添加 ${MAX_ORDER_RANGE_DAYS} 天`)
+  const limit = addCalendarMonths(parseYmd(input.startDate), MAX_ORDER_RANGE_MONTHS)
+  if (parseYmd(input.endDate) > limit) {
+    throw new RangeError('一次最多添加三个月')
   }
 
   const companyId = input.companyId || undefined

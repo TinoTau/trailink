@@ -12,6 +12,11 @@ import type {
   DriverReadDto,
   ItineraryDayReadDto,
   ItineraryDayWriteDto,
+  VehicleBindResultDto,
+  VehiclePhotoReadDto,
+  VehicleReadDto,
+  VehicleWriteDto,
+  LicensePhotoReadDto,
   OrderActivityReadDto,
   OrderActivityWriteDto,
   OrderFileReadDto,
@@ -96,6 +101,12 @@ export type ItineraryDay = Omit<
 > & {
   activities: OrderActivity[]
 }
+
+export type VehiclePhoto = RequiredApi<VehiclePhotoReadDto>
+export type Vehicle = Omit<RequiredApi<VehicleReadDto>, 'photos'> & { photos: VehiclePhoto[] }
+export type VehicleWrite = RequiredApi<VehicleWriteDto>
+export type VehicleBindResult = RequiredApi<VehicleBindResultDto>
+export type LicensePhoto = RequiredApi<LicensePhotoReadDto>
 
 export type OrderFile = RequiredApi<OrderFileReadDto>
 

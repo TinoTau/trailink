@@ -8,6 +8,7 @@ import { PRESET_COLORS, contrastText, driverCalendarFill, readDriverCalendarColo
 import {
   WEEKDAYS,
   addMonths,
+  CALENDAR_MONTH_SPAN,
   formatLocalDate,
   formatMonthDay,
   monthCells,
@@ -22,9 +23,9 @@ import {
   CALENDAR_HOLD_MS,
   CalendarDayCaption,
   type CalendarHold,
-  calendarDateFromDrag,
   calendarHoldShifted,
   captureCalendarPointer,
+  followCalendarDrag,
   pointFromDragEvent,
 } from '../../calendarDay'
 import { conflictDateChoices, ConflictDatePopover } from '../../ConflictDatePopover'
@@ -34,8 +35,6 @@ import type { DriverCalendarDay, DriverCalendarTrip, Order } from '../../types'
 import { CalendarInkBar, useCalendarInk } from '../../calendarInk'
 import { DriverDayEditor } from './DriverDayEditor'
 import './driver-calendar.css'
-
-const CALENDAR_MONTH_SPAN = 6
 
 function monthsAroundDate(dateText: string, today: Date) {
   const earliest = monthKey(addMonths(today, -CALENDAR_MONTH_SPAN))
@@ -219,6 +218,27 @@ export function DriverCalendarPage() {
       window.clearTimeout(hold.timer)
       rangeHoldRef.current = null
     }
+    let followFrame = 0
+    const followPoint = { current: null as { x: number; y: number } | null }
+    function stopRangeFollow() {
+      if (followFrame) {
+        window.cancelAnimationFrame(followFrame)
+        followFrame = 0
+      }
+      followPoint.current = null
+    }
+    function tickRangeFollow() {
+      followFrame = 0
+      const point = followPoint.current
+      if (!rangeDragging.current || !point) {
+        return
+      }
+      const date = followCalendarDrag(scrollRef.current, point.x, point.y)
+      if (date) {
+        setRangeEnd((current) => (current === date ? current : date))
+      }
+      followFrame = window.requestAnimationFrame(tickRangeFollow)
+    }
     function onMove(event: PointerEvent | TouchEvent) {
       const hold = rangeHoldRef.current
       const point = pointFromDragEvent(event)
@@ -226,12 +246,15 @@ export function DriverCalendarPage() {
         cancelHold()
         return
       }
-      if (!rangeDragging.current) {
+      if (!rangeDragging.current || !point) {
         return
       }
-      const date = calendarDateFromDrag(event, true)
-      if (date) {
-        setRangeEnd((current) => (current === date ? current : date))
+      if (window.TouchEvent && event instanceof TouchEvent && event.cancelable) {
+        event.preventDefault()
+      }
+      followPoint.current = point
+      if (!followFrame) {
+        followFrame = window.requestAnimationFrame(tickRangeFollow)
       }
     }
     function finishHold(event: PointerEvent | TouchEvent, selectIfTap: boolean) {
@@ -247,6 +270,7 @@ export function DriverCalendarPage() {
         }
       }
       rangeDragging.current = false
+      stopRangeFollow()
     }
     function onFinish(event: PointerEvent | TouchEvent) {
       finishHold(event, true)
@@ -268,6 +292,7 @@ export function DriverCalendarPage() {
       window.removeEventListener('touchend', onFinish)
       window.removeEventListener('pointercancel', onCancel)
       window.removeEventListener('touchcancel', onCancel)
+      stopRangeFollow()
     }
   }, [])
 
@@ -729,7 +754,7 @@ export function DriverCalendarPage() {
           <p className="driver-add-hint">
             {canceling
               ? `点击日历上已有行程的某一天，只取消${user?.name ? `「${user.name}」` : '当前司导'}在该单上的日期，其他司导不受影响。`
-              : '不知道订单号时，触屏按住不动约 0.5 秒再拖选起止日期，鼠标按下即拖。点一下只选当天，短滑仍是滚动。'}
+              : '不知道订单号时，触屏按住不动约 0.5 秒再拖选起止日期，鼠标按下即拖。拖到日历上下边缘时，日历跟着滚动。点一下只选当天，短滑仍是滚动。'}
           </p>
           {canceling ? null : (
             <button

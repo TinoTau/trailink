@@ -150,6 +150,10 @@ export type ItineraryDayReadDto = {
     assignedByUserId?: null | string;
     assignedByName?: null | string;
     assignedByContact?: null | string;
+    vehicleId?: null | string;
+    vehiclePlate?: null | string;
+    vehicleInfo?: null | string;
+    vehicleSharedNotes?: null | string;
     activities?: Array<OrderActivityReadDto>;
     warnings?: Array<string>;
 };
@@ -160,6 +164,40 @@ export type ItineraryDayWriteDto = {
     endLocation?: null | string;
     driverId?: null | string;
     failOnConflict?: boolean;
+};
+
+export type VehiclePhotoReadDto = {
+    id?: string;
+    fileName?: string;
+    sortOrder?: number;
+};
+
+export type LicensePhotoReadDto = {
+    id?: string;
+    side?: number;
+    fileName?: string;
+};
+
+export type VehicleReadDto = {
+    id?: string;
+    plate?: string;
+    sharedNotes?: null | string;
+    info?: null | string;
+    available?: boolean;
+    photos?: Array<VehiclePhotoReadDto>;
+};
+
+export type VehicleWriteDto = {
+    plate?: string;
+    sharedNotes?: null | string;
+    info?: null | string;
+    available?: boolean;
+};
+
+export type VehicleBindResultDto = {
+    orderId?: string;
+    vehicleId?: null | string;
+    dayIds?: Array<string>;
 };
 
 export type LoginDto = {

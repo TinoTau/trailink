@@ -9,9 +9,11 @@ public class ItineraryDay
     public string? EndLocation { get; set; }
     public Guid? DriverId { get; set; }
     public Guid? AssignedByUserId { get; set; }
+    public Guid? VehicleId { get; set; }
 
     public Order Order { get; set; } = null!;
     public Driver? Driver { get; set; }
     public User? AssignedBy { get; set; }
+    public Vehicle? Vehicle { get; set; }
     public ICollection<OrderActivity> Activities { get; set; } = [];
 }

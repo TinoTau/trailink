@@ -78,6 +78,16 @@ a.account-chip {
   font-weight: 600;
 }
 
+.profile-license {
+  margin-top: 16px;
+}
+
+.profile-license h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .account-hint,
 .account-empty {
   margin: 0;

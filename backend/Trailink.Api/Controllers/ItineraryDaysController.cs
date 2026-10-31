@@ -23,6 +23,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             .Include(day => day.Driver)
             .Include(day => day.Activities)
             .Include(day => day.AssignedBy)
+            .Include(day => day.Vehicle)
             .Where(day => day.OrderId == orderId)
             .OrderBy(day => day.ServiceDate)
             .ToListAsync(cancellationToken);
@@ -143,6 +144,135 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         return Ok(dto);
     }
 
+    [HttpPut("{dayId:guid}/vehicle")]
+    public async Task<ActionResult<VehicleBindResultDto>> BindVehicle(
+        Guid orderId,
+        Guid dayId,
+        VehicleBindDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var order = await db.Orders
+            .Include(item => item.Days)
+            .FirstOrDefaultAsync(item => item.Id == orderId, cancellationToken);
+        var day = order?.Days.FirstOrDefault(item => item.Id == dayId);
+        if (order is null || day is null)
+        {
+            return NotFound();
+        }
+
+        if (day.DriverId is null)
+        {
+            return Problem(title: "Validation error", detail: "这一天还没有司导。", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var assignerId = day.AssignedByUserId ?? order.CreatedByUserId;
+        if (assignerId != user.Id)
+        {
+            return Problem(title: "Forbidden", detail: "只能给自己分配的日期绑定车辆。", statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (request.VehicleId is null)
+        {
+            var cleared = new List<Guid>();
+            foreach (var item in order.Days)
+            {
+                if (request.OnlyDay && item.Id != day.Id)
+                {
+                    continue;
+                }
+
+                var itemAssigner = item.AssignedByUserId ?? order.CreatedByUserId;
+                if (itemAssigner != user.Id || item.VehicleId is null)
+                {
+                    continue;
+                }
+
+                item.VehicleId = null;
+                cleared.Add(item.Id);
+            }
+
+            if (cleared.Count > 0)
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            return Ok(new VehicleBindResultDto
+            {
+                OrderId = order.Id,
+                VehicleId = null,
+                DayIds = cleared
+            });
+        }
+
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(
+            item => item.Id == request.VehicleId && item.OwnerUserId == user.Id,
+            cancellationToken);
+        if (vehicle is null)
+        {
+            return NotFound();
+        }
+
+        var driverId = day.DriverId.Value;
+        var split = VehicleOrderSplit(order);
+        var scope = order.Days.Where(item =>
+        {
+            if (item.DriverId is null)
+            {
+                return false;
+            }
+
+            var itemAssigner = item.AssignedByUserId ?? order.CreatedByUserId;
+            if (itemAssigner != user.Id)
+            {
+                return false;
+            }
+
+            return !split || item.DriverId == driverId;
+        }).ToList();
+        var free = scope.Where(item => item.VehicleId is null).ToList();
+        if (free.Count == 0)
+        {
+            return Problem(
+                title: "Validation error",
+                detail: "该订单已经绑定了其他车辆。",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var bound = new List<Guid>();
+        foreach (var item in free)
+        {
+            item.VehicleId = vehicle.Id;
+            bound.Add(item.Id);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(new VehicleBindResultDto
+        {
+            OrderId = order.Id,
+            VehicleId = vehicle.Id,
+            DayIds = bound
+        });
+    }
+
+    private static bool VehicleOrderSplit(Order order)
+    {
+        var assigned = order.Days.Where(item => item.DriverId is not null).ToList();
+        if (assigned.Count == 0)
+        {
+            return false;
+        }
+
+        var drivers = assigned.Select(item => item.DriverId).Distinct().Count();
+        var assigners = assigned.Select(item => item.AssignedByUserId ?? order.CreatedByUserId).Distinct().Count();
+        return drivers > 1 || assigners > 1 || assigned.Count < order.Days.Count;
+    }
+
     [HttpDelete("{dayId:guid}")]
     public async Task<IActionResult> Delete(Guid orderId, Guid dayId, CancellationToken cancellationToken)
     {
@@ -171,6 +301,10 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
         AssignedByUserId = day.AssignedByUserId,
         AssignedByName = day.AssignedBy?.Name,
         AssignedByContact = day.AssignedBy?.Contact,
+        VehicleId = day.VehicleId,
+        VehiclePlate = day.Vehicle?.Plate,
+        VehicleInfo = day.Vehicle?.Info,
+        VehicleSharedNotes = day.Vehicle?.SharedNotes,
         Activities = (day.Activities ?? [])
             .OrderBy(activity => activity.SortOrder)
             .ThenBy(activity => activity.Id)
@@ -184,6 +318,7 @@ public class ItineraryDaysController(TrailinkDbContext db, OrderScheduling sched
             .Include(day => day.Driver)
             .Include(day => day.Activities)
             .Include(day => day.AssignedBy)
+            .Include(day => day.Vehicle)
             .FirstOrDefaultAsync(day => day.Id == dayId, cancellationToken);
     }
 

@@ -49,6 +49,53 @@ export function calendarHoldShifted(hold: { x: number; y: number }, x: number, y
   return dx * dx + dy * dy > HOLD_SLOP_PX * HOLD_SLOP_PX
 }
 
+const DRAG_SCROLL_EDGE = 28
+
+function dateInsideScroller(scroller: HTMLElement, x: number, y: number, allowNearest: boolean) {
+  const bounds = scroller.getBoundingClientRect()
+  const cells = scroller.querySelectorAll<HTMLElement>(`[${CALENDAR_DATE_ATTR}]`)
+  let nearest: { date: string; dist: number } | null = null
+  for (const cell of cells) {
+    const rect = cell.getBoundingClientRect()
+    if (rect.bottom <= bounds.top + 1 || rect.top >= bounds.bottom - 1) {
+      continue
+    }
+    const date = cell.getAttribute(CALENDAR_DATE_ATTR)
+    if (!date) {
+      continue
+    }
+    if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) {
+      return date
+    }
+    if (!allowNearest) {
+      continue
+    }
+    const cx = (rect.left + rect.right) / 2
+    const cy = Math.min(rect.bottom, Math.max(rect.top, y))
+    const dist = (cx - x) * (cx - x) + (cy - y) * (cy - y)
+    if (!nearest || dist < nearest.dist) {
+      nearest = { date, dist }
+    }
+  }
+  return nearest?.date ?? null
+}
+
+export function followCalendarDrag(scroller: HTMLElement | null, x: number, y: number) {
+  if (!scroller) {
+    return null
+  }
+  const bounds = scroller.getBoundingClientRect()
+  const overX = x >= bounds.left && x < bounds.right
+  const below = y - (bounds.bottom - DRAG_SCROLL_EDGE)
+  const above = bounds.top + DRAG_SCROLL_EDGE - y
+  if (overX && below > 0) {
+    scroller.scrollTop += Math.min(14, 3 + below * 0.12)
+  } else if (overX && above > 0) {
+    scroller.scrollTop -= Math.min(14, 3 + above * 0.12)
+  }
+  return dateInsideScroller(scroller, x, y, overX && (below > 0 || above > 0))
+}
+
 export function calendarDateFromDrag(event: PointerEvent | TouchEvent, lockScroll = false) {
   if (window.TouchEvent && event instanceof TouchEvent) {
     if (lockScroll && event.cancelable) {

@@ -29,8 +29,8 @@ function readProblem(text: string) {
   }
 }
 
-async function requestForm<T>(url: string, body: FormData): Promise<T> {
-  const response = await fetch(url, { method: 'POST', body, credentials: 'include' })
+async function requestForm<T>(url: string, body: FormData, method = 'POST'): Promise<T> {
+  const response = await fetch(url, { method, body, credentials: 'include' })
   if (!response.ok) {
     const text = await response.text()
     throw new Error(readProblem(text) || `${response.status} ${response.statusText}`)
@@ -52,6 +52,11 @@ export const api = {
     }
     body.append('file', file)
     return requestForm<T>(url, body)
+  },
+  putFile: <T>(url: string, file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return requestForm<T>(url, body, 'PUT')
   },
   put: <T>(url: string, body: unknown) =>
     request<T>(url, { method: 'PUT', body: JSON.stringify(body) }),

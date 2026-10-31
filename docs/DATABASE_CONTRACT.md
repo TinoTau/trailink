@@ -5,7 +5,7 @@
 数据库：PostgreSQL  
 迁移：EF Core Migrations
 
-第一阶段核心表：`drivers`、`driver_notes`、`dispatcher_notes`、`orders`、`order_notes`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`company_notes`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`。
+第一阶段核心表：`drivers`、`driver_notes`、`dispatcher_notes`、`orders`、`order_notes`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`company_notes`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`、`vehicles`、`vehicle_photos`、`driver_license_photos`。
 
 ---
 
@@ -120,6 +120,7 @@ description          TEXT NULL
 end_location         VARCHAR(200) NULL
 driver_id            UUID NULL
 assigned_by_user_id  UUID NULL
+vehicle_id           UUID NULL
 ```
 
 外键：
@@ -127,6 +128,7 @@ assigned_by_user_id  UUID NULL
 - `order_id` → `orders.id`
 - `driver_id` → `drivers.id`
 - `assigned_by_user_id` → `users.id`（当前是谁把这天派给该司导；解绑时清空。不是派单历史表）
+- `vehicle_id` → `vehicles.id`（当前登录用户绑上的车；删除车辆时置空。不是派单表）
 
 唯一约束：
 
@@ -292,6 +294,45 @@ approved_at          TIMESTAMPTZ NULL
 
 ---
 
+## 10b. vehicles 与 vehicle_photos
+
+```text
+vehicles
+id              UUID PRIMARY KEY
+owner_user_id   UUID NOT NULL
+plate           VARCHAR(20) NOT NULL
+shared_notes    TEXT NULL
+info            TEXT NULL
+available       BOOLEAN NOT NULL
+created_at      TIMESTAMPTZ NOT NULL
+
+vehicle_photos
+id           UUID PRIMARY KEY
+vehicle_id   UUID NOT NULL
+file_name    VARCHAR(255) NOT NULL
+file_path    TEXT NOT NULL
+sort_order   INT NOT NULL
+```
+
+外键：`vehicles.owner_user_id` → `users.id`（删除用户时级联删除）。`vehicle_photos.vehicle_id` → `vehicles.id`（删除车辆时级联删除）。唯一约束：`(owner_user_id, plate)`，车牌入库前去掉首尾空白。一辆车最多三张照片，jpg、png、webp，单张 8MB，文件在 `App_Data/files/vehicles/`。调度台写入的是压缩后的 jpg，最长边 1600。`available` 为 false 表示停用，行仍在，可用车辆列表不显示。排序和置顶不落库。
+
+---
+
+## 10c. driver_license_photos
+
+```text
+driver_license_photos
+id         UUID PRIMARY KEY
+user_id    UUID NOT NULL
+file_name  VARCHAR(255) NOT NULL
+file_path  TEXT NOT NULL
+side       INT NOT NULL
+```
+
+外键：`user_id` → `users.id`（删除用户时级联删除）。唯一约束：`(user_id, side)`。`side` 为 0 表示正面，1 表示反面。每人最多两张。jpg、png、webp，单张 8MB，文件在 `App_Data/files/licenses/`。页面写入的是压缩后的 jpg，最长边 1600。谁能看见这位司导，沿用已批准的 `driver_applications`，不另建关系。
+
+---
+
 ## 11. 明确不创建的表
 
 第一阶段不创建：
@@ -300,7 +341,6 @@ approved_at          TIMESTAMPTZ NULL
 - assignment_history
 - order_history
 - audit_logs
-- vehicles
 - customers
 - suppliers
 - payments
@@ -325,6 +365,9 @@ drivers 1 ──< itinerary_days >── 1 orders 1 ──< order_files
                       1
                       │
                       └──< order_activities
+users 1 ──< vehicles 1 ──< vehicle_photos
+users 1 ──< driver_license_photos
+vehicles 1 ──< itinerary_days.vehicle_id
 ```
 
 日历不建独立表。

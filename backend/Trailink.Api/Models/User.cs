@@ -24,4 +24,5 @@ public class User
     public ICollection<DispatcherNote> WrittenDispatcherNotes { get; set; } = [];
     public ICollection<DispatcherNote> IncomingDispatcherNotes { get; set; } = [];
     public ICollection<CompanyNote> CompanyNotes { get; set; } = [];
+    public ICollection<DriverLicensePhoto> LicensePhotos { get; set; } = [];
 }

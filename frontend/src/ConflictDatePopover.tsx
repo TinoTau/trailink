@@ -18,9 +18,8 @@ export type ConflictDateChoice = {
   showText: boolean
 }
 
-export function conflictDateChoices(
-  orders: Order[],
-  driverId: string,
+export function conflictChoices(
+  rows: { order: Order; day: ItineraryDay | undefined }[],
   date: string,
   patternIds: Iterable<string>,
   textFor: (order: Order, day: ItineraryDay | undefined) => { label: string; showText: boolean },
@@ -29,8 +28,7 @@ export function conflictDateChoices(
   const withPattern = options?.patterns !== false
   const ids = withPattern ? [...patternIds] : []
   const dateLabel = formatMonthDay(date)
-  return ordersOnDriverDate(orders, driverId, date).map((order) => {
-    const day = dayOnDriverDate(order, driverId, date)
+  return rows.map(({ order, day }) => {
     const text = textFor(order, day)
     return {
       orderId: order.id,
@@ -42,6 +40,26 @@ export function conflictDateChoices(
       showText: text.showText,
     }
   })
+}
+
+export function conflictDateChoices(
+  orders: Order[],
+  driverId: string,
+  date: string,
+  patternIds: Iterable<string>,
+  textFor: (order: Order, day: ItineraryDay | undefined) => { label: string; showText: boolean },
+  options?: { patterns?: boolean },
+): ConflictDateChoice[] {
+  return conflictChoices(
+    ordersOnDriverDate(orders, driverId, date).map((order) => ({
+      order,
+      day: dayOnDriverDate(order, driverId, date),
+    })),
+    date,
+    patternIds,
+    textFor,
+    options,
+  )
 }
 
 export function ConflictDatePopover({
@@ -81,7 +99,7 @@ export function ConflictDatePopover({
     <div className="conflict-date-popover" style={{ top, left }} role="dialog" aria-label="选择要移除的订单">
       {choices.map((choice) => (
         <button
-          key={choice.orderId}
+          key={`${choice.orderId}:${choice.dayId}`}
           type="button"
           className={`conflict-date-copy${armedId === choice.orderId ? ' release' : ''}`}
           style={choice.pattern ? conflictPatternStyle(choice.pattern, 62) : undefined}
