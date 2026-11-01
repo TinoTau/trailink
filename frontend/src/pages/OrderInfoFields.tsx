@@ -308,7 +308,7 @@ export function OrderInfoPanel({
   }
 
   return (
-    <header className="dispatcher-card-head" onPointerDown={onHeadPointerDown}>
+    <header className={`dispatcher-card-head${onHeadPointerDown ? ' draggable' : ''}`} onPointerDown={onHeadPointerDown}>
       <div className="order-info-main">
         <div className="dispatcher-card-title">
           <strong>{title}</strong>

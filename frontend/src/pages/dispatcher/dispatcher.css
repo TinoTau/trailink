@@ -507,6 +507,11 @@ a.dispatcher-chip {
   min-width: 0;
   max-width: 100%;
   padding: 12px 12px 8px;
+}
+
+/* 只有能拖动的卡片头（拖订单、拉高卡片）才不让手指滚动页面；
+   我的行程当日详情等不能拖的卡片头，按住空白处仍可上下滑动。 */
+.dispatcher-card-head.draggable {
   touch-action: none;
 }
 
