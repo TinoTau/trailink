@@ -1,0 +1,490 @@
+/* 活动库：添加活动弹框、评价框、公司信息里的活动库管理。 */
+
+.library-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.library-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 86vh;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0;
+  background: #fff;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.library-sheet,
+.library-sheet * {
+  box-sizing: border-box;
+}
+
+.library-sheet-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.library-sheet-bar h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #262626;
+  font-size: 13px;
+}
+
+.library-chip:disabled {
+  opacity: 0.5;
+}
+
+.library-chip.primary {
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #fff;
+}
+
+.library-chip.danger {
+  border-color: #ff4d4f;
+  color: #ff4d4f;
+}
+
+.library-chip.danger.armed {
+  background: #ff4d4f;
+  color: #fff;
+}
+
+.library-search,
+.library-field input,
+.library-field textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.library-field textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.library-hint {
+  margin: -4px 0 0;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.library-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.library-empty {
+  margin: 16px 0;
+  color: #8c8c8c;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 选项：长按拖动时不弹系统菜单、不选中文字；按住前仍可上下滚动。 */
+.library-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 4px;
+  border-bottom: 1px solid #f5f5f5;
+  cursor: pointer;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.library-option:focus {
+  outline: none;
+}
+
+.library-option:focus-visible {
+  outline: 2px solid #91caff;
+  outline-offset: -2px;
+}
+
+.library-option.dragging {
+  position: relative;
+  z-index: 1;
+  border-radius: 8px;
+  background: #f0f5ff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.library-pick-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid #d9d9d9;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.library-option.picked .library-pick-badge {
+  border-color: #1677ff;
+  background: #1677ff;
+}
+
+.library-option-name {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.library-option-name small {
+  overflow: hidden;
+  color: #8c8c8c;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-rating {
+  flex: 0 0 auto;
+  color: #fa8c16;
+  font-size: 12px;
+}
+
+.library-sheet-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 评价框 */
+.library-stars {
+  display: flex;
+  gap: 4px;
+}
+
+.library-star {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: none;
+  color: #d9d9d9;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.library-star.on {
+  color: #fa8c16;
+}
+
+.library-notes {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fafafa;
+  color: #595959;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.library-reviews {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-reviews li {
+  font-size: 13px;
+}
+
+.library-reviews li span {
+  margin-left: 6px;
+  color: #fa8c16;
+}
+
+.library-reviews li p {
+  margin: 2px 0 0;
+  color: #595959;
+  white-space: pre-wrap;
+}
+
+.library-photos {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.library-photos img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+/* 公司信息：活动库管理 */
+.library-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #595959;
+}
+
+.library-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.library-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  background: #f0f5ff;
+  color: #1d39c4;
+  font-size: 12px;
+}
+
+.library-tag button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  background: none;
+  color: #8c8c8c;
+}
+
+.library-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fffbe6;
+  font-size: 13px;
+}
+
+.library-suggest button,
+.library-dest-result {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: #1677ff;
+  font-size: 13px;
+  text-align: left;
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid #f5f5f5;
+  background: none;
+  text-align: left;
+}
+
+.library-row strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.library-row small {
+  display: block;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.library-inline {
+  display: flex;
+  gap: 6px;
+}
+
+.library-inline > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 拖动把手：按下立即拖动，这一块不滚动页面；选项其他位置要长按约半秒。 */
+.library-drag-handle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 36px;
+  margin: -6px -4px -6px 0;
+  color: #bfbfbf;
+  font-size: 14px;
+  letter-spacing: -2px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.library-pick-badge.on {
+  border-color: #1677ff;
+  background: #1677ff;
+}
+
+/* 已选：这一次添加的顺序，可以拖动调整。 */
+.library-picked {
+  flex: 0 0 auto;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.library-picked .library-hint {
+  margin: 0 0 4px;
+}
+
+.library-picked-list {
+  max-height: 30vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.library-picked-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 2px 0;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.library-picked-row.dragging {
+  position: relative;
+  z-index: 1;
+  border-radius: 8px;
+  background: #f0f5ff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.library-picked-remove {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: none;
+  color: #8c8c8c;
+  font-size: 18px;
+}
+
+/* 公司信息页的活动库入口和管理弹框 */
+.library-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-entry h2 {
+  margin-bottom: 4px;
+}
+
+.library-entry .account-hint {
+  margin: 0;
+}
+
+.library-entry > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.library-sheet.tall {
+  height: 86vh;
+}
+
+.library-filter {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.library-filter .library-chip {
+  height: 28px;
+}
+
+.library-chip.selected {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+
+.library-sheet-actions.end {
+  justify-content: flex-end;
+}
+
+.library-sheet-actions.end .library-chip.primary {
+  flex: 1 1 auto;
+  justify-content: center;
+  height: 40px;
+}
+
+.library-pending {
+  position: relative;
+}
+
+.library-pending button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 14px;
+  line-height: 24px;
+}

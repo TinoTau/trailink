@@ -27,6 +27,11 @@ import type {
   PendingDriverApplicationDto,
   SessionUserDto,
   WeatherSourceDto,
+  DestinationDto,
+  LibraryActivityReadDto,
+  LibraryActivityWriteDto,
+  LibraryPhotoReadDto,
+  LibraryReviewDto,
 } from './api/generated'
 
 type RequiredApi<T> = { [K in keyof T]-?: T[K] }
@@ -106,6 +111,21 @@ export type LicensePhoto = RequiredApi<LicensePhotoReadDto>
 export type OrderFile = RequiredApi<OrderFileReadDto>
 export type Place = RequiredApi<PlaceDto>
 export type WeatherSource = RequiredApi<WeatherSourceDto>
+
+export type Destination = RequiredApi<DestinationDto>
+export type LibraryPhoto = RequiredApi<LibraryPhotoReadDto>
+export type LibraryActivity = Omit<RequiredApi<LibraryActivityReadDto>, 'destinations' | 'photos'> & {
+  destinations: Destination[]
+  photos: LibraryPhoto[]
+}
+export type LibraryReview = RequiredApi<LibraryReviewDto>
+export type LibraryActivityDetail = LibraryActivity & { reviews: LibraryReview[] }
+export type LibraryActivityWrite = Omit<RequiredApi<LibraryActivityWriteDto>, 'nameZh' | 'nameEn' | 'sharedNotes'> & {
+  nameZh: string | null
+  nameEn: string | null
+  sharedNotes: string | null
+}
+export type LibraryPick = { destination: Destination | null; activities: LibraryActivity[] }
 
 export type Order = Omit<RequiredApi<OrderReadDto>, 'days' | 'files'> & {
   days: ItineraryDay[]

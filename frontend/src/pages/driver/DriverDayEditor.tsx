@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { isStoredFile, itineraryDayWrite, ordersApi } from '../../api/orders'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { FileField } from '../FileField'
 import { TrashIcon } from '../icons'
 import { OrderInfoEditor } from '../OrderInfoFields'
 import { formatLocalTime } from '../../localDate'
+import { libraryApi } from '../../api/library'
+import { useHoldReorder } from '../../useHoldReorder'
+import { ActivityPicker } from '../library/ActivityPicker'
+import { ActivityReview } from '../library/ActivityReview'
 import { splitOrderHint } from '../../orderFlags'
 import { usePlaces } from '../../api/places'
 import { placeMark, presetForLocation } from '../../placeMark'
@@ -128,47 +132,38 @@ function TripEditor(props: TripEditorProps) {
 
 function TripEditorState({ date, trip, onChanged }: TripEditorProps) {
   const [activities, setActivities] = useState(trip.activities)
-  const [composing, setComposing] = useState(false)
+  const [adding, setAdding] = useState<'pick' | 'manual' | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [reviewId, setReviewId] = useState<string | null>(null)
   const [savingPlace, setSavingPlace] = useState(false)
   const [placeError, setPlaceError] = useState<string | null>(null)
-  const [dragId, setDragId] = useState<string | null>(null)
-  const dragIdRef = useRef<string | null>(null)
-  const startIdsRef = useRef<string[]>([])
-
-  function moveActivity(overId: string) {
-    const currentId = dragIdRef.current
-    if (!currentId || currentId === overId) {
-      return
-    }
-    setActivities((current) => {
-      const from = current.findIndex((item) => item.id === currentId)
-      const to = current.findIndex((item) => item.id === overId)
-      if (from < 0 || to < 0 || from === to) {
-        return current
-      }
-      const next = [...current]
-      const [item] = next.splice(from, 1)
-      next.splice(to, 0, item)
-      return next
-    })
-  }
-
-  async function persistOrder() {
-    if (!dragIdRef.current) {
-      return
-    }
-    const ids = activities.map((item) => item.id)
-    const changed = ids.some((id, index) => id !== startIdsRef.current[index])
-    dragIdRef.current = null
-    setDragId(null)
-    if (!changed) {
-      return
-    }
+  async function persistOrder(ids: string[]) {
+    setActivities((current) => ids.map((id) => current.find((item) => item.id === id)!).filter(Boolean))
     try {
       await ordersApi.reorderActivities(trip.orderId, trip.id, ids)
       void onChanged()
     } catch {
       await onChanged()
+    }
+  }
+
+  const reorder = useHoldReorder(
+    activities.map((item) => item.id),
+    (ids) => void persistOrder(ids),
+  )
+  const shownActivities = reorder.order
+    .map((id) => activities.find((item) => item.id === id))
+    .filter((item): item is OrderActivity => Boolean(item))
+
+  async function addFromLibrary(picked: { id: string }[]) {
+    try {
+      const created = await libraryApi.addToDay(trip.orderId, trip.id, picked.map((item) => item.id))
+      setActivities((current) => [...current, ...created])
+      setAdding(null)
+      void onChanged()
+    } catch (item) {
+      setPlaceError(item instanceof Error ? item.message : '添加活动失败')
+      setAdding(null)
     }
   }
 
@@ -197,59 +192,69 @@ function TripEditorState({ date, trip, onChanged }: TripEditorProps) {
       <PlaceMarkBar value={trip.endLocation} disabled={savingPlace} onSelect={savePlace} />
       <DriverVehicleBrief trip={trip} />
       {placeError ? <p className="driver-edit-error">{placeError}</p> : null}
-      {activities.map((activity) => (
-        <SavedActivity
-          key={activity.id}
-          orderId={trip.orderId}
-          dayId={trip.id}
-          activity={activity}
-          dragging={dragId === activity.id}
-          onPointerDown={(event) => {
-            if ((event.target as HTMLElement).closest('button')) {
-              return
-            }
-            event.currentTarget.setPointerCapture(event.pointerId)
-            dragIdRef.current = activity.id
-            startIdsRef.current = activities.map((item) => item.id)
-            setDragId(activity.id)
-          }}
-          onPointerMove={(event) => {
-            if (!dragIdRef.current) {
-              return
-            }
-            const over = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-activity-id]')
-            const overId = over?.getAttribute('data-activity-id')
-            if (overId) {
-              moveActivity(overId)
-            }
-          }}
-          onPointerUp={() => void persistOrder()}
-          onUpdated={() => void onChanged()}
-          onRemoved={() => {
-            setActivities((current) => current.filter((item) => item.id !== activity.id))
-            void onChanged()
-          }}
-        />
-      ))}
-      {composing ? (
+      {shownActivities.length > 1 ? <p className="driver-activity-hint">按住 ⋮⋮ 拖动排序，或长按活动约半秒后拖动</p> : null}
+      {shownActivities.map((activity) =>
+        editingId === activity.id ? (
+          <ActivityComposer
+            key={activity.id}
+            date={date}
+            orderId={trip.orderId}
+            dayId={trip.id}
+            editing={activity}
+            onCreated={(saved) => {
+              setActivities((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+              setEditingId(null)
+              void onChanged()
+            }}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <SavedActivity
+            key={activity.id}
+            orderId={trip.orderId}
+            dayId={trip.id}
+            activity={activity}
+            dragging={reorder.draggingId === activity.id}
+            dragProps={reorder.itemProps(activity.id)}
+            handleProps={reorder.handleProps(activity.id)}
+            onEdit={() => setEditingId(activity.id)}
+            onReview={activity.libraryActivityId ? () => setReviewId(activity.libraryActivityId!) : undefined}
+            onUpdated={() => void onChanged()}
+            onRemoved={() => {
+              setActivities((current) => current.filter((item) => item.id !== activity.id))
+              void onChanged()
+            }}
+          />
+        ),
+      )}
+      {adding === 'manual' ? (
         <ActivityComposer
           date={date}
           orderId={trip.orderId}
           dayId={trip.id}
           onCreated={(created) => {
             setActivities((current) => [...current, created])
-            setComposing(false)
+            setAdding(null)
             void onChanged()
           }}
-          onCancel={() => setComposing(false)}
+          onCancel={() => setAdding(null)}
         />
       ) : (
         <div className="driver-activity-actions">
-          <button type="button" onClick={() => setComposing(true)}>
+          <button type="button" onClick={() => setAdding('pick')}>
             添加活动
           </button>
         </div>
       )}
+      {adding === 'pick' ? (
+        <ActivityPicker
+          place={trip.endLocation ?? null}
+          onConfirm={addFromLibrary}
+          onManual={() => setAdding('manual')}
+          onClose={() => setAdding(null)}
+        />
+      ) : null}
+      {reviewId ? <ActivityReview activityId={reviewId} onClose={() => setReviewId(null)} /> : null}
     </article>
   )
 }
@@ -357,9 +362,10 @@ function SavedActivity({
   dayId,
   activity,
   dragging,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
+  dragProps,
+  handleProps,
+  onEdit,
+  onReview,
   onUpdated,
   onRemoved,
 }: {
@@ -367,9 +373,10 @@ function SavedActivity({
   dayId: string
   activity: OrderActivity
   dragging: boolean
-  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void
-  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void
-  onPointerUp: () => void
+  dragProps: ReturnType<ReturnType<typeof useHoldReorder>['itemProps']>
+  handleProps: ReturnType<ReturnType<typeof useHoldReorder>['handleProps']>
+  onEdit: () => void
+  onReview?: () => void
   onUpdated: () => void
   onRemoved: () => void
 }) {
@@ -383,15 +390,8 @@ function SavedActivity({
   }
 
   return (
-    <div
-      className={`driver-saved-activity${dragging ? ' dragging' : ''}`}
-      data-activity-id={activity.id}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-    >
-      <span className="driver-drag-handle" aria-hidden>
+    <div className={`driver-saved-activity${dragging ? ' dragging' : ''}`} {...dragProps}>
+      <span className="driver-drag-handle" aria-label="拖动排序" {...handleProps}>
         ⋮⋮
       </span>
       <div className="driver-activity-main">
@@ -406,6 +406,14 @@ function SavedActivity({
         ) : activity.ticketPath ? (
           <span className="driver-ticket">电子票</span>
         ) : null}
+        {onReview ? (
+          <button type="button" onClick={onReview}>
+            评价
+          </button>
+        ) : null}
+        <button type="button" onClick={onEdit}>
+          编辑
+        </button>
         <FileField
           label={activity.ticketPath ? '更换' : '上传电子票'}
           accept="image/jpeg,image/png,image/webp,application/pdf"
@@ -427,23 +435,26 @@ function SavedActivity({
   )
 }
 
+/** 手动填写一项活动；传入 editing 时改已有活动（活动库选来的也能补承办方、时间、电子票）。 */
 function ActivityComposer({
   date,
   orderId,
   dayId,
+  editing,
   onCreated,
   onCancel,
 }: {
   date: string
   orderId: string
   dayId: string
+  editing?: OrderActivity
   onCreated: (activity: OrderActivity) => void
   onCancel: () => void
 }) {
-  const [content, setContent] = useState('')
-  const [provider, setProvider] = useState('')
-  const [bookingTime, setBookingTime] = useState('')
-  const [checkinTime, setCheckinTime] = useState('')
+  const [content, setContent] = useState(editing?.content ?? '')
+  const [provider, setProvider] = useState(editing?.provider ?? '')
+  const [bookingTime, setBookingTime] = useState(toTimeInput(editing?.bookingTime))
+  const [checkinTime, setCheckinTime] = useState(toTimeInput(editing?.checkinTime))
   const [ticket, setTicket] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -463,11 +474,13 @@ function ActivityComposer({
     setSaving(true)
     setError(null)
     try {
-      const created = await ordersApi.createActivity(orderId, dayId, body)
+      const created = editing
+        ? await ordersApi.updateActivity(orderId, dayId, editing.id, body)
+        : await ordersApi.createActivity(orderId, dayId, body)
       const withTicket = ticket ? await ordersApi.uploadTicket(orderId, dayId, created.id, ticket) : created
       onCreated(withTicket)
     } catch (item) {
-      setError(item instanceof Error ? item.message : '添加活动失败')
+      setError(item instanceof Error ? item.message : editing ? '保存活动失败' : '添加活动失败')
     } finally {
       setSaving(false)
     }
@@ -487,16 +500,18 @@ function ActivityComposer({
           <input type="time" value={checkinTime} onChange={(event) => setCheckinTime(event.target.value)} />
         </label>
       </div>
-      <FileField
-        label={ticket ? `已选 ${ticket.name}` : '上传电子票'}
-        accept="image/jpeg,image/png,image/webp,application/pdf"
-        className="driver-ticket-btn"
-        onPick={setTicket}
-      />
+      {editing ? null : (
+        <FileField
+          label={ticket ? `已选 ${ticket.name}` : '上传电子票'}
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          className="driver-ticket-btn"
+          onPick={setTicket}
+        />
+      )}
       {error ? <p className="driver-edit-error">{error}</p> : null}
       <div className="driver-activity-actions">
         <button type="button" disabled={saving} onClick={() => void save()}>
-          {saving ? '添加中…' : '添加活动'}
+          {saving ? '保存中…' : editing ? '保存' : '添加活动'}
         </button>
         <button type="button" disabled={saving} onClick={onCancel}>
           取消
@@ -508,6 +523,10 @@ function ActivityComposer({
 
 function fromTimeInput(date: string, time: string) {
   return time ? `${date}T${time}:00` : null
+}
+
+function toTimeInput(value?: string | null) {
+  return value ? value.slice(11, 16) : ''
 }
 
 function dispatcherContactLine(order: Order, trip: ItineraryDay | undefined, viewerId?: string | null) {

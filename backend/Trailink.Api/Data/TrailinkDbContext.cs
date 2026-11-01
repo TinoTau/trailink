@@ -22,6 +22,12 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<VehiclePhoto> VehiclePhotos => Set<VehiclePhoto>();
     public DbSet<DriverLicensePhoto> DriverLicensePhotos => Set<DriverLicensePhoto>();
+    public DbSet<Destination> Destinations => Set<Destination>();
+    public DbSet<LibraryActivity> LibraryActivities => Set<LibraryActivity>();
+    public DbSet<LibraryActivityDestination> LibraryActivityDestinations => Set<LibraryActivityDestination>();
+    public DbSet<LibraryActivityPhoto> LibraryActivityPhotos => Set<LibraryActivityPhoto>();
+    public DbSet<LibraryActivityRating> LibraryActivityRatings => Set<LibraryActivityRating>();
+    public DbSet<UserActivityOrder> UserActivityOrders => Set<UserActivityOrder>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -353,11 +359,17 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.CheckinTime).HasColumnName("checkin_time").HasColumnType("timestamp without time zone");
             entity.Property(x => x.TicketPath).HasColumnName("ticket_path");
             entity.Property(x => x.SortOrder).HasColumnName("sort_order");
+            entity.Property(x => x.LibraryActivityId).HasColumnName("library_activity_id");
 
             entity.HasOne(x => x.ItineraryDay)
                 .WithMany(x => x.Activities)
                 .HasForeignKey(x => x.ItineraryDayId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.LibraryActivity)
+                .WithMany()
+                .HasForeignKey(x => x.LibraryActivityId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<OrderFile>(entity =>
@@ -373,6 +385,115 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
                 .WithMany(x => x.Files)
                 .HasForeignKey(x => x.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        ConfigureActivityLibrary(modelBuilder);
+    }
+
+    private static void ConfigureActivityLibrary(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Destination>(entity =>
+        {
+            entity.ToTable("destinations");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.NameZh).HasColumnName("name_zh").HasMaxLength(60);
+            entity.Property(x => x.NameEn).HasColumnName("name_en").HasMaxLength(100);
+            entity.Property(x => x.Mark).HasColumnName("mark").HasMaxLength(4);
+            entity.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(x => x.Mark).IsUnique();
+            entity.HasData(Services.Weather.Places.All.Select(place => new Destination
+            {
+                Id = place.Id,
+                NameZh = place.Name,
+                NameEn = place.NameEn,
+                Mark = place.Mark,
+                CreatedAt = new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero)
+            }));
+        });
+
+        modelBuilder.Entity<LibraryActivity>(entity =>
+        {
+            entity.ToTable("library_activities");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.NameZh).HasColumnName("name_zh").HasMaxLength(100);
+            entity.Property(x => x.NameEn).HasColumnName("name_en").HasMaxLength(150);
+            entity.Property(x => x.SharedNotes).HasColumnName("shared_notes");
+            entity.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+        });
+
+        modelBuilder.Entity<LibraryActivityDestination>(entity =>
+        {
+            entity.ToTable("library_activity_destinations");
+            entity.HasKey(x => new { x.ActivityId, x.DestinationId });
+            entity.Property(x => x.ActivityId).HasColumnName("activity_id");
+            entity.Property(x => x.DestinationId).HasColumnName("destination_id");
+            entity.HasIndex(x => x.DestinationId);
+
+            entity.HasOne(x => x.Activity)
+                .WithMany(x => x.Destinations)
+                .HasForeignKey(x => x.ActivityId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Destination)
+                .WithMany(x => x.Activities)
+                .HasForeignKey(x => x.DestinationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryActivityPhoto>(entity =>
+        {
+            entity.ToTable("library_activity_photos");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.ActivityId).HasColumnName("activity_id");
+            entity.Property(x => x.FileName).HasColumnName("file_name").HasMaxLength(255).IsRequired();
+            entity.Property(x => x.FilePath).HasColumnName("file_path").IsRequired();
+            entity.Property(x => x.SortOrder).HasColumnName("sort_order");
+
+            entity.HasOne(x => x.Activity)
+                .WithMany(x => x.Photos)
+                .HasForeignKey(x => x.ActivityId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryActivityRating>(entity =>
+        {
+            entity.ToTable("library_activity_ratings");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.ActivityId).HasColumnName("activity_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.Score).HasColumnName("score");
+            entity.Property(x => x.Comment).HasColumnName("comment");
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            entity.HasIndex(x => new { x.ActivityId, x.UserId }).IsUnique();
+            entity.ToTable(table => table.HasCheckConstraint("ck_library_activity_ratings_score", "score BETWEEN 1 AND 5"));
+
+            entity.HasOne(x => x.Activity)
+                .WithMany(x => x.Ratings)
+                .HasForeignKey(x => x.ActivityId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserActivityOrder>(entity =>
+        {
+            entity.ToTable("user_activity_orders");
+            entity.HasKey(x => new { x.UserId, x.DestinationId, x.ActivityId });
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.DestinationId).HasColumnName("destination_id");
+            entity.Property(x => x.ActivityId).HasColumnName("activity_id");
+            entity.Property(x => x.Position).HasColumnName("position");
+
+            entity.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Destination>().WithMany().HasForeignKey(x => x.DestinationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<LibraryActivity>().WithMany().HasForeignKey(x => x.ActivityId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

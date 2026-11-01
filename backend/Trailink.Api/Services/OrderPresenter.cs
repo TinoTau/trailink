@@ -66,7 +66,8 @@ public class OrderPresenter(TrailinkDbContext db, OrderScheduling scheduling, We
         BookingTime = activity.BookingTime,
         CheckinTime = activity.CheckinTime,
         TicketPath = activity.TicketPath,
-        SortOrder = activity.SortOrder
+        SortOrder = activity.SortOrder,
+        LibraryActivityId = activity.LibraryActivityId
     };
 
     public static OrderFileReadDto ToRead(OrderFile file) => new()

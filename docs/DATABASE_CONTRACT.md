@@ -1,11 +1,11 @@
 # Trailink V1 数据库契约
 
 版本：V1 MVP 第一阶段  
-日期：2026-10-23（2026-11-01 补上 `orders.shared_notes`）  
+日期：2026-10-23（2026-11-01 补上 `orders.shared_notes`、增量备份用的 `updated_at` 和 `backup_deletions`、活动库）  
 数据库：PostgreSQL  
 迁移：EF Core Migrations
 
-第一阶段核心表：`drivers`、`driver_notes`、`dispatcher_notes`、`orders`、`order_notes`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`company_notes`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`、`vehicles`、`vehicle_photos`、`driver_license_photos`。
+第一阶段核心表：`drivers`、`driver_notes`、`dispatcher_notes`、`orders`、`order_notes`、`itinerary_days`、`order_activities`、`order_files`、`companies`、`company_notes`、`users`、`company_members`、`dispatcher_applications`、`driver_applications`、`vehicles`、`vehicle_photos`、`driver_license_photos`、`destinations`、`library_activities`、`library_activity_destinations`、`library_activity_photos`、`library_activity_ratings`、`user_activity_orders`。
 
 ---
 
@@ -390,6 +390,37 @@ side       INT NOT NULL
 ```
 
 外键：`user_id` → `users.id`（删除用户时级联删除）。唯一约束：`(user_id, side)`。`side` 为 0 表示正面，1 表示反面。每人最多两张。jpg、png、webp，单张 8MB，文件在 `App_Data/files/licenses/`。页面写入的是压缩后的 jpg，最长边 1600。谁能看见这位司导，沿用已批准的 `driver_applications`，不另建关系。
+
+---
+
+## 10c2. 活动库（迁移 `AddActivityLibrary`）
+
+所有公司共用；只有公司账户能写活动、图片和新建目的地。
+
+- `destinations`：`id`、`name_zh`(60)、`name_en`(100)、`mark`(4，唯一)、`created_by_user_id`、`created_at`。
+  - 7 个常用住宿地点由 `Places.cs` 定义固定 Id，迁移时写入（`mark` 为浮雕字）。
+  - 其他目的地由公司账户新建，`mark` 为空。中英文名至少一个，同名不重复建。
+- `library_activities`：`id`、`name_zh`(100)、`name_en`(150)、`shared_notes`、`created_by_user_id`、`created_at`。住宿酒店也存在这里。
+- `library_activity_destinations`：主键 `(activity_id, destination_id)`，多对多，两边删除都级联。
+- `library_activity_photos`：`id`、`activity_id`、`file_name`、`file_path`、`sort_order`。每项最多 3 张，文件在 `App_Data/files/library/`。
+- `library_activity_ratings`：`id`、`activity_id`、`user_id`、`score`(1–5，检查约束)、`comment`、`updated_at`。唯一 `(activity_id, user_id)`。
+- `user_activity_orders`：主键 `(user_id, destination_id, activity_id)`、`position`。本人在某目的地的选择框顺序。
+- `order_activities.library_activity_id`：可空，外键指向 `library_activities`，删除时置空。活动名在 `content` 里是添加时的快照。
+
+---
+
+## 10d. 增量备份支持（迁移 `AddBackupChangeTracking`）
+
+只在数据库里实现，EF 模型和后端代码不知道这些列和表：
+
+- `orders`、`itinerary_days`、`order_activities`、`order_files`、`order_notes` 各有 `updated_at timestamptz NOT NULL DEFAULT now()`，带索引。
+  - 新增行取当前时间。
+  - 修改时由 `BEFORE UPDATE` 触发器（`backup_touch_updated_at`）改成当前时间，包括后端的原生 SQL 写入。
+  - 迁移前已有的行取迁移执行的时间。
+- `backup_deletions`：`id bigserial`、`table_name`、`row_id uuid`、`deleted_at`。
+  - 上述五张表删除一行（包括级联删除）时，由 `AFTER DELETE` 触发器（`backup_record_deletion`）记一条。
+  - 只供增量备份使用，备份脚本删除 8 天前的记录。
+- 增量备份按 `updated_at` 和 `backup_deletions` 导出改动；还原时关闭触发器，保留备份里的原值。见 `ARCHITECTURE.md` 第 8 节「备份」。
 
 ---
 

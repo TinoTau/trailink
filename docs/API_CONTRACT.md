@@ -427,6 +427,18 @@ PUT /api/orders/{orderId}/days/{dayId}/activities/reorder
 
 必须正好包含当天全部活动且不重复，否则 400。顺序写入 `order_activities.sort_order`。
 
+```http
+POST /api/orders/{orderId}/days/{dayId}/activities/from-library
+```
+
+```json
+{ "libraryActivityIds": ["活动库ID1", "活动库ID2"] }
+```
+
+- 按传入顺序把活动库里的活动加到这一天末尾，返回新建的活动数组。
+- 活动内容取活动库当时的名称（中文名优先）。
+- 每项带 `libraryActivityId`。手动填写的活动这个字段为 null；活动库删除这项后也变成 null。
+
 ---
 
 ## 6. 司机日历写入
@@ -563,3 +575,44 @@ GET /api/weather/source
 ```
 
 返回 `{ "name": "MET Norway", "url": "https://www.met.no/en" }`，「我的行程」底部用它注明来源。所选来源需要密钥但没有配置（不查天气）时返回 204。
+
+## 活动库
+
+所有登录用户可以查看、搜索、评分、保存自己的顺序。标「公司账户」的接口其他身份返回 403。
+
+```http
+GET    /api/library/destinations?q=           目的地搜索（中英文名模糊匹配，常用地点在前）
+POST   /api/library/destinations              新建目的地（公司账户）{ nameZh, nameEn }，同名返回已有的
+GET    /api/library/activities?q=&destinationId=   活动搜索，按评分排序
+GET    /api/library/pick?place=               当日详情选择框：按住宿位置找目的地，返回 { destination, activities }
+PUT    /api/library/order                     保存本人在某目的地的顺序 { destinationId, activityIds }
+GET    /api/library/activities/{id}           详情，含 reviews
+POST   /api/library/activities                新建（公司账户）
+PUT    /api/library/activities/{id}           修改（公司账户）
+DELETE /api/library/activities/{id}           删除（公司账户），行程里的活动保留文字
+PUT    /api/library/activities/{id}/rating    本人评分 { score: 1–5, comment }
+DELETE /api/library/activities/{id}/rating    删除本人评分
+POST   /api/library/activities/{id}/photos            上传图片（公司账户，最多 3 张，8MB 以内 jpg/png/webp）
+PUT    /api/library/activities/{id}/photos/{photoId}  更新图片（公司账户）
+DELETE /api/library/activities/{id}/photos/{photoId}  删除图片（公司账户）
+GET    /api/library/activities/{id}/photos/{photoId}  查看图片（登录即可）
+```
+
+活动写入：
+
+```json
+{ "nameZh": "库克山直升机", "nameEn": "Mt Cook Heli", "sharedNotes": "提前一天确认天气", "destinationIds": ["目的地ID"] }
+```
+
+- 中英文名至少一个；至少一个目的地。
+- 中文名或英文名与已有活动相同（不区分大小写）时返回 400。
+
+活动响应：
+
+- `id`、`nameZh`、`nameEn`、`name`（中文名优先）、`sharedNotes`、`destinations`、`photos`。
+- `averageScore`：一位小数，没人评分为 null。
+- `ratingCount`。
+- `myScore`、`myComment`：当前用户自己的评分和评价。
+- 详情另带 `reviews`：每条有 `userName`、`score`、`comment`、`updatedAt`、`mine`。
+
+`pick` 的排序：本人在这个目的地保存过的顺序在前，其余按平均评分降序、评分人数降序、名称。住宿位置找不到目的地时，`destination` 为 null，`activities` 为空数组。

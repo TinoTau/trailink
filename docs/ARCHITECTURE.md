@@ -98,7 +98,10 @@ trailink/
 | 公司简称 | `CompanyNotes`（含写入） | `CompanyPage`、`currentCompany.ts` |
 | 车辆与车辆绑定 | `VehiclesController`、`ItineraryDaysController`（`/vehicle`） | `pages/dispatcher/VehicleBoard.tsx`、`api/vehicles.ts` |
 | 驾照照片 | `LicensePhotosController` | `pages/LicenseGallery.tsx`、`api/license.ts` |
-| 照片大图查看（车辆、驾照共用） | — | `pages/PhotoViewer.tsx` |
+| 照片大图查看（车辆、驾照、活动库共用） | — | `pages/PhotoViewer.tsx` |
+| 活动库：目的地匹配、模糊搜索、防重名、评分汇总、弹框排序 | `ActivityLibrary`、`LibraryController`、`OrderActivitiesController`（`from-library`） | `api/library.ts`、`pages/library/` |
+| 活动拖动排序（活动选择框、已选、当日活动共用；⋮⋮ 把手立即拖，其他位置长按约 0.5 秒） | — | `useHoldReorder.ts` |
+| 常用住宿地点（含固定 Id、英文名，迁移时写入 `destinations`） | `Services/Weather/Places` | `api/places.ts` |
 | 文件存储 | `AppFileStore`、`AvatarImage` | `photoImage.ts` + `photoImage.worker.ts`（只在后台线程压缩，没有后备） |
 | 附件定时清理 | `ExpiredAttachmentCleanup`（启动后每 6 小时） | — |
 | 常用住宿地点（名称、浮雕字） | `Services/Weather/Places`，`GET /api/places` | `api/places.ts`（`usePlaces`） |
@@ -106,6 +109,7 @@ trailink/
 | 日历格子、浮雕、日期 | — | `calendarDay.tsx`、`calendarInk.tsx`、`placeMark.ts`、`localDate.ts` |
 | 日历框选起止日期 | — | `useCalendarRangePick.ts`（我的行程和调度台创建订单共用） |
 | 调度台图标排列、拖拽落点、日历对齐、卡片拉高 | — | `pages/dispatcher/boardLayout.ts`、`boardDrag.ts`、`boardCalendar.ts`、`paneLift.ts` |
+| 调度台页面分工 | — | `DispatcherPage.tsx` 持有数据和各张日历的联动；`useBoardDrag.ts` 负责全局拖拽监听（按下、长按、拖动、松手落点、点击）；`OrderPane.tsx` 是订单区（订单 / 车辆切换、创建订单、打开的订单或当日卡片）；`DriverPane.tsx` 是司导区（图标、已隐藏、司导卡片、调度员订单池、驾照）。 |
 | 本机偏好（键名统一在这里） | — | `localPrefs.ts` |
 | 共用图标 | — | `pages/icons.tsx` |
 | 页面数据刷新 | — | `usePageLoad.ts`（进入页面、回到窗口时重新读取，保留未保存输入） |
@@ -168,7 +172,30 @@ trailink/
   - 只改前端：上传 `frontend/dist` 压缩包，只重建 `web` 容器。
   - 改了后端：上传改动的后端文件，重建 `api` 镜像。
   - 改了库结构：只有用户明确说明需要时才处理云端库。到时单独写一个只新增表或列、可以重复执行的 SQL 脚本，并补写迁移历史记录；不和前端发布混在同一个脚本里。
+- 备份（用户 2026-11-01 要求）：服务器上的定时任务，只读数据库，不改业务数据。
+  - 脚本和数据都在 `~/trailink-backups/`。和发布脚本一样不放进仓库，安装时由 `install-backup-cron.sh` 复制。
+  - crontab 每小时第 7 分钟执行 `trailink-backup.sh auto`：
+    - 新西兰时间 03 点：全量。
+    - 其他时间：增量。
+    - 用文件锁防止重叠。
+  - 全量：`pg_dump -Fc` 整库，存到 `full/`。
+    - 用 `pg_restore -l` 校验通过才算成功。
+    - 保留最新 7 份，多的删除。
+    - 成功后删除 `incremental/` 里的全部增量，增量从这次全量开始的时刻重新算起。
+  - 增量：存到 `incremental/`，没有改动不生成文件。
+    - 导出订单相关五张表 `updated_at` 在上次增量之后的行（往前多取 10 分钟，防止漏掉当时未提交的事务），以及 `backup_deletions` 里同期的删除记录。
+    - 每张表一个 CSV，打成一个 tar.gz。
+  - 还原：`trailink-restore.sh <全量> [增量…]` 只还原到一个新建的 `trailink_restore_时间` 库，不碰正在用的库。
+    - 增量按时间顺序处理：按主键覆盖改动的行，再删除记录里删掉的行。
+    - 检查无误后，是否切换由人工决定。
+  - 日志在 `~/trailink-backups/backup.log`。备份在同一台虚拟机上，虚拟机整机丢失时备份也会丢；需要异地副本时另行处理。
 - 本机开发和测试只用本机库，不连云端库。
+- 云端库定时备份（用户 2026-11-01 要求）：
+  - 虚拟机上 cron 每小时第 5 分钟执行 `~/trailink-backup/trailink-backup.sh`，用 postgres 容器里的 `pg_dump -Fc` 全量导出。只读，不改数据。
+  - 备份存放路径默认 `~/trailink-backups`，可在安装时指定。文件名 `trailink-YYYYMMDD-HHMM.dump`（新西兰时间），保留 7 天，滚动删除。
+  - 先写临时文件，用 `pg_restore --list` 校验后再改名；失败时不删旧备份。剩余空间低于 500MB 时跳过。日志在 `~/trailink-backup/backup.log`。
+  - 只备份数据库，不含上传的照片和电子票（`App_Data` 数据卷）。备份和数据库在同一块磁盘上，虚拟机整机损坏时一起丢失。
+  - 脚本和发布脚本一样是一次性的，不放进仓库。恢复要另起一个临时库验证后再决定，不直接覆盖线上库。
 - 发布红线（线上是真实用户和真实订单）：
   - 发布不动云端库：不连接、不迁移、不导入、不导出。只有用户明确说明需要备份或导入数据时才操作。
   - 不执行 `docker compose down -v`，不删除任何数据卷。

@@ -115,6 +115,102 @@ namespace Trailink.Api.Data.Migrations
                     b.ToTable("company_notes", (string)null);
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.Destination", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<string>("Mark")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)")
+                        .HasColumnName("mark");
+
+                    b.Property<string>("NameEn")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name_en");
+
+                    b.Property<string>("NameZh")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("name_zh");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Mark")
+                        .IsUnique();
+
+                    b.ToTable("destinations", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("6c1f0001-0000-4000-8000-000000000001"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Mark = "基",
+                            NameEn = "Christchurch",
+                            NameZh = "基督城"
+                        },
+                        new
+                        {
+                            Id = new Guid("6c1f0001-0000-4000-8000-000000000002"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Mark = "凯",
+                            NameEn = "Kaikoura",
+                            NameZh = "凯库拉"
+                        },
+                        new
+                        {
+                            Id = new Guid("6c1f0001-0000-4000-8000-000000000003"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Mark = "特",
+                            NameEn = "Lake Tekapo",
+                            NameZh = "特卡波"
+                        },
+                        new
+                        {
+                            Id = new Guid("6c1f0001-0000-4000-8000-000000000004"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Mark = "瓦",
+                            NameEn = "Wanaka",
+                            NameZh = "瓦纳卡"
+                        },
+                        new
+                        {
+                            Id = new Guid("6c1f0001-0000-4000-8000-000000000005"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Mark = "皇",
+                            NameEn = "Queenstown",
+                            NameZh = "皇后镇"
+                        },
+                        new
+                        {
+                            Id = new Guid("6c1f0001-0000-4000-8000-000000000006"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Mark = "蒂",
+                            NameEn = "Te Anau",
+                            NameZh = "蒂阿瑙"
+                        },
+                        new
+                        {
+                            Id = new Guid("6c1f0001-0000-4000-8000-000000000007"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 11, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Mark = "但",
+                            NameEn = "Dunedin",
+                            NameZh = "但尼丁"
+                        });
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.DispatcherApplication", b =>
                 {
                     b.Property<Guid>("Id")
@@ -356,6 +452,130 @@ namespace Trailink.Api.Data.Migrations
                     b.ToTable("itinerary_days", (string)null);
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<string>("NameEn")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("name_en");
+
+                    b.Property<string>("NameZh")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name_zh");
+
+                    b.Property<string>("SharedNotes")
+                        .HasColumnType("text")
+                        .HasColumnName("shared_notes");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("library_activities", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivityDestination", b =>
+                {
+                    b.Property<Guid>("ActivityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_id");
+
+                    b.Property<Guid>("DestinationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("destination_id");
+
+                    b.HasKey("ActivityId", "DestinationId");
+
+                    b.HasIndex("DestinationId");
+
+                    b.ToTable("library_activity_destinations", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivityPhoto", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActivityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_id");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("file_name");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("file_path");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActivityId");
+
+                    b.ToTable("library_activity_photos", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivityRating", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActivityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_id");
+
+                    b.Property<string>("Comment")
+                        .HasColumnType("text")
+                        .HasColumnName("comment");
+
+                    b.Property<int>("Score")
+                        .HasColumnType("integer")
+                        .HasColumnName("score");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("ActivityId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("library_activity_ratings", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_library_activity_ratings_score", "score BETWEEN 1 AND 5");
+                        });
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.Order", b =>
                 {
                     b.Property<Guid>("Id")
@@ -440,6 +660,10 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("itinerary_day_id");
 
+                    b.Property<Guid?>("LibraryActivityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("library_activity_id");
+
                     b.Property<string>("Provider")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
@@ -456,6 +680,8 @@ namespace Trailink.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ItineraryDayId");
+
+                    b.HasIndex("LibraryActivityId");
 
                     b.ToTable("order_activities", (string)null);
                 });
@@ -583,6 +809,33 @@ namespace Trailink.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.UserActivityOrder", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid>("DestinationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("destination_id");
+
+                    b.Property<Guid>("ActivityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_id");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer")
+                        .HasColumnName("position");
+
+                    b.HasKey("UserId", "DestinationId", "ActivityId");
+
+                    b.HasIndex("ActivityId");
+
+                    b.HasIndex("DestinationId");
+
+                    b.ToTable("user_activity_orders", (string)null);
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.Vehicle", b =>
@@ -816,6 +1069,55 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("Vehicle");
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivityDestination", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.LibraryActivity", "Activity")
+                        .WithMany("Destinations")
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.Destination", "Destination")
+                        .WithMany("Activities")
+                        .HasForeignKey("DestinationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Activity");
+
+                    b.Navigation("Destination");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivityPhoto", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.LibraryActivity", "Activity")
+                        .WithMany("Photos")
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Activity");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivityRating", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.LibraryActivity", "Activity")
+                        .WithMany("Ratings")
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Activity");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.Order", b =>
                 {
                     b.HasOne("Trailink.Api.Models.User", "AssignedDispatcher")
@@ -848,7 +1150,14 @@ namespace Trailink.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Trailink.Api.Models.LibraryActivity", "LibraryActivity")
+                        .WithMany()
+                        .HasForeignKey("LibraryActivityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("ItineraryDay");
+
+                    b.Navigation("LibraryActivity");
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.OrderFile", b =>
@@ -898,6 +1207,27 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("Driver");
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.UserActivityOrder", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.LibraryActivity", null)
+                        .WithMany()
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.Destination", null)
+                        .WithMany()
+                        .HasForeignKey("DestinationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.Vehicle", b =>
                 {
                     b.HasOne("Trailink.Api.Models.User", "Owner")
@@ -931,6 +1261,11 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("Users");
                 });
 
+            modelBuilder.Entity("Trailink.Api.Models.Destination", b =>
+                {
+                    b.Navigation("Activities");
+                });
+
             modelBuilder.Entity("Trailink.Api.Models.Driver", b =>
                 {
                     b.Navigation("ItineraryDays");
@@ -941,6 +1276,15 @@ namespace Trailink.Api.Data.Migrations
             modelBuilder.Entity("Trailink.Api.Models.ItineraryDay", b =>
                 {
                     b.Navigation("Activities");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.LibraryActivity", b =>
+                {
+                    b.Navigation("Destinations");
+
+                    b.Navigation("Photos");
+
+                    b.Navigation("Ratings");
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.Order", b =>

@@ -18,7 +18,7 @@ public class DataModelTests
             .ToArray();
 
         Assert.Equal(
-            ["companies", "company_members", "company_notes", "dispatcher_applications", "dispatcher_notes", "driver_applications", "driver_license_photos", "driver_notes", "drivers", "itinerary_days", "order_activities", "order_files", "order_notes", "orders", "users", "vehicle_photos", "vehicles"],
+            ["companies", "company_members", "company_notes", "destinations", "dispatcher_applications", "dispatcher_notes", "driver_applications", "driver_license_photos", "driver_notes", "drivers", "itinerary_days", "library_activities", "library_activity_destinations", "library_activity_photos", "library_activity_ratings", "order_activities", "order_files", "order_notes", "orders", "user_activity_orders", "users", "vehicle_photos", "vehicles"],
             tables);
     }
 

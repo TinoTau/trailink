@@ -70,6 +70,50 @@ public class OrderActivitiesController(TrailinkDbContext db, AppFileStore files)
         return Created($"/api/orders/{orderId}/days/{dayId}/activities/{activity.Id}", OrderPresenter.ToRead(activity));
     }
 
+    /// <summary>从活动库一次加入多项活动，按传入的顺序排在这一天已有活动之后。活动名取添加时的名称。</summary>
+    [HttpPost("from-library")]
+    public async Task<ActionResult<List<OrderActivityReadDto>>> CreateFromLibrary(
+        Guid orderId,
+        Guid dayId,
+        OrderActivitiesFromLibraryDto request,
+        CancellationToken cancellationToken)
+    {
+        if (!await DayExistsAsync(orderId, dayId, cancellationToken))
+        {
+            return NotFound();
+        }
+
+        var ids = request.LibraryActivityIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return this.Invalid("请至少选一项活动。");
+        }
+
+        var picked = await db.LibraryActivities
+            .Where(item => ids.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (picked.Count != ids.Count)
+        {
+            return this.Invalid("有活动已经从活动库删除，请刷新后再选。");
+        }
+
+        var nextOrder = await db.OrderActivities
+            .Where(item => item.ItineraryDayId == dayId)
+            .Select(item => (int?)item.SortOrder)
+            .MaxAsync(cancellationToken) ?? -1;
+        var created = ids.Select((id, index) => new OrderActivity
+        {
+            Id = Guid.NewGuid(),
+            ItineraryDayId = dayId,
+            Content = ActivityLibrary.DisplayName(picked[id].NameZh, picked[id].NameEn),
+            LibraryActivityId = id,
+            SortOrder = nextOrder + 1 + index
+        }).ToList();
+        db.OrderActivities.AddRange(created);
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(created.Select(OrderPresenter.ToRead).ToList());
+    }
+
     [HttpPut("{activityId:guid}")]
     public async Task<ActionResult<OrderActivityReadDto>> Update(
         Guid orderId,

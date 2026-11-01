@@ -98,6 +98,19 @@ export type CompanyOrderDto = {
     kind?: string;
 };
 
+export type DestinationDto = {
+    id?: string;
+    nameZh?: null | string;
+    nameEn?: null | string;
+    mark?: null | string;
+    name?: string;
+};
+
+export type DestinationWriteDto = {
+    nameZh?: null | string;
+    nameEn?: null | string;
+};
+
 export type DispatcherNoteWriteDto = {
     notes?: null | string;
 };
@@ -170,6 +183,71 @@ export type ItineraryDayWriteDto = {
     failOnConflict?: boolean;
 };
 
+export type LibraryActivityDetailDto = {
+    reviews?: Array<LibraryReviewDto>;
+    id?: string;
+    nameZh?: null | string;
+    nameEn?: null | string;
+    name?: string;
+    sharedNotes?: null | string;
+    destinations?: Array<DestinationDto>;
+    photos?: Array<LibraryPhotoReadDto>;
+    averageScore?: null | number;
+    ratingCount?: number;
+    myScore?: null | number;
+    myComment?: null | string;
+};
+
+export type LibraryActivityReadDto = {
+    id?: string;
+    nameZh?: null | string;
+    nameEn?: null | string;
+    name?: string;
+    sharedNotes?: null | string;
+    destinations?: Array<DestinationDto>;
+    photos?: Array<LibraryPhotoReadDto>;
+    averageScore?: null | number;
+    ratingCount?: number;
+    myScore?: null | number;
+    myComment?: null | string;
+};
+
+export type LibraryActivityWriteDto = {
+    nameZh?: null | string;
+    nameEn?: null | string;
+    sharedNotes?: null | string;
+    destinationIds?: Array<string>;
+};
+
+export type LibraryOrderWriteDto = {
+    destinationId?: string;
+    activityIds?: Array<string>;
+};
+
+export type LibraryPhotoReadDto = {
+    id?: string;
+    fileName?: string;
+    sortOrder?: number;
+};
+
+export type LibraryPickDto = {
+    destination?: null | DestinationDto;
+    activities?: Array<LibraryActivityReadDto>;
+};
+
+export type LibraryRatingWriteDto = {
+    score?: number;
+    comment?: null | string;
+};
+
+export type LibraryReviewDto = {
+    userName?: string;
+    score?: number;
+    comment?: null | string;
+    updatedAt?: string;
+    mine?: boolean;
+};
+
 export type LicensePhotoReadDto = {
     id?: string;
     side?: number;
@@ -181,6 +259,10 @@ export type LoginDto = {
     password?: string;
 };
 
+export type OrderActivitiesFromLibraryDto = {
+    libraryActivityIds?: Array<string>;
+};
+
 export type OrderActivityReadDto = {
     id?: string;
     itineraryDayId?: string;
@@ -190,6 +272,7 @@ export type OrderActivityReadDto = {
     checkinTime?: unknown;
     ticketPath?: null | string;
     sortOrder?: number;
+    libraryActivityId?: null | string;
 };
 
 export type OrderActivityReorderDto = {
@@ -1050,6 +1133,272 @@ export type PutApiOrdersByOrderIdDaysByDayIdVehicleResponses = {
 
 export type PutApiOrdersByOrderIdDaysByDayIdVehicleResponse = PutApiOrdersByOrderIdDaysByDayIdVehicleResponses[keyof PutApiOrdersByOrderIdDaysByDayIdVehicleResponses];
 
+export type GetApiLibraryDestinationsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        q?: string;
+    };
+    url: '/api/library/destinations';
+};
+
+export type GetApiLibraryDestinationsResponses = {
+    /**
+     * OK
+     */
+    200: Array<DestinationDto>;
+};
+
+export type GetApiLibraryDestinationsResponse = GetApiLibraryDestinationsResponses[keyof GetApiLibraryDestinationsResponses];
+
+export type PostApiLibraryDestinationsData = {
+    body: DestinationWriteDto;
+    path?: never;
+    query?: never;
+    url: '/api/library/destinations';
+};
+
+export type PostApiLibraryDestinationsResponses = {
+    /**
+     * OK
+     */
+    200: DestinationDto;
+};
+
+export type PostApiLibraryDestinationsResponse = PostApiLibraryDestinationsResponses[keyof PostApiLibraryDestinationsResponses];
+
+export type GetApiLibraryActivitiesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        q?: string;
+        destinationId?: string;
+    };
+    url: '/api/library/activities';
+};
+
+export type GetApiLibraryActivitiesResponses = {
+    /**
+     * OK
+     */
+    200: Array<LibraryActivityReadDto>;
+};
+
+export type GetApiLibraryActivitiesResponse = GetApiLibraryActivitiesResponses[keyof GetApiLibraryActivitiesResponses];
+
+export type PostApiLibraryActivitiesData = {
+    body: LibraryActivityWriteDto;
+    path?: never;
+    query?: never;
+    url: '/api/library/activities';
+};
+
+export type PostApiLibraryActivitiesResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type PostApiLibraryActivitiesResponse = PostApiLibraryActivitiesResponses[keyof PostApiLibraryActivitiesResponses];
+
+export type GetApiLibraryPickData = {
+    body?: never;
+    path?: never;
+    query?: {
+        place?: string;
+    };
+    url: '/api/library/pick';
+};
+
+export type GetApiLibraryPickResponses = {
+    /**
+     * OK
+     */
+    200: LibraryPickDto;
+};
+
+export type GetApiLibraryPickResponse = GetApiLibraryPickResponses[keyof GetApiLibraryPickResponses];
+
+export type PutApiLibraryOrderData = {
+    body: LibraryOrderWriteDto;
+    path?: never;
+    query?: never;
+    url: '/api/library/order';
+};
+
+export type PutApiLibraryOrderResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type DeleteApiLibraryActivitiesByIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}';
+};
+
+export type DeleteApiLibraryActivitiesByIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type GetApiLibraryActivitiesByIdData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}';
+};
+
+export type GetApiLibraryActivitiesByIdResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type GetApiLibraryActivitiesByIdResponse = GetApiLibraryActivitiesByIdResponses[keyof GetApiLibraryActivitiesByIdResponses];
+
+export type PutApiLibraryActivitiesByIdData = {
+    body: LibraryActivityWriteDto;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}';
+};
+
+export type PutApiLibraryActivitiesByIdResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type PutApiLibraryActivitiesByIdResponse = PutApiLibraryActivitiesByIdResponses[keyof PutApiLibraryActivitiesByIdResponses];
+
+export type DeleteApiLibraryActivitiesByIdRatingData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}/rating';
+};
+
+export type DeleteApiLibraryActivitiesByIdRatingResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type DeleteApiLibraryActivitiesByIdRatingResponse = DeleteApiLibraryActivitiesByIdRatingResponses[keyof DeleteApiLibraryActivitiesByIdRatingResponses];
+
+export type PutApiLibraryActivitiesByIdRatingData = {
+    body: LibraryRatingWriteDto;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}/rating';
+};
+
+export type PutApiLibraryActivitiesByIdRatingResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type PutApiLibraryActivitiesByIdRatingResponse = PutApiLibraryActivitiesByIdRatingResponses[keyof PutApiLibraryActivitiesByIdRatingResponses];
+
+export type PostApiLibraryActivitiesByIdPhotosData = {
+    body: {
+        file?: IFormFile;
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}/photos';
+};
+
+export type PostApiLibraryActivitiesByIdPhotosResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type PostApiLibraryActivitiesByIdPhotosResponse = PostApiLibraryActivitiesByIdPhotosResponses[keyof PostApiLibraryActivitiesByIdPhotosResponses];
+
+export type DeleteApiLibraryActivitiesByIdPhotosByPhotoIdData = {
+    body?: never;
+    path: {
+        id: string;
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}/photos/{photoId}';
+};
+
+export type DeleteApiLibraryActivitiesByIdPhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type DeleteApiLibraryActivitiesByIdPhotosByPhotoIdResponse = DeleteApiLibraryActivitiesByIdPhotosByPhotoIdResponses[keyof DeleteApiLibraryActivitiesByIdPhotosByPhotoIdResponses];
+
+export type GetApiLibraryActivitiesByIdPhotosByPhotoIdData = {
+    body?: never;
+    path: {
+        id: string;
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}/photos/{photoId}';
+};
+
+export type GetApiLibraryActivitiesByIdPhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PutApiLibraryActivitiesByIdPhotosByPhotoIdData = {
+    body: {
+        file?: IFormFile;
+    };
+    path: {
+        id: string;
+        photoId: string;
+    };
+    query?: never;
+    url: '/api/library/activities/{id}/photos/{photoId}';
+};
+
+export type PutApiLibraryActivitiesByIdPhotosByPhotoIdResponses = {
+    /**
+     * OK
+     */
+    200: LibraryActivityDetailDto;
+};
+
+export type PutApiLibraryActivitiesByIdPhotosByPhotoIdResponse = PutApiLibraryActivitiesByIdPhotosByPhotoIdResponses[keyof PutApiLibraryActivitiesByIdPhotosByPhotoIdResponses];
+
 export type GetApiAuthLicensePhotosData = {
     body?: never;
     path?: never;
@@ -1210,6 +1559,25 @@ export type PostApiOrdersByOrderIdDaysByDayIdActivitiesResponses = {
 };
 
 export type PostApiOrdersByOrderIdDaysByDayIdActivitiesResponse = PostApiOrdersByOrderIdDaysByDayIdActivitiesResponses[keyof PostApiOrdersByOrderIdDaysByDayIdActivitiesResponses];
+
+export type PostApiOrdersByOrderIdDaysByDayIdActivitiesFromLibraryData = {
+    body: OrderActivitiesFromLibraryDto;
+    path: {
+        orderId: string;
+        dayId: string;
+    };
+    query?: never;
+    url: '/api/orders/{orderId}/days/{dayId}/activities/from-library';
+};
+
+export type PostApiOrdersByOrderIdDaysByDayIdActivitiesFromLibraryResponses = {
+    /**
+     * OK
+     */
+    200: Array<OrderActivityReadDto>;
+};
+
+export type PostApiOrdersByOrderIdDaysByDayIdActivitiesFromLibraryResponse = PostApiOrdersByOrderIdDaysByDayIdActivitiesFromLibraryResponses[keyof PostApiOrdersByOrderIdDaysByDayIdActivitiesFromLibraryResponses];
 
 export type DeleteApiOrdersByOrderIdDaysByDayIdActivitiesByActivityIdData = {
     body?: never;

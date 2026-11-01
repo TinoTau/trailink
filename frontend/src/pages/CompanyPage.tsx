@@ -6,6 +6,7 @@ import { ordersApi } from '../api/orders'
 import { useAuthenticatedAuth } from '../auth/authState'
 import { AccountMenu } from './AccountMenu'
 import { OrderFilesBlock } from './OrderFilesBlock'
+import { ActivityLibrarySection } from './library/ActivityLibrarySection'
 import { OrderDetailNotes } from './OrderInfoFields'
 import { readCurrentCompanyId, writeCurrentCompanyId } from '../currentCompany'
 import { formatMonthDay } from '../localDate'
@@ -406,6 +407,8 @@ export function CompanyPage() {
               </section>
             </>
           ) : null}
+
+          {user.role === 'company' ? <ActivityLibrarySection /> : null}
 
           <section className="account-section profile-block">
             <h2>历史订单</h2>

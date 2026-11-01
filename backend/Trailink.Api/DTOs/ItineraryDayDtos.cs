@@ -73,4 +73,7 @@ public class OrderActivityReadDto
 
     public string? TicketPath { get; set; }
     public int SortOrder { get; set; }
+
+    /// <summary>从活动库选的活动；手动填写的为 null。</summary>
+    public Guid? LibraryActivityId { get; set; }
 }

@@ -25,6 +25,7 @@ builder.Services.AddDbContext<TrailinkDbContext>(options =>
 builder.Services.AddScoped<OrderScheduling>();
 builder.Services.AddScoped<OrderDriverAssignment>();
 builder.Services.AddScoped<OrderPresenter>();
+builder.Services.AddScoped<ActivityLibrary>();
 builder.Services.AddScoped<AuthSession>();
 builder.Services.AddSingleton<AppFileStore>();
 builder.Services.AddHostedService<ExpiredAttachmentCleanup>();

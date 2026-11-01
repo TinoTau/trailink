@@ -9,7 +9,8 @@ public enum StoredFileKind
     Ticket,
     Order,
     Vehicle,
-    License
+    License,
+    LibraryActivity
 }
 
 public sealed class AppFileStore(IWebHostEnvironment env)
@@ -52,6 +53,7 @@ public sealed class AppFileStore(IWebHostEnvironment env)
             StoredFileKind.Order => "orders",
             StoredFileKind.Vehicle => "vehicles",
             StoredFileKind.License => "licenses",
+            StoredFileKind.LibraryActivity => "library",
             _ => "other"
         };
 
