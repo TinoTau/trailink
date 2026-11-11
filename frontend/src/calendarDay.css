@@ -113,20 +113,44 @@
   position: relative;
 }
 
+/* 固定在屏幕上（挂在 body 下），左右 × 上中下 6 个位置。 */
 .calendar-ink-bar {
-  position: absolute;
-  top: 50%;
-  z-index: 6;
+  position: fixed;
+  z-index: 15;
   width: 28px;
   height: 132px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
-  transform: translateY(-50%);
   opacity: 0.75;
   touch-action: none;
   cursor: ns-resize;
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.calendar-ink-bar[data-side='left'] {
+  left: calc(12px + env(safe-area-inset-left, 0px));
+}
+
+.calendar-ink-bar[data-side='right'] {
+  right: calc(12px + env(safe-area-inset-right, 0px));
+}
+
+/* 上：让开页面顶部的标题和按钮。 */
+.calendar-ink-bar[data-level='top'] {
+  top: calc(84px + env(safe-area-inset-top, 0px));
+}
+
+.calendar-ink-bar[data-level='middle'] {
+  top: 50%;
+  margin-top: -66px;
+}
+
+.calendar-ink-bar[data-level='bottom'] {
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
 }
 
 .calendar-ink-bar:focus,
@@ -134,9 +158,20 @@
   outline: none;
 }
 
+/* 按满 0.5 秒：稍微放大，提示可以拿起来移动。 */
+.calendar-ink-bar.is-held {
+  transform: scale(1.08);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.24);
+  opacity: 0.9;
+}
+
 .calendar-ink-bar.is-moving {
   right: auto;
-  cursor: ew-resize;
+  bottom: auto;
+  margin-top: 0;
+  opacity: 0.9;
+  cursor: grabbing;
+  transition: none;
 }
 
 .calendar-ink-bar-fill,
@@ -151,6 +186,24 @@
   left: 10px;
   border-radius: 999px;
   background: #8c8c8c;
+}
+
+.calendar-ink-bar-notch {
+  left: 5px;
+  right: 5px;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: #bfbfbf;
+}
+
+/* 车牌挡：刻度和滑块变成蓝色，提示现在显示的是车牌。 */
+.calendar-ink-bar-notch.is-on {
+  background: #1677ff;
+}
+
+.calendar-ink-bar.is-plate .calendar-ink-bar-thumb {
+  background: #1677ff;
 }
 
 .calendar-ink-bar-thumb {

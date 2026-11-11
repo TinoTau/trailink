@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { isStoredFile, itineraryDayWrite, ordersApi } from '../../api/orders'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { FileField } from '../FileField'
-import { TrashIcon } from '../icons'
+import { DeleteIcon } from '../icons'
 import { OrderInfoEditor } from '../OrderInfoFields'
 import { formatLocalTime } from '../../localDate'
 import { libraryApi } from '../../api/library'
@@ -93,13 +93,14 @@ export function DriverDayEditor({
                 extraActions={
                   <button
                     type="button"
-                    className="dispatcher-icon-btn danger"
+                    className={`dispatcher-icon-btn danger${armedOrderId === group.orderId ? ' release' : ''}`}
                     aria-label="解除这一天"
+                    data-release-day="true"
                     aria-pressed={armedOrderId === group.orderId}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={() => onArmDayRelease?.(group.orderId)}
                   >
-                    <TrashIcon />
+                    <DeleteIcon />
                   </button>
                 }
               />

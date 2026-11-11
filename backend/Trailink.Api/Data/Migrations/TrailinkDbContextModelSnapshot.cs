@@ -603,6 +603,11 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("guest_count");
 
+                    b.Property<string>("Island")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("island");
+
                     b.Property<string>("OrderNo")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -614,6 +619,12 @@ namespace Trailink.Api.Data.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("platform_order_no");
 
+                    b.Property<int>("ShareLevel")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("share_level");
+
                     b.Property<string>("SharedNotes")
                         .HasColumnType("text")
                         .HasColumnName("shared_notes");
@@ -621,6 +632,11 @@ namespace Trailink.Api.Data.Migrations
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date")
                         .HasColumnName("start_date");
+
+                    b.Property<string>("VehicleType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("vehicle_type");
 
                     b.HasKey("Id");
 
@@ -684,6 +700,45 @@ namespace Trailink.Api.Data.Migrations
                     b.HasIndex("LibraryActivityId");
 
                     b.ToTable("order_activities", (string)null);
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.OrderClaim", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<int>("ShareLevel")
+                        .HasColumnType("integer")
+                        .HasColumnName("share_level");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DriverId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("OrderId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("order_claims", (string)null);
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.OrderFile", b =>
@@ -1158,6 +1213,25 @@ namespace Trailink.Api.Data.Migrations
                     b.Navigation("ItineraryDay");
 
                     b.Navigation("LibraryActivity");
+                });
+
+            modelBuilder.Entity("Trailink.Api.Models.OrderClaim", b =>
+                {
+                    b.HasOne("Trailink.Api.Models.Order", "Order")
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Trailink.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Order");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Trailink.Api.Models.OrderFile", b =>

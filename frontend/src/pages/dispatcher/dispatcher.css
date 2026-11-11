@@ -3,7 +3,12 @@
   flex-direction: column;
   width: 100%;
   max-width: 100%;
+  /* 旧版 iOS（15.4 以前）和旧版安卓浏览器不认 dvh，先给 vh 兜底。 */
+  height: 100vh;
   height: 100dvh;
+  /* 刘海屏横屏、底部横条：内容避开安全区（index.html 用了 viewport-fit=cover）。 */
+  box-sizing: border-box;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   overflow: hidden;
   background: #fff;
   color: #1f1f1f;
@@ -15,6 +20,39 @@
   justify-content: space-between;
   gap: 12px;
   padding: 16px 16px 8px;
+}
+
+/*
+ * 从订单记录跳过来时的返回按钮：浮在页面左上角、盖在其他控件上面，大一些、带阴影，一眼能看到。
+ * 圆形，里面是带圆勾的返回箭头。
+ */
+.dispatcher-back {
+  position: fixed;
+  z-index: 30;
+  top: calc(12px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid #f0f0f0;
+  border-radius: 50%;
+  background: #fff;
+  color: #1f1f1f;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+
+.dispatcher-back:active {
+  background: #f5f5f5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+}
+
+.dispatcher-header-title {
+  flex: 1;
+  min-width: 0;
 }
 
 .dispatcher-header-actions {
@@ -39,6 +77,13 @@
   margin: 4px 0 0;
   font-size: 12px;
   color: #8c8c8c;
+}
+
+/* 天气数据来源（和司导日历底部的注明一样，浅灰小字）。 */
+.dispatcher-weather-credit {
+  color: #bfbfbf;
+  font-size: 11px;
+  text-decoration: none;
 }
 
 .dispatcher-pane {
@@ -111,9 +156,12 @@
 }
 
 .dispatcher-pane-bar h2 {
+  flex: none;
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+  /* 派给调度窄屏上按钮多时，「订单」不被挤成竖排。 */
+  white-space: nowrap;
 }
 
 .dispatcher-filters,
@@ -134,6 +182,23 @@
 .dispatcher-chip.release {
   color: #ff4d4f;
   box-shadow: 0 0 0 2px #ff4d4f;
+}
+
+/*
+ * 删除（红圈红 ×）：图标 24px，按钮 30×30；上下负边距抵掉多出来的高度，标题行不变高。
+ * 二次确认时按钮外面套一圈红框。
+ */
+.dispatcher-icon-btn.danger {
+  width: 30px;
+  height: 30px;
+  margin: -4px 0;
+  /* 二次确认的红框是圆角方形，和其他红框一致。 */
+  border-radius: 8px;
+}
+
+.dispatcher-icon-btn.danger svg {
+  width: 24px;
+  height: 24px;
 }
 
 a.dispatcher-chip {
@@ -312,6 +377,20 @@ a.dispatcher-chip {
   font-size: 12px;
 }
 
+/* 订单图标的名字：订单号，或「人数 车型 共用备注」，最多两行，多的省略。 */
+.dispatcher-tile strong.dispatcher-tile-label {
+  display: -webkit-box;
+  max-width: calc(100% - 12px);
+  padding: 0 6px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-all;
+}
+
 .dispatcher-tile span,
 .dispatcher-tile em {
   margin-top: 4px;
@@ -398,10 +477,33 @@ a.dispatcher-chip {
   pointer-events: none;
 }
 
-.dispatcher-corner {
+/* 车辆「未配车」：司导图标左上角写还缺几天车。 */
+.dispatcher-missing-badge {
   position: absolute;
   top: 6px;
-  right: 6px;
+  left: 6px;
+  z-index: 1;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #fff1f0;
+  color: #cf1322;
+  font-size: 11px;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.dispatcher-chip.missing:not(.active) {
+  color: #cf1322;
+}
+
+.dispatcher-chip:disabled {
+  color: #bfbfbf;
+}
+
+.dispatcher-corner {
+  position: absolute;
+  top: 0;
+  right: 0;
   z-index: 1;
   display: flex;
   gap: 2px;
@@ -411,11 +513,14 @@ a.dispatcher-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  flex: none;
+  /* 手指容易点到：44×44，图标 28px。上下负边距抵掉多出来的高度，所在的行不会变高。 */
+  width: 44px;
+  height: 44px;
+  margin: -11px 0;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 10px;
   background: transparent;
   color: #8c8c8c;
 }
@@ -426,17 +531,18 @@ a.dispatcher-chip {
 }
 
 .dispatcher-icon-btn.danger {
-  color: #bfbfbf;
-}
-
-.dispatcher-icon-btn.danger:hover {
   color: #ff4d4f;
 }
 
 .dispatcher-icon-btn svg {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: 28px;
+  height: 28px;
+}
+
+/* 头像角上的置顶贴着角放，不用负边距。 */
+.dispatcher-corner .dispatcher-icon-btn {
+  margin: 0;
 }
 
 .dispatcher-card {
@@ -522,7 +628,29 @@ a.dispatcher-chip {
 }
 
 .dispatcher-card-remove {
-  margin-left: 12px;
+  margin-left: 8px;
+}
+
+.dispatcher-chip.dispatcher-card-return {
+  flex: none;
+  height: 30px;
+  margin: -3px 0 -3px 8px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: #595959;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 套红框只换边框颜色，不往外扩，不压到旁边的文字。 */
+.dispatcher-chip.dispatcher-card-return.release {
+  border-color: #ff4d4f;
+  box-shadow: none;
+  color: #ff4d4f;
+}
+
+.dispatcher-dates-slot {
+  padding: 0 0 10px;
 }
 
 .dispatcher-card-head strong {
@@ -768,6 +896,7 @@ a.dispatcher-chip {
   .dispatcher-notes textarea,
   .dispatcher-notes-field input,
   .dispatcher-notes-field textarea,
+  .dispatcher-notes-field select,
   .dispatcher-company-search input {
     font-size: 16px;
   }
@@ -828,8 +957,12 @@ a.dispatcher-chip {
   position: fixed;
   z-index: 20;
   min-width: 72px;
+  max-width: 180px;
+  overflow: hidden;
   padding: 8px 10px;
   border-radius: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   background: #1677ff;
   color: #fff;
   font-size: 12px;
@@ -996,4 +1129,310 @@ a.dispatcher-chip {
 
 .vehicle-photo-bars button[aria-current='true']::before {
   background: #8c8c8c;
+}
+
+/* 编辑订单里的抢单范围：样式沿用当日详情的住宿位置按钮（place-mark-bar）。 */
+.share-level {
+  margin: 0 0 12px;
+}
+
+.share-level-bar {
+  margin: 0;
+}
+
+.share-level-bar button {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.share-level-bar button:disabled {
+  border-color: #f0f0f0;
+  background: #fafafa;
+  color: #bfbfbf;
+}
+
+.share-level-hint {
+  margin: 4px 0 0;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+/* 抢单：放出去的单灰色虚线框；有人抢了（待确认）的单和抢单司导图标用抢单专用的橙色虚线框；
+   抢单待确认一行；确认派单条；日历上被抢的日期橙色虚线框。橙色只用于抢单。 */
+.dispatcher-tile.shared,
+.dispatcher-driver.claimant .dispatcher-avatar {
+  border: 1.5px dashed #8c8c8c;
+}
+
+.dispatcher-tile.shared.assigned {
+  border-color: rgb(0 0 0 / 45%);
+}
+
+.dispatcher-tile.shared.claimed,
+.dispatcher-driver.claimant .dispatcher-avatar {
+  border-color: #fa8c16;
+}
+
+.dispatcher-day .grab-mark {
+  position: absolute;
+  inset: 1px;
+  border: 2px dashed #fa8c16;
+  border-radius: 9px;
+  pointer-events: none;
+}
+
+.dispatcher-tile .dispatcher-tile-claim {
+  margin-top: 2px;
+  color: #d46b08;
+  font-weight: 600;
+  opacity: 1;
+}
+
+.claim-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 6px 6px 6px 10px;
+  border: 1px dashed #ffd591;
+  border-radius: 10px;
+  background: #fff7e6;
+  color: #ad4e00;
+  font-size: 13px;
+}
+
+.claim-confirm-button {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #fa8c16;
+  border-radius: 999px;
+  background: #fa8c16;
+  color: #fff;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.claim-confirm-button:disabled {
+  opacity: 0.6;
+}
+
+.claim-pick-name {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 82%);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 改日期：编辑订单里的入口，和日历底部的操作条。 */
+.reschedule-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #262626;
+  font-size: 13px;
+}
+
+.reschedule-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reschedule-bar .dispatcher-chip {
+  height: 30px;
+  padding: 0 12px;
+}
+
+.reschedule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.reschedule-bar .reschedule-row {
+  justify-content: flex-end;
+}
+
+.reschedule-summary {
+  margin: 0;
+  color: #262626;
+  font-size: 13px;
+}
+
+.reschedule-summary.warn {
+  color: #cf1322;
+}
+
+/* 改日期时司导区先收起来，订单日历占满下面，手机上也有地方拖。 */
+.dispatcher-page.rescheduling .dispatcher-pane.drivers {
+  display: none;
+}
+
+.dispatcher-chip.reschedule-save:not(:disabled) {
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #fff;
+}
+
+.dispatcher-chip.reschedule-save.release:not(:disabled) {
+  border-color: #ff4d4f;
+  background: #fff;
+  color: #ff4d4f;
+}
+
+.dispatcher-card-footer .reschedule-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 改日期：行程上的格子按下就拖（整段平移），不滚动日历；滚动在其他格子上。 */
+.dispatcher-page.rescheduling .dispatcher-month-grid .calendar-day.in-range,
+.dispatcher-page.rescheduling .dispatcher-month-grid .calendar-day.range-edge,
+.reschedule-dialog .dispatcher-month-grid .calendar-day.in-range,
+.reschedule-dialog .dispatcher-month-grid .calendar-day.range-edge {
+  touch-action: none;
+}
+
+/* 编辑订单：人数、车型、南/北岛一行。南/北岛不是主要信息，一个小按钮按一下换一个。 */
+.order-basics {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 0 10px;
+  align-items: end;
+}
+
+/* 人数、车型：下拉框选常用值，选「…」换成输入框（右边小箭头回到下拉框）。和输入框同样的边框、圆角、高度。 */
+.choice-field-select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #262626;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.choice-field.typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.choice-field.typing input {
+  flex: 1;
+  height: 34px;
+}
+
+.choice-field-back {
+  flex: none;
+  width: 28px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8c8c8c;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.island-toggle {
+  min-width: 64px;
+  height: 32px;
+  margin-top: 4px;
+  padding: 0 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 999px;
+  background: #fff;
+  color: #262626;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 公司信息订单记录里的改日期弹框：卡片就是调度台的订单日历卡。 */
+.reschedule-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: rgba(255, 255, 255, 0.72);
+  overscroll-behavior: contain;
+}
+
+.reschedule-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  height: min(680px, 86vh);
+  height: min(680px, 86dvh);
+}
+
+/* 卡片头右上角：「保存」/「添加」在关闭按钮左边（所有创建、修改都一样）。 */
+.card-head-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 编辑区的「保存」画进这个空位；空着时不占地方。 */
+.card-save-slot {
+  display: contents;
+}
+
+.card-save {
+  white-space: nowrap;
+}
+
+/* 卡片头上的主要按钮（调度台创建订单）：和司导界面「领取订单」一样的蓝色实心圆角按钮。 */
+.card-primary {
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.card-primary:active {
+  background: #0958d9;
+}
+
+.card-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/*
+ * 电脑网页（宽屏）：卡片不拉满整个屏幕，否则日历一行七格被拉得又扁又长（1366 宽时每格约 190×36）。
+ * 卡片限宽居中，日历比例接近手机和平板；卡片外面的订单、司导、车辆方块照旧铺满。
+ */
+@media (min-width: 900px) {
+  .dispatcher-card {
+    width: 100%;
+    max-width: 720px;
+    margin-inline: auto;
+  }
 }

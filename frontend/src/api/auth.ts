@@ -1,5 +1,7 @@
 import type {
   CompanyHome,
+  CompanyOrderRecord,
+  CompanyOrderScope,
   CompanySearch,
   DispatcherSearch,
   DriverApplicant,
@@ -36,6 +38,18 @@ export const companyApi = {
   apply: (companyId: string) => api.post<PendingApplication>('/api/companies/applications', { companyId }),
   desk: (companyId?: string) =>
     api.get<CompanyHome>(companyId ? `/api/company?companyId=${encodeURIComponent(companyId)}` : '/api/company'),
+  /** 订单记录：调度员看分配给自己的单，公司账户看本公司全部，司导看自己跑的。按开始日期从早到晚。 */
+  /** 订单记录：`all` 公司全部（公司账户）、`desk` 自己调度台上的（公司账户、调度员）、`driver` 派给自己跑的（所有人）。不传用角色的默认。 */
+  /** 订单记录导出成默认样式的 Excel。 */
+  exportOrders: (companyId: string, scope: CompanyOrderScope) =>
+    api.getFile(`/api/company/orders/export?companyId=${encodeURIComponent(companyId)}&scope=${scope}`),
+  /** 把订单记录填进上传的表格（.xlsx），返回填好的表格。 */
+  fillOrders: (companyId: string, scope: CompanyOrderScope, file: File) =>
+    api.postFileForFile(`/api/company/orders/export?companyId=${encodeURIComponent(companyId)}&scope=${scope}`, file),
+  orders: (companyId: string, scope?: CompanyOrderScope) =>
+    api.get<CompanyOrderRecord[]>(
+      `/api/company/orders?companyId=${encodeURIComponent(companyId)}${scope ? `&scope=${scope}` : ''}`,
+    ),
   updateContact: (companyId: string, contact: string) =>
     api.put<CompanyHome>('/api/company', { companyId, contact }),
   updateName: (companyId: string, name: string) =>

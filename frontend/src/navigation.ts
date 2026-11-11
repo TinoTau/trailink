@@ -14,6 +14,7 @@ export const APP_NAVIGATION: readonly AppNavigationItem[] = [
   { path: '/company/assign', label: '派给调度', roles: ['company'], accountMenu: true },
   { path: '/dispatcher', label: '调度台', roles: STAFF_ROLES, accountMenu: true },
   { path: '/driver/calendar', label: '我的行程', roles: ALL_ROLES, accountMenu: false },
+  { path: '/driver/grab', label: '抢单', roles: ALL_ROLES, accountMenu: true },
   { path: '/company', label: '公司信息', roles: ALL_ROLES, accountMenu: true },
   { path: '/me', label: '个人信息', roles: ALL_ROLES, accountMenu: true },
 ] as const

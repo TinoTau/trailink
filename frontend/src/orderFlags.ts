@@ -11,6 +11,31 @@ export function orderDisplayLabel(order: { label?: string | null }) {
   return clipTileLabel((order.label ?? '').trim())
 }
 
+/**
+ * 调度台和派给调度的订单图标上写的字（两个界面同一个规则）：
+ * 有订单号写订单号；没有时依次写人数、车型、共用备注第一行（「2人 五座车 基督城-特卡波…」），图标里最多两行。
+ * 这些都没有（例如看不到详情的单）时用后端给的显示名。
+ */
+export function orderTileLabel(order: {
+  label?: string | null
+  platformOrderNo?: string | null
+  guestCount?: number | null
+  vehicleType?: string | null
+  sharedNotes?: string | null
+}) {
+  const orderNo = order.platformOrderNo?.trim()
+  if (orderNo) {
+    return orderNo
+  }
+  const route = (order.sharedNotes ?? '').trim().split(/\r?\n/)[0]?.trim() ?? ''
+  const parts = [
+    order.guestCount && order.guestCount > 0 ? `${order.guestCount}人` : '',
+    order.vehicleType?.trim() ?? '',
+    route,
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : (order.label ?? '').trim()
+}
+
 /** 日历格子里的一条行程：我的行程和调度台当日编辑共用。 */
 export function calendarTrip(order: Order, day: ItineraryDay): DriverCalendarTrip {
   return {
@@ -282,4 +307,16 @@ export function splitOrderHint(orders: Order[]) {
     return '此单尚未派完所有日期'
   }
   return null
+}
+
+/** 南/北岛的选项，顺序就是界面上的顺序。 */
+export const ORDER_ISLANDS = [
+  { value: 'south', label: '南岛' },
+  { value: 'north', label: '北岛' },
+  { value: 'both', label: '南北岛' },
+] as const
+
+/** 没填按南岛显示（业务主要在南岛）。 */
+export function islandLabel(island: string | null | undefined) {
+  return ORDER_ISLANDS.find((item) => item.value === island)?.label ?? '南岛'
 }

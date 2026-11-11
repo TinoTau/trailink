@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Trailink.Api.Data;
 using Trailink.Api.Services;
+using Trailink.Api.Services.Export;
+using Trailink.Api.Services.Recognition;
 using Trailink.Api.Services.Weather;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,8 +26,10 @@ builder.Services.AddDbContext<TrailinkDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 builder.Services.AddScoped<OrderScheduling>();
 builder.Services.AddScoped<OrderDriverAssignment>();
+builder.Services.AddScoped<OrderReschedule>();
 builder.Services.AddScoped<OrderPresenter>();
 builder.Services.AddScoped<ActivityLibrary>();
+builder.Services.AddScoped<OrderGrab>();
 builder.Services.AddScoped<AuthSession>();
 builder.Services.AddSingleton<AppFileStore>();
 builder.Services.AddHostedService<ExpiredAttachmentCleanup>();
@@ -38,6 +42,14 @@ builder.Services.AddSingleton(services => services.GetRequiredService<IOptions<W
         DefaultRequestHeaders = { { "User-Agent", "Trailink/1.0 (+https://trailink.cc)" } }
     }));
 builder.Services.AddHostedService<WeatherRefresh>();
+builder.Services.Configure<RecognitionOptions>(builder.Configuration.GetSection("Recognition"));
+builder.Services.AddScoped<OrderRecordSheetFiller>();
+builder.Services.AddHttpClient<IDraftModel, AnthropicDraftModel>((services, http) =>
+{
+    http.Timeout = TimeSpan.FromSeconds(services.GetRequiredService<IOptions<RecognitionOptions>>().Value.TimeoutSeconds);
+});
+builder.Services.AddScoped<OrderDraftRecognizer>();
+builder.Services.AddScoped<OrderImport>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {

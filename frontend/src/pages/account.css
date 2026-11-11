@@ -1,7 +1,10 @@
 .account-page {
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
   min-height: 100dvh;
+  box-sizing: border-box;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   background: #fff;
   color: #1f1f1f;
 }
@@ -274,6 +277,8 @@ a.account-chip {
   position: fixed;
   inset: 0;
   z-index: 8;
+  /* 弹框里滑到头不带动后面的页面。 */
+  overscroll-behavior: contain;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -285,6 +290,7 @@ a.account-chip {
   width: min(420px, 100%);
   max-height: 80dvh;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   border: 1px solid #f0f0f0;
   border-radius: 20px;
@@ -462,4 +468,24 @@ a.account-chip {
 
 .profile-meta span {
   color: #8c8c8c;
+}
+
+/* 订单弹框：日期一行，右边「调整日期」。 */
+.account-order-dates {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.account-order-dates p {
+  margin: 0;
+}
+
+/* 电脑网页（宽屏）：放宽一些，订单记录表格不用左右滑就能看全。 */
+@media (min-width: 900px) {
+  .account-main {
+    max-width: 800px;
+  }
 }

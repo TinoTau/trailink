@@ -3,7 +3,12 @@
   flex-direction: column;
   width: 100%;
   max-width: 100%;
+  /* 旧版 iOS（15.4 以前）和旧版安卓浏览器不认 dvh，先给 vh 兜底。 */
+  height: 100vh;
   height: 100dvh;
+  /* 刘海屏横屏、底部横条：内容避开安全区（index.html 用了 viewport-fit=cover）。 */
+  box-sizing: border-box;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   overflow: hidden;
   background: #fff;
   color: #1f1f1f;
@@ -685,4 +690,51 @@
   border: 1px solid #d9d9d9;
   border-radius: 8px;
   font-size: 16px;
+}
+
+/* 抢单专用橙色：从抢单页跳过来时标出那张单的日期，盖在行程颜色和冲突红色之上。 */
+.driver-day .grab-mark {
+  position: absolute;
+  inset: 1px;
+  border: 2px dashed #fa8c16;
+  border-radius: 9px;
+  pointer-events: none;
+}
+
+.driver-grab-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #fff7e6;
+  color: #ad4e00;
+  font-size: 13px;
+}
+
+.driver-grab-note .grab-mark-sample {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px dashed #fa8c16;
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+
+.driver-grab-note button {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ad4e00;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+/* 电脑网页（宽屏）：日历限宽居中，格子不被拉得又扁又长；滚动条还在窗口右边。 */
+@media (min-width: 900px) {
+  .driver-calendar-scroll {
+    padding-inline: max(8px, calc((100% - 720px) / 2));
+  }
 }

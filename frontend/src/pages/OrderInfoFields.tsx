@@ -1,10 +1,11 @@
-import { useState, type PointerEvent, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { message } from 'antd'
 import { companyApi } from '../api/auth'
 import { updateOrderInfo } from '../api/orders'
 import { useAuthenticatedAuth } from '../auth/authState'
 import { formatMonthDay } from '../localDate'
-import { orderDisplayLabel } from '../orderFlags'
+import { ORDER_ISLANDS, orderDisplayLabel } from '../orderFlags'
 import type { CompanySearch, Order } from '../types'
 import { OrderFilesBlock } from './OrderFilesBlock'
 import './dispatcher/dispatcher.css'
@@ -20,6 +21,18 @@ export function privateOrderNoteCopy(role: string) {
   return { label: '调度备注', placeholder: '仅调度可见，司导看不到' }
 }
 
+/**
+ * 卡片头上「保存」的位置：所有创建、修改的「保存」都放在关闭按钮左边。
+ * 卡片（订单卡、司导卡、车辆卡、当日卡片、公司信息订单弹框）在头上关闭按钮左边留一个空位，通过这个 context 交给里面的编辑区；
+ * 编辑区的「保存」就画到这个空位里。没有空位时（不在卡片里）照旧画在「订单信息」标题那一行。
+ */
+export const SaveSlotContext = createContext<HTMLElement | null>(null)
+
+/** 卡片头上关闭按钮左边的空位：先渲染这个，再渲染关闭按钮。 */
+export function SaveSlot({ onSlot }: { onSlot: (element: HTMLElement | null) => void }) {
+  return <span className="card-save-slot" ref={onSlot} />
+}
+
 const sharedOrderNoteLabel = '共用备注'
 const sharedOrderNotePlaceholder = '公司、调度员和司导都能看到'
 
@@ -33,6 +46,7 @@ export function OrderInfoFields({
   sharedNotes,
   onSharedNotesChange,
   onSave,
+  afterSave,
   saveDisabled,
   extra,
   className,
@@ -42,6 +56,7 @@ export function OrderInfoFields({
   companyId,
   companyName,
   onCompanyChange,
+  basics,
 }: {
   heading?: ReactNode
   subtitle?: string
@@ -51,7 +66,10 @@ export function OrderInfoFields({
   onNotesChange?: (value: string) => void
   sharedNotes?: string
   onSharedNotesChange?: (value: string) => void
-  onSave?: () => void
+  /** 返回 false 表示没保存成功。失焦时也会调用。 */
+  onSave?: () => void | boolean | Promise<boolean | void>
+  /** 点「保存」且保存成功后调用（例如收起编辑、回到详情）。失焦保存不调用。 */
+  afterSave?: () => void
   saveDisabled?: boolean
   extra?: ReactNode
   className?: string
@@ -61,6 +79,8 @@ export function OrderInfoFields({
   companyId?: string | null
   companyName?: string | null
   onCompanyChange?: (companyId: string, companyName: string) => void
+  /** 人数、车型、南/北岛（订单记录里用来区分订单）；不传就不显示。 */
+  basics?: OrderBasicsValue & { onChange: (next: OrderBasicsValue) => void }
 }) {
   const { user } = useAuthenticatedAuth()
   const canEditOrder = Boolean(onPlatformOrderNoChange)
@@ -71,25 +91,33 @@ export function OrderInfoFields({
   const resolvedNotesLabel = notesLabel ?? (canEditOrder ? privateCopy.label : '备注')
   const resolvedNotesPlaceholder = notesPlaceholder ?? (canEditOrder ? privateCopy.placeholder : '给这个司导写备注')
 
+  const saveSlot = useContext(SaveSlotContext)
+  const saveButton = onSave ? (
+    <button
+      type="button"
+      className="dispatcher-chip card-save"
+      disabled={saveDisabled}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        void Promise.resolve(onSave()).then((saved) => {
+          if (saved !== false) {
+            afterSave?.()
+          }
+        })
+      }}
+    >
+      保存
+    </button>
+  ) : null
+
   return (
     <div className={`dispatcher-notes${className ? ` ${className}` : ''}`} onPointerDown={(event) => event.stopPropagation()}>
-      {(heading || onSave) ? (
+      {saveButton && saveSlot ? createPortal(saveButton, saveSlot) : null}
+      {heading || (saveButton && !saveSlot) ? (
         <span>
           {heading}
-          {onSave ? (
-            <button
-              type="button"
-              className="dispatcher-chip"
-              disabled={saveDisabled}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation()
-                onSave()
-              }}
-            >
-              保存
-            </button>
-          ) : null}
+          {saveSlot ? null : saveButton}
         </span>
       ) : null}
       {subtitle ? <p className="dispatcher-notes-sub">{subtitle}</p> : null}
@@ -113,6 +141,7 @@ export function OrderInfoFields({
           />
         </label>
       ) : null}
+      {basics ? <OrderBasicsFields {...basics} /> : null}
       {onSharedNotesChange ? (
         <NoteBox
           label={sharedOrderNoteLabel}
@@ -135,6 +164,173 @@ export function OrderInfoFields({
       ) : null}
       {extra}
     </div>
+  )
+}
+
+export interface OrderBasicsValue {
+  /** 输入框里的文字，空表示 0。 */
+  guestCount: string
+  vehicleType: string
+  island: string | null
+}
+
+export function orderBasicsOf(order: { guestCount?: number | null; vehicleType?: string | null; island?: string | null }): OrderBasicsValue {
+  return {
+    guestCount: order.guestCount ? String(order.guestCount) : '',
+    vehicleType: order.vehicleType ?? '',
+    island: order.island ?? null,
+  }
+}
+
+/** 写回接口时的值：人数空为 0。 */
+export function orderBasicsFields(value: OrderBasicsValue) {
+  return {
+    guestCount: /^\d+$/.test(value.guestCount.trim()) ? Number(value.guestCount.trim()) : 0,
+    vehicleType: value.vehicleType,
+    island: value.island,
+  }
+}
+
+/** 人数下拉框的常用选项；其他人数选「…」再输入。 */
+const GUEST_CHOICES = ['2', '3', '4', '5', '6'] as const
+/** 车型下拉框的常用选项；其他车型（如「7座阿尔法」）选「…」再输入。 */
+const VEHICLE_CHOICES = ['5座', '7座', '12座'] as const
+
+function OrderBasicsFields({ guestCount, vehicleType, island, onChange }: OrderBasicsValue & { onChange: (next: OrderBasicsValue) => void }) {
+  const value = { guestCount, vehicleType, island }
+  return (
+    <div className="order-basics">
+      <label className="dispatcher-notes-field order-basics-guests">
+        人数
+        <ChoiceField
+          label="人数"
+          value={guestCount}
+          choices={GUEST_CHOICES}
+          numeric
+          maxLength={3}
+          onChange={(next) => onChange({ ...value, guestCount: next.replace(/\D/g, '') })}
+        />
+      </label>
+      <label className="dispatcher-notes-field order-basics-vehicle">
+        车型
+        <ChoiceField
+          label="车型"
+          value={vehicleType}
+          choices={VEHICLE_CHOICES}
+          maxLength={50}
+          placeholder="如 7座阿尔法"
+          onChange={(next) => onChange({ ...value, vehicleType: next })}
+        />
+      </label>
+      <label className="dispatcher-notes-field order-basics-island">
+        南/北岛
+        <IslandToggle island={island} onChange={(next) => onChange({ ...value, island: next })} />
+      </label>
+    </div>
+  )
+}
+
+const OTHER = '…'
+
+/**
+ * 下拉框选常用值，最后一项「…」改成输入框自己填。
+ * 已有的值不在选项里（例如「7座阿尔法」「1」）时直接显示输入框；输入框右边的小箭头回到下拉框。
+ */
+export function ChoiceField({
+  label,
+  value,
+  choices,
+  numeric = false,
+  maxLength,
+  placeholder,
+  onChange,
+}: {
+  label: string
+  value: string
+  choices: readonly string[]
+  numeric?: boolean
+  maxLength?: number
+  placeholder?: string
+  onChange: (next: string) => void
+}) {
+  const [typing, setTyping] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  // 值不在选项里（已有的「7座阿尔法」，或换了一张单）就一定显示输入框，不会显示成「—」把原值藏起来。
+  const custom = value.trim() !== '' && !choices.includes(value.trim())
+
+  if (typing || custom) {
+    return (
+      <span className="choice-field typing">
+        <input
+          ref={inputRef}
+          value={value}
+          inputMode={numeric ? 'numeric' : undefined}
+          maxLength={maxLength}
+          placeholder={placeholder ?? (numeric ? '输入人数' : '')}
+          aria-label={label}
+          onPointerDown={(event) => event.stopPropagation()}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button
+          type="button"
+          className="choice-field-back"
+          aria-label={`改回从列表里选${label}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => {
+            setTyping(false)
+            if (!choices.includes(value.trim())) {
+              onChange('')
+            }
+          }}
+        >
+          ▾
+        </button>
+      </span>
+    )
+  }
+
+  return (
+    <select
+      className="choice-field-select"
+      aria-label={label}
+      value={choices.includes(value.trim()) ? value.trim() : ''}
+      onPointerDown={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        if (event.target.value === OTHER) {
+          setTyping(true)
+          onChange('')
+          // 换成输入框后直接可以打字。
+          window.requestAnimationFrame(() => inputRef.current?.focus())
+          return
+        }
+        onChange(event.target.value)
+      }}
+    >
+      <option value="">—</option>
+      {choices.map((choice) => (
+        <option key={choice} value={choice}>
+          {choice}
+        </option>
+      ))}
+      <option value={OTHER}>{OTHER}</option>
+    </select>
+  )
+}
+
+/** 南/北岛：不是主要信息，一个按钮，按一下换一个（南岛 → 北岛 → 南北岛 → 南岛）。没填按南岛。 */
+export function IslandToggle({ island, onChange }: { island: string | null | undefined; onChange: (next: string) => void }) {
+  const index = Math.max(0, ORDER_ISLANDS.findIndex((item) => item.value === island))
+  const next = ORDER_ISLANDS[(index + 1) % ORDER_ISLANDS.length]
+  return (
+    <button
+      type="button"
+      className="island-toggle"
+      aria-label={`南/北岛：${ORDER_ISLANDS[index].label}，点一下换成${next.label}`}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => onChange(next.value)}
+    >
+      {ORDER_ISLANDS[index].label}
+    </button>
   )
 }
 
@@ -278,6 +474,7 @@ export function OrderInfoPanel({
   onHeadPointerDown,
   extraActions,
   trailing,
+  onSaveSlot,
   children,
 }: {
   title: ReactNode
@@ -293,9 +490,21 @@ export function OrderInfoPanel({
   onHeadPointerDown?: (event: PointerEvent<HTMLElement>) => void
   extraActions?: ReactNode
   trailing?: ReactNode
+  /** 头上关闭按钮左边「保存」的空位；卡片把它交给卡片里的编辑区（`SaveSlotContext`）。 */
+  onSaveSlot?: (element: HTMLElement | null) => void
   children?: ReactNode
 }) {
   const [localOpen, setLocalOpen] = useState(false)
+  const [saveSlot, setSaveSlot] = useState<HTMLElement | null>(null)
+  const onSaveSlotRef = useRef(onSaveSlot)
+  useEffect(() => {
+    onSaveSlotRef.current = onSaveSlot
+  })
+  // 回调要稳定：每次渲染换一个新函数，React 会反复先传 null 再传元素。
+  const slotRef = useCallback((element: HTMLElement | null) => {
+    setSaveSlot(element)
+    onSaveSlotRef.current?.(element)
+  }, [])
   const notesOpen = onOpenChange ? Boolean(open) : localOpen
 
   function toggle() {
@@ -327,10 +536,17 @@ export function OrderInfoPanel({
           {extraActions}
         </div>
         {meta ? <p className="dispatcher-card-meta">{meta}</p> : null}
-        {editable && notesOpen ? children : <OrderNotesPreview sharedNotes={sharedNotes} notes={notes} />}
+        {editable && notesOpen ? (
+          <SaveSlotContext.Provider value={saveSlot}>{children}</SaveSlotContext.Provider>
+        ) : (
+          <OrderNotesPreview sharedNotes={sharedNotes} notes={notes} />
+        )}
         {subtitle ? <p>{subtitle}</p> : null}
       </div>
-      {trailing}
+      <div className="card-head-actions">
+        <SaveSlot onSlot={slotRef} />
+        {trailing}
+      </div>
     </header>
   )
 }
@@ -388,6 +604,7 @@ function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoE
         notesPlaceholder={privateOrderNoteCopy('driver').placeholder}
         onSave={() => void save()}
         extra={
+          <>
           <label className="dispatcher-notes-field">
             订单截图
             <OrderFilesBlock
@@ -397,6 +614,7 @@ function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoE
               onChanged={() => void onSaved()}
             />
           </label>
+          </>
         }
       />
     </OrderInfoPanel>
@@ -413,7 +631,7 @@ export function OrderDetailNotes({
   onSaved: (order: Order) => void | Promise<void>
 }) {
   const privateNotes = role === 'driver' ? order.driverNotes ?? '' : order.notes ?? ''
-  const version = `${order.id}:${order.sharedNotes ?? ''}:${privateNotes}`
+  const version = `${order.id}:${order.sharedNotes ?? ''}:${privateNotes}:${JSON.stringify(orderBasicsOf(order))}`
   return <OrderDetailNotesState key={version} order={order} role={role} privateNotes={privateNotes} onSaved={onSaved} />
 }
 
@@ -431,12 +649,17 @@ function OrderDetailNotesState({
   const copy = privateOrderNoteCopy(role)
   const [sharedNotes, setSharedNotes] = useState(order.sharedNotes ?? '')
   const [notes, setNotes] = useState(privateNotes)
+  // 人数、车型、南/北岛只有调度员和公司账户能改。
+  const [basics, setBasics] = useState(() => orderBasicsOf(order))
+  const editsBasics = role !== 'driver'
 
   async function save() {
     try {
       const saved = await updateOrderInfo(
         order,
-        role === 'driver' ? { driverNotes: notes, sharedNotes } : { notes, sharedNotes },
+        role === 'driver'
+          ? { driverNotes: notes, sharedNotes }
+          : { notes, sharedNotes, ...orderBasicsFields(basics) },
       )
       message.success('订单已保存')
       await onSaved(saved)
@@ -454,6 +677,7 @@ function OrderDetailNotesState({
       onNotesChange={setNotes}
       notesLabel={copy.label}
       notesPlaceholder={copy.placeholder}
+      basics={editsBasics ? { ...basics, onChange: setBasics } : undefined}
       onSave={() => void save()}
     />
   )

@@ -225,7 +225,7 @@ public class DriversController(TrailinkDbContext db, AuthSession session, AppFil
         }
 
         var user = await session.GetUserAsync(cancellationToken);
-        return await VisibleDrivers(user).AnyAsync(driver => driver.Id == driverId, cancellationToken);
+        return await DriverRoster.Viewable(db, user).AnyAsync(driver => driver.Id == driverId, cancellationToken);
     }
 
     private async Task<Dictionary<Guid, AccountProfile>> AccountProfilesAsync(

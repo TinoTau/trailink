@@ -6,8 +6,10 @@ import type {
   Order,
   OrderActivity,
   OrderActivityWrite,
+  OrderDatesResult,
   OrderFile,
   OrderWrite,
+  ShareLevel,
 } from '../types'
 import { api } from './client'
 
@@ -19,6 +21,8 @@ export async function createOrderWithDays(input: {
   driverId?: string | null
   guestCount?: number
   companyId?: string
+  /** 公司账户在调度台上建单：放在自己的调度台上（派给调度里建单不传，留在公司订单池）。 */
+  onMyDesk?: boolean
 }) {
   if (!input.startDate || !input.endDate) {
     throw new Error('请先在日历上选择起止日期')
@@ -35,6 +39,7 @@ export async function createOrderWithDays(input: {
     startDate: input.startDate,
     guestCount: input.guestCount ?? 0,
     ...(companyId ? { companyId } : {}),
+    ...(input.onMyDesk ? { onMyDesk: true } : {}),
   })
   const warnings: string[] = []
   for (const date of dates) {
@@ -75,14 +80,25 @@ export function clearDayDriver(day: {
 
 export function updateOrderInfo(
   order: Order,
-  fields: { platformOrderNo?: string; notes?: string; driverNotes?: string; sharedNotes?: string; companyId?: string | null },
+  fields: {
+    platformOrderNo?: string
+    notes?: string
+    driverNotes?: string
+    sharedNotes?: string
+    companyId?: string | null
+    guestCount?: number
+    vehicleType?: string
+    island?: string | null
+  },
 ) {
   return ordersApi.update(order.id, {
     platformOrderNo: fields.platformOrderNo !== undefined
       ? fields.platformOrderNo.trim() || undefined
       : order.platformOrderNo ?? undefined,
     startDate: toDateOnly(order.startDate),
-    guestCount: order.guestCount,
+    guestCount: fields.guestCount !== undefined ? fields.guestCount : order.guestCount,
+    vehicleType: fields.vehicleType !== undefined ? fields.vehicleType.trim() || null : order.vehicleType ?? null,
+    island: fields.island !== undefined ? fields.island : order.island ?? null,
     notes: fields.notes !== undefined ? fields.notes : order.notes,
     driverNotes: fields.driverNotes !== undefined ? fields.driverNotes : order.driverNotes,
     sharedNotes: fields.sharedNotes !== undefined ? fields.sharedNotes : order.sharedNotes,
@@ -91,8 +107,16 @@ export function updateOrderInfo(
 }
 
 export const ordersApi = {
-  list: (params?: { orderNo?: string; driverId?: string }) => {
+  /** `mine`：我的行程，按当前账号自己的司导身份取行程（调度员、公司账户也一样）。 */
+  /** `desk`：调度台，只取自己调度台上的单（调度员和公司账户都一样）。 */
+  list: (params?: { orderNo?: string; driverId?: string; mine?: boolean; desk?: boolean }) => {
     const search = new URLSearchParams()
+    if (params?.desk) {
+      search.set('desk', 'true')
+    }
+    if (params?.mine) {
+      search.set('mine', 'true')
+    }
     if (params?.orderNo) {
       search.set('orderNo', params.orderNo)
     }
@@ -105,9 +129,15 @@ export const ordersApi = {
   get: (id: string) => api.get<Order>(`/api/orders/${id}`),
   create: (body: OrderWrite) => api.post<Order>('/api/orders', body),
   update: (id: string, body: OrderWrite) => api.put<Order>(`/api/orders/${id}`, body),
-  remove: (id: string) => api.delete(`/api/orders/${id}`),
+  /** `release`：在调度台上删除，已绑公司的单退回公司订单池；派给调度里删除不传，公司账户真删。 */
+  remove: (id: string, release = false) => api.delete(release ? `/api/orders/${id}?release=true` : `/api/orders/${id}`),
+  /** 改日期（调度台订单日历上拖动）：原来每一天平移 shiftDays 天，落到新起止范围外的删掉，两头多出来的补空白日。 */
+  reschedule: (orderId: string, startDate: string, endDate: string, shiftDays: number) =>
+    api.put<OrderDatesResult>(`/api/orders/${orderId}/dates`, { startDate, endDate, shiftDays }),
   assignDriver: (orderId: string, driverId: string | null, failOnConflict = false) =>
     api.put<AssignmentResult>(`/api/orders/${orderId}/driver`, { driverId, failOnConflict }),
+  setShareLevel: (orderId: string, shareLevel: ShareLevel) =>
+    api.put<Order>(`/api/orders/${orderId}/share-level`, { shareLevel }),
   assignDispatcher: (orderId: string, dispatcherUserId: string | null) =>
     api.put<Order>(`/api/orders/${orderId}/dispatcher`, { dispatcherUserId }),
   createDay: (orderId: string, body: ItineraryDayWrite) =>

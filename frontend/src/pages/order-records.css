@@ -1,0 +1,271 @@
+/* 标题一行：公司账户右边有「全部 / 调度」下拉框。 */
+.order-records-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.account-section .order-records-head h2,
+.order-records-head h2 {
+  margin: 0;
+}
+
+.order-records-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 「导出」：和范围下拉框一样的白底圆角小按钮。 */
+.order-records-export {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid #f0f0f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #1f1f1f;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.order-records-export:disabled {
+  color: #8c8c8c;
+  cursor: default;
+}
+
+.order-export-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+  padding: 6px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+.order-export-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.order-export-item:hover,
+.order-export-item:active {
+  background: #f5f5f5;
+}
+
+.order-export-item strong {
+  color: #1f1f1f;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.order-export-item span {
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.order-records-scope {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #1f1f1f;
+  font-size: 14px;
+}
+
+/* 公司信息页的订单记录：最多同时显示 10 行（行高固定），上下滑看更多；表格比屏幕宽时左右滑。 */
+.order-records {
+  --record-row: 40px;
+  max-height: calc(var(--record-row) * 11);
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.order-records table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+}
+
+.order-records th,
+.order-records td {
+  height: var(--record-row);
+  padding: 0 10px;
+  border-bottom: 1px solid #f5f5f5;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.order-records thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom-color: #f0f0f0;
+  background: #fff;
+  color: #8c8c8c;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.order-records tbody tr {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+.order-records tbody tr.past td {
+  color: #8c8c8c;
+}
+
+/* 点过或长按过的那一行：浅灰底，标出正在看哪一单。点表格外面取消。 */
+.order-records tbody tr.selected td {
+  background: #f5f5f5;
+  color: #1f1f1f;
+}
+
+.order-records .record-year td {
+  height: 28px;
+  padding-top: 6px;
+  color: #8c8c8c;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.order-records .record-dates {
+  font-variant-numeric: tabular-nums;
+}
+
+.order-records .record-route {
+  text-align: left;
+}
+
+.record-missing {
+  color: #cf1322;
+}
+
+.record-missing.soft {
+  color: #d46b08;
+}
+
+.order-records-hint {
+  margin: 6px 2px 0;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.order-record-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.order-record-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 280px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+.order-record-menu-title {
+  margin: 0;
+  overflow: hidden;
+  color: #595959;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-record-menu .account-chip {
+  justify-content: center;
+  min-height: 40px;
+}
+
+.order-record-share {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.order-record-share .share-level {
+  margin: 0;
+}
+
+.order-record-return {
+  color: #cf1322;
+}
+
+/* 退回公司两步确认：第一下加圆角方形红框，点别处取消。 */
+.order-record-return.armed {
+  border-color: #ff4d4f;
+  box-shadow: 0 0 0 2px #ff4d4f;
+  border-radius: 8px;
+}
+
+/*
+ * 选中的行里可以点的司导、车牌格子（含「未派单」「未配车」）：格子里是一块铺满格子的圆角白面，
+ * 浅边框加一点点阴影，和界面上的圆角按钮一个风格；按下时变灰。没选中时这块面是透明的，看不出来。
+ */
+.order-records td[data-jump-cell] {
+  padding: 0 4px;
+}
+
+.order-records .record-jump-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.order-records tbody tr.selected td.record-jump {
+  cursor: pointer;
+}
+
+.order-records tbody tr.selected td.record-jump .record-jump-face {
+  border-color: #e8e8e8;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.order-records tbody tr.selected td.record-jump:hover .record-jump-face {
+  border-color: #d9d9d9;
+}
+
+.order-records tbody tr.selected td.record-jump:active .record-jump-face {
+  background: #f0f0f0;
+  box-shadow: none;
+}

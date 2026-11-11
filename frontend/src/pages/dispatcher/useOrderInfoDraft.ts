@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { updateOrderInfo } from '../../api/orders'
 import type { Order } from '../../types'
+import { orderBasicsFields, orderBasicsOf, type OrderBasicsValue } from '../OrderInfoFields'
 import { keepDraft, syncDraft } from '../../usePageLoad'
 
 /**
@@ -19,6 +20,9 @@ export function useOrderInfoDraft(
   const [sharedNotes, setSharedNotes] = useState('')
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
+  const [basics, setBasics] = useState<OrderBasicsValue>({ guestCount: '', vehicleType: '', island: null })
+  const basicsRef = useRef<OrderBasicsValue>(basics)
+  const loadedBasicsKey = useRef('')
   const platformNoRef = useRef('')
   const notesRef = useRef('')
   const sharedNotesRef = useRef('')
@@ -53,6 +57,14 @@ export function useOrderInfoDraft(
       setCompanyId(nextCompanyId)
       setCompanyName(nextCompanyName)
     }
+    // 人数、车型、南/北岛：换订单或重新读到不同的值时，没改过就跟着更新。
+    const nextBasics = order ? orderBasicsOf(order) : { guestCount: '', vehicleType: '', island: null }
+    const nextBasicsKey = JSON.stringify(nextBasics)
+    if (switched || JSON.stringify(basicsRef.current) === loadedBasicsKey.current) {
+      basicsRef.current = nextBasics
+      setBasics(nextBasics)
+    }
+    loadedBasicsKey.current = nextBasicsKey
     loadedRef.current = {
       id: selectedOrderId,
       platform: nextPlatform,
@@ -78,6 +90,11 @@ export function useOrderInfoDraft(
     sharedNotes,
     companyId,
     companyName,
+    basics,
+    changeBasics(next: OrderBasicsValue) {
+      basicsRef.current = next
+      setBasics(next)
+    },
     changePlatformNo(value: string) {
       platformNoRef.current = value
       setPlatformNo(value)
@@ -127,7 +144,11 @@ export function useOrderInfoDraft(
           notes: notesRef.current,
           sharedNotes: sharedNotesRef.current,
           companyId: companyIdRef.current,
+          ...orderBasicsFields(basicsRef.current),
         })
+        basicsRef.current = orderBasicsOf(saved)
+        loadedBasicsKey.current = JSON.stringify(basicsRef.current)
+        setBasics(basicsRef.current)
         platformNoRef.current = saved.platformOrderNo ?? ''
         notesRef.current = saved.notes ?? ''
         sharedNotesRef.current = saved.sharedNotes ?? ''

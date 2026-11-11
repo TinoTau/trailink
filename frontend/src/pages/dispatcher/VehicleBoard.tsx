@@ -37,6 +37,7 @@ export function VehicleBoard({
   calendarRangeStart,
   calendarRangeEnd,
   calendarBodyRef,
+  onCalendarScroll,
   onCalendarDayClick,
   onSelect,
   onAddingChange,
@@ -56,6 +57,8 @@ export function VehicleBoard({
   calendarRangeStart: string
   calendarRangeEnd: string
   calendarBodyRef?: Ref<HTMLDivElement>
+  /** 车辆日历滑动时带着下面的司导日历一起滑。 */
+  onCalendarScroll?: () => void
   onCalendarDayClick?: (mark: CalendarMark, anchor: HTMLButtonElement) => void
   onSelect: (id: string | null) => void
   onAddingChange: (adding: boolean) => void
@@ -173,8 +176,8 @@ export function VehicleBoard({
       }
       setCalendarArmed(false)
     }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [calendarArmed])
 
   async function deleteFromCalendar() {
@@ -343,6 +346,7 @@ export function VehicleBoard({
               rangeStart={calendarRangeStart}
               rangeEnd={calendarRangeEnd}
               bodyRef={calendarBodyRef}
+              onBodyScroll={onCalendarScroll}
               bodyKey="vehicle"
               dayClicks
               onDayClick={onCalendarDayClick}
@@ -456,8 +460,8 @@ function VehicleDetail({
       }
       setArmed(false)
     }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [armed])
 
   useEffect(() => {

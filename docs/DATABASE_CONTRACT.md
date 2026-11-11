@@ -80,11 +80,14 @@ order_no           VARCHAR(40) NOT NULL UNIQUE
 platform_order_no  VARCHAR(100) NULL
 start_date         DATE NOT NULL
 guest_count        INTEGER NOT NULL
+vehicle_type       VARCHAR(50) NULL     -- 车型，自由填写（如「五座车」「7座阿尔法或威尔法」）
+island             VARCHAR(10) NULL     -- south 南岛 / north 北岛 / both 南北岛；NULL 界面按南岛显示
 driver_notes       TEXT NULL
 shared_notes       TEXT NULL
 company_id                      UUID NULL
 created_by_user_id              UUID NULL
 assigned_dispatcher_user_id     UUID NULL
+share_level                     INTEGER NOT NULL DEFAULT 0
 ```
 
 外键：
@@ -103,6 +106,7 @@ assigned_dispatcher_user_id     UUID NULL
 - `driver_notes` 是司导备注，只在「我的行程」读写。角色为司导的接口响应不返回调度备注。
 - `shared_notes` 是共用备注，公司、调度员、司导都能读写。各自的备注仍互不可见，共用备注显示在各自备注上方。
 - `assigned_dispatcher_user_id` 只表示公司把整单交给哪位调度员，不拆天、不另建订单。调度员建单时默认写成自己。公司改派即覆盖。
+- `share_level` 是抢单范围（迁移 `AddOrderShareLevel`）：0 调度自留（不放出，抢单页不显示），1 公司内部，2 面向所有人。这张单的调度员（`assigned_dispatcher_user_id`，没有时是 `created_by_user_id`）或所属公司的公司账户能改；1 和 2 要求 `company_id` 非空。解绑公司、换调度员、退回公司池时回到 0。抢单待确认写 `order_claims`（见 10e）；确认后只写 `itinerary_days.driver_id` / `assigned_by_user_id`，关系写 `driver_applications`（已批准）和 `company_members`。
 
 ---
 
@@ -423,6 +427,22 @@ side       INT NOT NULL
 - 增量备份按 `updated_at` 和 `backup_deletions` 导出改动；还原时关闭触发器，保留备份里的原值。见 `ARCHITECTURE.md` 第 8 节「备份」。
 
 ---
+
+## 10e. order_claims（迁移 `AddOrderClaims`）
+
+```text
+id           UUID PRIMARY KEY
+order_id     UUID NOT NULL → orders.id（删除订单时一起删除）
+user_id      UUID NOT NULL → users.id（删除用户时一起删除）
+driver_id    UUID NOT NULL（抢单人的司导身份）
+share_level  INTEGER NOT NULL（抢单那一刻订单的等级，确认时按它建立关系）
+created_at   TIMESTAMPTZ NOT NULL
+UNIQUE (order_id, user_id)
+```
+
+- 司导抢单写一行，撤回删一行。一张单可以有多行（多位司导抢）。
+- 调度员确认其中一位后，这张单的行全部删除。订单被其他方式派完后这些行留着也不再显示（只列还有未派日期的订单）。
+- 不是派单表：派单仍只写 `itinerary_days.driver_id`。
 
 ## 11. 明确不创建的表
 

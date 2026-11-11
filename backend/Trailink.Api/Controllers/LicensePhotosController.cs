@@ -210,7 +210,7 @@ public class LicensePhotosController(TrailinkDbContext db, AuthSession session, 
             return (null, Unauthorized());
         }
 
-        var visible = await DriverRoster.Visible(db, viewer)
+        var visible = await DriverRoster.Viewable(db, viewer)
             .AnyAsync(driver => driver.Id == driverId, cancellationToken);
         if (!visible)
         {

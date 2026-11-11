@@ -3,11 +3,12 @@ import { licenseApi } from '../../api/license'
 import { driverDisplayLabel, type ConflictPattern } from '../../orderFlags'
 import { contactLabel } from '../../text'
 import type { LicensePhoto, Order } from '../../types'
-import { PinIcon, TrashIcon } from '../icons'
+import { PinIcon, DeleteIcon } from '../icons'
 import { LicenseGallery } from '../LicenseGallery'
 import { DeskHint, PersonAvatar } from './BoardParts'
 import type { BoardPerson } from './boardLayout'
 import type { DragState } from './boardDrag'
+import type { CalendarInk } from '../../calendarInk'
 import { DispatcherCalendarCard, DispatcherDayCard, type CalendarMark } from './DispatcherCalendarCard'
 import type { usePaneLift } from './paneLift'
 
@@ -38,6 +39,8 @@ export function DriverPane({
   hoverDriverId,
   drag,
   conflictPatterns,
+  claimantIds,
+  missingDays,
   armedUnbindId,
   canUnbind,
   onHiddenToggle,
@@ -58,6 +61,10 @@ export function DriverPane({
   drag: DragState | null
   /** 车辆冲突时，涉及的司导图标换成对应图案。 */
   conflictPatterns: Map<string, ConflictPattern>
+  /** 抢单司导：图标用虚线框。 */
+  claimantIds: Set<string>
+  /** 车辆「未配车」：每位司导还缺几天车；有值时没有司导就显示已配齐。 */
+  missingDays?: Map<string, { days: number }>
   armedUnbindId: string | null
   canUnbind: (personId: string) => boolean
   /** 展开或收起已隐藏名单时，页面清掉待确认的解除绑定。 */
@@ -102,7 +109,7 @@ export function DriverPane({
                   aria-pressed={armedUnbindId === driver.id}
                   onClick={() => onRequestUnbind(driver)}
                 >
-                  <TrashIcon />
+                  <DeleteIcon />
                 </button>
               ) : null}
             </div>
@@ -111,14 +118,16 @@ export function DriverPane({
       ) : null}
       <DeskHint open={hintOpen} onToggle={() => setHintOpen((current) => !current)} text={assignDesk ? HINT_ASSIGN : HINT_DRIVERS} />
       <div className="dispatcher-grid">
-        {drivers.length === 0 ? <p className="dispatcher-empty">{assignDesk ? '暂无调度员' : '暂无司导'}</p> : null}
+        {drivers.length === 0 ? (
+          <p className="dispatcher-empty">{missingDays ? '派出的行程都配好车了' : assignDesk ? '暂无调度员' : '暂无司导'}</p>
+        ) : null}
         {drivers.map((driver) => {
           const pinned = pinnedIds.includes(driver.id)
           return (
             <div
               key={driver.id}
               data-driver-id={driver.id}
-              className={`dispatcher-driver${hoverDriverId === driver.id && drag && drag.kind !== 'driver' ? ' drop' : ''}${pinned ? ' pinned' : ''}${drag?.id === driver.id ? ' dragging' : ''}${selectedDriverId === driver.id ? ' open' : ''}`}
+              className={`dispatcher-driver${hoverDriverId === driver.id && drag && drag.kind !== 'driver' && drag.from !== 'driver' ? ' drop' : ''}${pinned ? ' pinned' : ''}${drag?.id === driver.id ? ' dragging' : ''}${selectedDriverId === driver.id ? ' open' : ''}${claimantIds.has(driver.id) ? ' claimant' : ''}`}
             >
               <div className="dispatcher-corner">
                 <button
@@ -145,6 +154,9 @@ export function DriverPane({
                 />
                 <span>{driverDisplayLabel(driver)}</span>
               </button>
+              {missingDays?.get(driver.id) ? (
+                <span className="dispatcher-missing-badge">缺{missingDays.get(driver.id)!.days}天</span>
+              ) : null}
             </div>
           )
         })}
@@ -185,6 +197,7 @@ export function DispatcherPoolCard({
   onNotesSave,
   onClose,
   onHide,
+  hideArmed = false,
   onHeadPointerDown,
   renderOrderTile,
 }: {
@@ -194,9 +207,11 @@ export function DispatcherPoolCard({
   onFilterChange: (filter: PoolFilter) => void
   notes: string
   onNotesChange: (value: string) => void
-  onNotesSave: () => void
+  onNotesSave: () => void | Promise<boolean | void>
   onClose: () => void
   onHide: () => void
+  /** 隐藏已套红框，再点一次执行。 */
+  hideArmed?: boolean
   onHeadPointerDown: (event: ReactPointerEvent<HTMLElement>) => void
   renderOrderTile: (order: Order) => ReactNode
 }) {
@@ -213,6 +228,7 @@ export function DispatcherPoolCard({
       onClose={onClose}
       onRemove={onHide}
       removeLabel="隐藏"
+      removeArmed={hideArmed}
     >
       <div className="dispatcher-filters">
         <button type="button" className={`dispatcher-chip${filter === 'open' ? ' active' : ''}`} onClick={() => onFilterChange('open')}>
@@ -292,10 +308,13 @@ export function DriverDetailCard({
   onNotesSave,
   onClose,
   onHide,
+  hideArmed = false,
   onCardPointerDown,
   onDayClick,
+  ink,
   onDayPointerDown,
   dragConflict,
+  action,
 }: {
   person: BoardPerson
   /** 这张卡片是登录用户自己（可以管理驾照照片）。 */
@@ -308,17 +327,24 @@ export function DriverDetailCard({
   onBodyScroll?: () => void
   notes: string
   onNotesChange: (value: string) => void
-  onNotesSave: () => void
+  onNotesSave: () => void | Promise<boolean | void>
   onClose: () => void
   onHide: () => void
+  /** 隐藏已套红框，再点一次执行。 */
+  hideArmed?: boolean
   onCardPointerDown: (event: ReactPointerEvent<HTMLElement>) => void
+  /** 和订单卡片共用的透明度设置。 */
+  ink?: CalendarInk
   onDayClick: (mark: CalendarMark, anchor: HTMLButtonElement) => void
   onDayPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, mark: CalendarMark) => void
   dragConflict: boolean
+  /** 抢单待确认：司导备注下方的确认条。 */
+  action?: ReactNode
 }) {
   return (
     <DispatcherCalendarCard
       inkBar
+      ink={ink}
       title={person.name}
       onCardPointerDown={onCardPointerDown}
       meta={`联系方式 ${contactLabel(person.contact)}`}
@@ -332,9 +358,12 @@ export function DriverDetailCard({
       notes={notes}
       onNotesChange={onNotesChange}
       onNotesSave={onNotesSave}
+      action={action}
       notesExtra={<DriverLicense driverId={person.id} canManage={isSelf} busy={busy} />}
       onClose={onClose}
       onRemove={onHide}
+      removeLabel="隐藏"
+      removeArmed={hideArmed}
       onDayClick={onDayClick}
       dragConflict={dragConflict}
       onDayPointerDown={onDayPointerDown}

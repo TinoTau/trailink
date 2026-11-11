@@ -68,9 +68,16 @@ export function ActivityReview({ activityId, onClose }: { activityId: string; on
       <div className="library-sheet" role="dialog" aria-label="活动评价">
         <header className="library-sheet-bar">
           <h2>{detail ? detail.name : '加载中…'}</h2>
-          <button type="button" className="library-chip" onClick={onClose}>
-            关闭
-          </button>
+          <div className="library-sheet-bar-actions">
+            {detail ? (
+              <button type="button" className="library-chip primary" disabled={!score || saving} onClick={() => void save()}>
+                保存评价
+              </button>
+            ) : null}
+            <button type="button" className="library-chip" onClick={onClose}>
+              关闭
+            </button>
+          </div>
         </header>
         {detail ? (
           <div className="library-list">
@@ -109,18 +116,13 @@ export function ActivityReview({ activityId, onClose }: { activityId: string; on
               评价（选填）
               <textarea value={comment} maxLength={500} onChange={(event) => setComment(event.target.value)} />
             </label>
-            <div className="library-sheet-actions">
-              {detail.myScore ? (
+            {detail.myScore ? (
+              <div className="library-sheet-actions">
                 <button type="button" className="library-chip danger" disabled={saving} onClick={() => void removeMine()}>
                   删除我的评价
                 </button>
-              ) : (
-                <span />
-              )}
-              <button type="button" className="library-chip primary" disabled={!score || saving} onClick={() => void save()}>
-                保存评价
-              </button>
-            </div>
+              </div>
+            ) : null}
             <h3 className="library-field">所有评价</h3>
             {detail.reviews.length === 0 ? <p className="library-empty">还没有评价</p> : null}
             <ul className="library-reviews">

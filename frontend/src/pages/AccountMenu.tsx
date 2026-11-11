@@ -9,7 +9,7 @@ export function AccountMenu() {
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-  const onCalendar = location.pathname.startsWith('/driver')
+  const onCalendar = location.pathname === '/driver/calendar'
 
   useEffect(() => {
     if (!open) {

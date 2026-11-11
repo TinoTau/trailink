@@ -9,12 +9,12 @@ export function NoteIcon() {
   )
 }
 
-export function TrashIcon() {
+/** 删除 / 移除：红圈里一个红 ×（原来的垃圾桶缩小后不好认，统一换成这个）。 */
+export function DeleteIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 7h16" />
-      <path d="M9 7V5h6v2" />
-      <path d="M7 7l1 12h8l1-12" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9 9l6 6M15 9l-6 6" />
     </svg>
   )
 }

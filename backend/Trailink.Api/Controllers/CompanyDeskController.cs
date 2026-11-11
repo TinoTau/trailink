@@ -4,6 +4,7 @@ using Trailink.Api.Data;
 using Trailink.Api.DTOs;
 using Trailink.Api.Models;
 using Trailink.Api.Services;
+using Trailink.Api.Services.Export;
 
 namespace Trailink.Api.Controllers;
 
@@ -52,6 +53,235 @@ public class CompanyDeskController(
         }
 
         return Ok(new CompanyHomeDto { Companies = companies, Desk = desk });
+    }
+
+    /// <summary>
+    /// 公司信息页的订单记录，按 <c>scope</c> 过滤（见 <see cref="CompanyOrderScopes"/>）：
+    /// all 本公司全部（只有公司账户），desk 自己调度台上的（公司账户、调度员），driver 派给自己跑的（所有人）。
+    /// 不传时用这个角色能看的第一项；不在角色范围内的 403。
+    /// 不管完成没有都给，按开始日期从早到晚；界面自己滚到今天。
+    /// </summary>
+    [HttpGet("orders")]
+    public async Task<ActionResult<List<CompanyOrderRecordDto>>> Orders(
+        [FromQuery] Guid companyId,
+        [FromQuery] string? scope,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var (records, error, _) = await LoadRecordsAsync(user, companyId, scope, cancellationToken);
+        return error ?? Ok(records);
+    }
+
+    /// <summary>
+    /// 导出订单记录为 Excel：范围同 <see cref="Orders"/>（当前下拉框选的那一项），全部记录（不只是屏幕上看到的 10 行）。
+    /// 样式是默认的「订单记录」表：浅蓝表头、绿色年份行、行程路线左对齐。
+    /// </summary>
+    [HttpGet("orders/export")]
+    public async Task<IActionResult> ExportOrders(
+        [FromQuery] Guid companyId,
+        [FromQuery] string? scope,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        var (records, error, chosen) = await LoadRecordsAsync(user, companyId, scope, cancellationToken);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var rows = await ExportRowsAsync(user, companyId, records!, cancellationToken);
+        var bytes = OrderRecordSheet.BuildDefault(rows);
+        Response.Headers["X-Export-Added"] = rows.Count.ToString();
+        return File(bytes, OrderRecordSheet.ContentType, ExportFileName(chosen, null));
+    }
+
+    /// <summary>
+    /// 把订单记录填进用户上传的表格（.xlsx，空表或已有内容的都可以）：
+    /// 配了 AI 密钥时让 AI 看表头和已有的几行，认出每一列是什么、从哪一行往下写、日期怎么写；
+    /// 没配或 AI 失败时按表头文字自己找。已有的单（起止日期和行程 / 负责人对得上）不重复写。
+    /// 文件名是「原文件名-年月日-时分秒.xlsx」。结果里 <c>X-Export-Added</c> / <c>X-Export-Skipped</c> 是写入和跳过的条数，<c>X-Export-Mode</c> 是 ai / auto。
+    /// </summary>
+    [HttpPost("orders/export")]
+    [RequestSizeLimit(OrderRecordSheet.MaxUploadBytes + 64 * 1024)]
+    public async Task<IActionResult> FillOrders(
+        [FromQuery] Guid companyId,
+        [FromQuery] string? scope,
+        IFormFile? file,
+        [FromServices] OrderRecordSheetFiller filler,
+        CancellationToken cancellationToken)
+    {
+        var user = await session.GetUserAsync(cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return this.Invalid("请选择要填写的表格文件。");
+        }
+
+        if (file.Length > OrderRecordSheet.MaxUploadBytes)
+        {
+            return this.Invalid("表格太大了，最大 5MB。");
+        }
+
+        if (!OrderRecordSheet.IsXlsx(file.FileName))
+        {
+            return this.Invalid("只支持 .xlsx 格式的表格。旧版 .xls 请先在 Excel 或 WPS 里另存为 .xlsx。");
+        }
+
+        var (records, error, chosen) = await LoadRecordsAsync(user, companyId, scope, cancellationToken);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var rows = await ExportRowsAsync(user, companyId, records!, cancellationToken);
+        await using var input = new MemoryStream();
+        await file.CopyToAsync(input, cancellationToken);
+        input.Position = 0;
+        var result = await filler.FillAsync(input, rows, cancellationToken);
+        if (result.Error is string fillError)
+        {
+            return this.Invalid(fillError);
+        }
+
+        Response.Headers["X-Export-Added"] = result.Added.ToString();
+        Response.Headers["X-Export-Skipped"] = result.Skipped.ToString();
+        Response.Headers["X-Export-Mode"] = result.Mode;
+        return File(result.Bytes!, OrderRecordSheet.ContentType, ExportFileName(chosen, file.FileName));
+    }
+
+    private static string ExportFileName(string scope, string? uploaded)
+    {
+        // 文件名带新西兰时间的日期和时分秒，多次导出不重名。上传的表格保留原来的名字。
+        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, BusinessDate.Zone);
+        var stamp = now.ToString("yyyyMMdd-HHmmss");
+        if (uploaded is not null)
+        {
+            var name = Path.GetFileNameWithoutExtension(Path.GetFileName(uploaded));
+            return $"{(string.IsNullOrWhiteSpace(name) ? "订单记录" : name)}-{stamp}.xlsx";
+        }
+
+        var label = scope switch
+        {
+            CompanyOrderScopes.Desk => "调度中",
+            CompanyOrderScopes.Driver => "已接单",
+            _ => "全部"
+        };
+        return $"订单记录-{label}-{stamp}.xlsx";
+    }
+
+    /// <summary>导出用的每一行：订单来源写这个账号给这家公司起的简称（没有就用公司名）。</summary>
+    private async Task<List<OrderRecordRow>> ExportRowsAsync(
+        User user,
+        Guid companyId,
+        List<CompanyOrderRecordDto> records,
+        CancellationToken cancellationToken)
+    {
+        var companyName = await db.Companies
+            .Where(company => company.Id == companyId)
+            .Select(company => company.Name)
+            .FirstOrDefaultAsync(cancellationToken) ?? "";
+        var notes = await Services.CompanyNotes.EnsureAsync(db, user.Id, [(companyId, companyName)], cancellationToken);
+        var source = notes.TryGetValue(companyId, out var note) && !string.IsNullOrWhiteSpace(note) ? note : companyName;
+        return records.Select(record => OrderRecordRow.From(record, source)).ToList();
+    }
+
+    /// <summary>订单记录列表和导出共用：按角色检查范围，读出这家公司的单。范围不对时 <c>Error</c> 是 403。</summary>
+    private async Task<(List<CompanyOrderRecordDto>? Records, ActionResult? Error, string Scope)> LoadRecordsAsync(
+        User user,
+        Guid companyId,
+        string? scope,
+        CancellationToken cancellationToken)
+    {
+        var isOwner = user.Role == UserRoles.Company && user.CompanyId == companyId;
+        var allowed = CompanyOrderScopes.For(user, isOwner);
+        var chosen = string.IsNullOrWhiteSpace(scope) ? allowed[0] : scope.Trim().ToLowerInvariant();
+        if (!allowed.Contains(chosen))
+        {
+            // 过滤选项跟着角色走：司导不能看公司全部订单和调度手里的订单，调度员不能看公司全部订单。
+            return (null, this.Forbidden("没有权限查看这个范围的订单。"), chosen);
+        }
+
+        var query = db.Orders.Where(order => order.CompanyId == companyId && order.Days.Count > 0);
+        if (chosen == CompanyOrderScopes.Desk)
+        {
+            // 调度：自己调度台上的单（调度员是分配给自己的，公司账户和它的调度台同一条规则）。
+            query = query.Where(OrderRules.OnDesk(user));
+        }
+        else if (chosen == CompanyOrderScopes.Driver)
+        {
+            // 司导：这家公司的单里派给自己跑的。
+            if (user.DriverId is not Guid driverId)
+            {
+                return ([], null, chosen);
+            }
+
+            query = query.Where(order => order.Days.Any(day => day.DriverId == driverId));
+        }
+
+        var orders = await query
+            .Include(order => order.Days).ThenInclude(day => day.Driver)
+            .Include(order => order.Days).ThenInclude(day => day.Vehicle)
+            .OrderBy(order => order.StartDate)
+            .ThenBy(order => order.OrderNo)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
+        var manages = user.Role is UserRoles.Dispatcher or UserRoles.Company;
+        // 只给自己管的单开操作：公司账户管本公司全部，调度员管自己调度台上的。只是自己跑的单只能看。
+        bool Manages(Order order) => manages && (isOwner || OrderRules.IsOnDesk(order, user));
+        var records = orders.Select(order =>
+        {
+            var days = order.Days.OrderBy(day => day.ServiceDate).ToList();
+            var drivers = days
+                .Where(day => day.Driver is not null)
+                .Select(day => day.Driver!)
+                .DistinctBy(driver => driver.Id)
+                .ToList();
+            var vehicles = days
+                .Where(day => day.Vehicle is not null)
+                .Select(day => day.Vehicle!)
+                .DistinctBy(vehicle => vehicle.Id)
+                .ToList();
+            var onDesk = manages && OrderRules.IsOnDesk(order, user);
+            return new CompanyOrderRecordDto
+            {
+                Id = order.Id,
+                Label = OrderRules.Label(order.PlatformOrderNo, order.SharedNotes),
+                GuestCount = order.GuestCount,
+                VehicleType = order.VehicleType,
+                Island = order.Island,
+                StartDate = days[0].ServiceDate,
+                EndDate = days[^1].ServiceDate,
+                DayCount = days.Count,
+                Route = order.SharedNotes,
+                Drivers = drivers.Select(driver => driver.Name).ToList(),
+                DriverIds = drivers.Select(driver => driver.Id).ToList(),
+                Plates = vehicles.Select(vehicle => vehicle.Plate).ToList(),
+                VehicleIds = vehicles.Select(vehicle => vehicle.Id).ToList(),
+                OnDesk = onDesk,
+                UnassignedDays = days.Count(day => day.DriverId is null),
+                NoVehicleDays = days.Count(day => day.VehicleId is null),
+                ShareLevel = order.ShareLevel,
+                CanEdit = Manages(order),
+                CanSetShareLevel = Manages(order) && OrderRules.CanSetShareLevel(order, user),
+                CanReturn = onDesk && OrderRules.IsRealOrder(order)
+            };
+        }).ToList();
+        return (records, null, chosen);
     }
 
     [HttpPut]
@@ -437,32 +667,6 @@ public class CompanyDeskController(
         var dispatcherNotes = noteRows.ToDictionary(note => note.DispatcherUserId, note => note.Notes);
         var dispatcherHidden = noteRows.ToDictionary(note => note.DispatcherUserId, note => note.Hidden);
 
-        var ordersQuery = db.Orders.Where(order =>
-            order.CompanyId == company.Id &&
-            order.Days.Count > 0);
-        if (isOwner)
-        {
-            ordersQuery = ordersQuery.Where(OrderRules.Historical(BusinessDate.Today));
-        }
-        else
-        {
-            var drove = user.DriverId != null;
-            var driverId = user.DriverId;
-            var assigns = user.Role == UserRoles.Dispatcher;
-            ordersQuery = ordersQuery.Where(order =>
-                (assigns && order.Days.Any(day => day.AssignedByUserId == user.Id)) ||
-                (drove && order.Days.Any(day => day.DriverId == driverId)));
-        }
-
-        var orders = await ordersQuery
-            .Include(order => order.Days)
-            .OrderByDescending(order => order.StartDate)
-            .ThenBy(order => order.OrderNo)
-            .Take(80)
-            .ToListAsync(cancellationToken);
-        var orderIds = orders.Select(order => order.Id).ToList();
-        var viewerNotes = await ViewerNotes.OrderNotesAsync(db, user, orderIds, cancellationToken);
-
         return new CompanyDeskDto
         {
             Id = company.Id,
@@ -503,25 +707,21 @@ public class CompanyDeskController(
                         HasAvatar = !string.IsNullOrWhiteSpace(member.User.AvatarPath)
                     })
                     .ToList()
-                : [],
-            Orders = orders.Select(order => new CompanyOrderDto
-            {
-                Id = order.Id,
-                OrderNo = order.OrderNo,
-                PlatformOrderNo = order.PlatformOrderNo,
-                Label = OrderRules.Label(order.PlatformOrderNo, order.SharedNotes),
-                Notes = viewerNotes.GetValueOrDefault(order.Id),
-                DriverNotes = user.Role == UserRoles.Driver ? order.DriverNotes : null,
-                SharedNotes = order.SharedNotes,
-                StartDate = order.StartDate,
-                DayCount = order.Days.Count,
-                Kind = isOwner
-                    ? "company"
-                    : user.Role == UserRoles.Dispatcher &&
-                      order.Days.Any(day => day.AssignedByUserId == user.Id)
-                        ? "assigned"
-                        : "driven"
-            }).ToList()
+                : []
         };
     }
+}
+
+/// <summary>公司信息「订单记录」的过滤范围，能看哪些跟着角色走。</summary>
+public static class CompanyOrderScopes
+{
+    public const string All = "all";
+    public const string Desk = "desk";
+    public const string Driver = "driver";
+
+    /// <summary>这个账号在这家公司能选的范围，第一项是默认。</summary>
+    public static string[] For(User user, bool isOwner) =>
+        isOwner ? [All, Desk, Driver]
+        : user.Role is UserRoles.Dispatcher or UserRoles.Company ? [Desk, Driver]
+        : [Driver];
 }

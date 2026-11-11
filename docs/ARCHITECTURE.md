@@ -39,7 +39,7 @@
                                                        └→ 本地文件目录 App_Data/files/
 ```
 
-不使用：微服务、Kubernetes、Redis、消息队列（Kafka / RabbitMQ）、CQRS、Event Sourcing、DDD 复杂分层、通用工作流引擎、AI Agent / LLM、GraphQL、时区管理框架。
+不使用：微服务、Kubernetes、Redis、消息队列（Kafka / RabbitMQ）、CQRS、Event Sourcing、DDD 复杂分层、通用工作流引擎、AI Agent（AI 只用于建单识图，见第 9b 节）、GraphQL、时区管理框架。
 
 后端简单分层：`Controllers`、`Services`（只在有实际业务逻辑时）、`Data`、`Models`、`DTOs`。不为每张表机械创建 Repository / Service / Interface。
 
@@ -92,6 +92,7 @@ trailink/
 | 公司成员与调度员 | `CompanyMembership`、`CompanyDeskController`、`CompaniesController` | `pages/CompanyPage.tsx` |
 | 司导申请与解除 | `DispatchersController` | `pages/ProfilePage.tsx` |
 | 订单与行程 CRUD | `OrdersController`、`ItineraryDaysController`、`OrderActivitiesController` | `api/orders.ts`、`OrderInfoFields`、`DriverDayEditor` |
+| 已建订单改日期（整段平移 / 拉长缩短、冲突改回未派） | `OrderReschedule`（`PUT /api/orders/{id}/dates`） | `pages/dispatcher/useOrderReschedule.ts`（订单日历上拖动） |
 | 派单、取消、拆单权限、退回公司池 | `OrderDriverAssignment` | `orderFlags.isOwnAssignment`（只比较后端给出的派出人） |
 | 冲突检测、同日占用、占位单覆盖、附件过期 | `OrderScheduling` | `ConflictDatePopover`（只负责弹出选择） |
 | 各人备注（订单 / 司导 / 调度员） | `ViewerNotes` | `OrderInfoFields`、`pages/dispatcher/useOrderInfoDraft` |
@@ -110,6 +111,7 @@ trailink/
 | 日历框选起止日期 | — | `useCalendarRangePick.ts`（我的行程和调度台创建订单共用） |
 | 调度台图标排列、拖拽落点、日历对齐、卡片拉高 | — | `pages/dispatcher/boardLayout.ts`、`boardDrag.ts`、`boardCalendar.ts`、`paneLift.ts` |
 | 调度台页面分工 | — | `DispatcherPage.tsx` 持有数据和各张日历的联动；`useBoardDrag.ts` 负责全局拖拽监听（按下、长按、拖动、松手落点、点击）；`OrderPane.tsx` 是订单区（订单 / 车辆切换、创建订单、打开的订单或当日卡片）；`DriverPane.tsx` 是司导区（图标、已隐藏、司导卡片、调度员订单池、驾照）。 |
+| 抢单：订单等级、可见范围、整段抢单、冲突、待确认、确认派单、自动建立司导关系 | `Services/OrderGrab`、`GrabController`、`OrdersController`（`share-level`）、`OrderRules.DispatcherId` / `CanSetShareLevel`、`DriverRoster.Viewable`（抢单司导可查看）、表 `order_claims` | `pages/grab/GrabPage.tsx`、`api/grab.ts`；调度台：等级按钮（`DispatcherCalendarCard`）、虚线框和抢单待确认（`DispatcherPage.renderOrderTile`）、抢单司导排序、`ClaimParts.tsx`（选择框、确认条） |
 | 本机偏好（键名统一在这里） | — | `localPrefs.ts` |
 | 共用图标 | — | `pages/icons.tsx` |
 | 页面数据刷新 | — | `usePageLoad.ts`（进入页面、回到窗口时重新读取，保留未保存输入） |
@@ -224,6 +226,20 @@ trailink/
 - 失败时 5、15、45 分钟后重试，仍失败就等下一个时段，期间保留上一批数据。
 - 结果只存在接口进程内存里（`WeatherForecasts`），不写数据库；订单接口在行程日上带出 `weather`。
 - 一天显示哪里的天气由 `WeatherRules` 决定：住宿地，或当天的库克山、峡湾项目（见 PRD 第 8 节）。
+
+## 9b. 外部服务：AI 建单
+
+- 代码在 `Services/Recognition/`：
+  - `ImageSlicer`：长图宽度超过 1600 缩到 1600，按 28 像素一个视觉 token 切段（每段不超过 4,700 token、2,576 像素高），相邻两段重叠 120 像素，输出 JPEG；超过 4000 万像素直接拒绝。
+  - `RecognitionSources`：有文字层的 PDF 用 PdfPig 取前 4 页文字（最多 8000 字）；扫描件 PDF 原样交给模型。每个文件前加「文件 #序号」。
+  - `IDraftModel` / `AnthropicDraftModel`：调 Anthropic Messages API（`POST /v1/messages`，请求头 `x-api-key`、`anthropic-version: 2023-06-01`），用强制工具 `submit_order_draft` 拿结构化结果。错误转成中文提示（密钥无效、余额不足、繁忙、超时）。
+  - `OrderDraftRecognizer`：拼系统提示（今天的新西兰日期、常用地点、活动库清单），调模型，整理结果（日期解析不了的丢掉、同一天合并、活动库 id 和电子票序号核对）。一次只处理一单（`SemaphoreSlim`），保护 1GB 内存。
+  - `LibraryMatcher`：模型没关联活动库时按名字再找一遍。中文名或英文名与识别出的名字互相包含（只比字母、数字、汉字，英文不分大小写）才算；中文少于 3 个字、英文少于 5 个字母的名字只有当天住宿地或前一晚住宿地是它的目的地时才算；名字越长分越高，目的地对上加分，最高分并列不关联。
+  - `OrderImport`：把核对后的草稿一次写成订单、行程日、活动、电子票和订单截图；失败时删掉已存的文件，不留半张单。
+- 订单记录「填进我的表格」也用这个模型和密钥（`Services/Export/OrderRecordSheetFiller`，Excel 读写用 ClosedXML）：只发表格文字，让模型回填表格结构；没有密钥或模型出错时按表头文字找。默认样式的导出在 `Services/Export/OrderRecordSheet`。
+- 配置：`Recognition` 节，`Model`（默认 `claude-haiku-5-5`）、`BaseUrl`（留空用正式地址）、`MaxTokens`、`TimeoutSeconds`；密钥只放服务器环境变量 `Recognition__ApiKey`，不进 Git。没有密钥时 `GET /api/recognition/status` 返回不可用，调度台不显示入口。
+- 后端测试用 `FakeDraftModel` 替换模型，不请求外部接口。
+- 隐私：只把识别需要的内容发给模型；Anthropic 的 API 数据默认不用于训练；提示里要求不输出客人姓名、电话、证件号。
 
 ## 10. 日志与观测
 

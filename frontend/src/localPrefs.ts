@@ -3,6 +3,8 @@
 export const PREF_KEYS = {
   calendarInkBalance: 'trailink.calendar.inkBalance',
   calendarInkSide: 'trailink.calendar.inkSide',
+  calendarInkLevel: 'trailink.calendar.inkLevel',
+  calendarInkPlate: 'trailink.calendar.inkPlate',
   driverCalendarColors: 'trailink.driverCalendar.colors.v2',
   currentCompanyId: 'trailink.currentCompanyId',
   driverLayout: 'trailink.dispatcher.driverLayout',

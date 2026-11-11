@@ -286,7 +286,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         {
             Username = $"disp_{suffix}",
             Password = "Passw0rd!",
-            Name = "可搜调度",
+            Name = $"可搜调度{suffix}",
             AccountType = "driver"
         });
         var dispatcherUser = await (await dispatcherClient.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<SessionUserDto>();
@@ -306,7 +306,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
             AccountType = "driver"
         });
 
-        var found = await applicantClient.GetFromJsonAsync<List<DispatcherSearchDto>>($"/api/dispatchers?name=可搜调度");
+        var found = await applicantClient.GetFromJsonAsync<List<DispatcherSearchDto>>($"/api/dispatchers?name=可搜调度{suffix}");
         Assert.Contains(found!, item => item.Id == dispatcherUser!.Id);
 
         var applied = await applicantClient.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
@@ -337,7 +337,8 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         });
         Assert.Equal(HttpStatusCode.BadRequest, again.StatusCode);
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await companyClient.DeleteAsync($"/api/dispatchers/drivers/{applicantMe.DriverId}")).StatusCode);
+        // 公司账户也能在自己的调度台上解除司导，但这位司导是申请到调度员名下的，不是公司自己的。
+        Assert.Equal(HttpStatusCode.NotFound, (await companyClient.DeleteAsync($"/api/dispatchers/drivers/{applicantMe.DriverId}")).StatusCode);
         (await dispatcherClient.DeleteAsync($"/api/dispatchers/drivers/{applicantMe.DriverId}")).EnsureSuccessStatusCode();
         var roster = await dispatcherClient.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
         Assert.DoesNotContain(roster!, item => item.Id == applicantMe.DriverId);
@@ -442,7 +443,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
-    public async Task Company_desk_lists_only_handled_historical_orders()
+    public async Task Company_order_records_list_each_viewers_orders()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var today = BusinessDate.Today;
@@ -533,29 +534,94 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         Assert.False(driverDesk!.Desk!.CanManage);
         Assert.Empty(driverDesk.Desk.Dispatchers);
 
-        Assert.Equal(4, companyDesk.Desk.Orders.Count);
-        Assert.Contains(companyDesk.Desk.Orders, item => item.Id == assignedPast && item.Kind == "company");
-        Assert.Contains(companyDesk.Desk.Orders, item => item.Id == companyPast);
-        Assert.Contains(companyDesk.Desk.Orders, item => item.Id == drovePast);
-        Assert.Contains(companyDesk.Desk.Orders, item => item.Id == handedOff);
-        Assert.DoesNotContain(companyDesk.Desk.Orders, item => item.Id == future);
-        Assert.DoesNotContain(companyDesk.Desk.Orders, item => item.Id == openPast);
+        var companyId = companyUser.CompanyId!.Value;
+        async Task<List<CompanyOrderRecordDto>> RecordsAsync(HttpClient client, string? scope = null) =>
+            (await client.GetFromJsonAsync<List<CompanyOrderRecordDto>>(
+                $"/api/company/orders?companyId={companyId}{(scope is null ? "" : $"&scope={scope}")}"))!;
+        async Task<HttpStatusCode> ScopeStatusAsync(HttpClient client, string scope) =>
+            (await client.GetAsync($"/api/company/orders?companyId={companyId}&scope={scope}")).StatusCode;
 
-        Assert.Equal(3, dispatcherDesk!.Desk!.Orders.Count);
-        Assert.Contains(dispatcherDesk.Desk.Orders, item => item.Id == assignedPast && item.Kind == "assigned");
-        Assert.Contains(dispatcherDesk.Desk.Orders, item => item.Id == drovePast && item.Kind == "driven");
-        Assert.Contains(dispatcherDesk.Desk.Orders, item => item.Id == future && item.Kind == "assigned");
-        Assert.DoesNotContain(dispatcherDesk.Desk.Orders, item => item.Id == companyPast);
-        Assert.DoesNotContain(dispatcherDesk.Desk.Orders, item => item.Id == handedOff);
-        Assert.DoesNotContain(dispatcherDesk.Desk.Orders, item => item.Id == openPast);
+        // 公司账户：本公司全部订单，不管完成没有，按开始日期从早到晚。
+        var companyRecords = await RecordsAsync(companyClient);
+        Assert.Equal(
+            new[] { drovePast, handedOff, openPast, assignedPast, companyPast, future },
+            companyRecords.Select(item => item.Id).ToArray());
+        Assert.All(companyRecords, item => Assert.True(item.CanEdit));
+        // 退回公司按调度台规则：分给调度员的单不在公司账户自己的调度台上，不能从这里退回；
+        // 公司账户自己派了司导的池里的单算在它的调度台上，可以退回。
+        Assert.Equal(
+            new[] { drovePast, companyPast },
+            companyRecords.Where(item => item.CanReturn).Select(item => item.Id).ToArray());
+        var open = companyRecords.Single(item => item.Id == openPast);
+        Assert.Equal(1, open.UnassignedDays);
+        Assert.Equal(1, open.NoVehicleDays);
+        Assert.Empty(open.Drivers);
+        var assignedRecord = companyRecords.Single(item => item.Id == assignedPast);
+        Assert.Equal(["历史司导"], assignedRecord.Drivers);
+        // 司导 id 和名字一一对应（点司导跳到调度台用）；只有在自己调度台上的单才能跳。
+        Assert.Single(assignedRecord.DriverIds);
+        Assert.Equal(assignedRecord.Plates.Count, assignedRecord.VehicleIds.Count);
+        Assert.Equal(
+            companyRecords.Where(item => item.CanReturn).Select(item => item.Id).ToArray(),
+            companyRecords.Where(item => item.OnDesk).Select(item => item.Id).ToArray());
 
-        Assert.Equal(4, driverDesk!.Desk!.Orders.Count);
-        Assert.All(driverDesk.Desk.Orders, item => Assert.Equal("driven", item.Kind));
-        Assert.Contains(driverDesk.Desk.Orders, item => item.Id == assignedPast);
-        Assert.Contains(driverDesk.Desk.Orders, item => item.Id == companyPast);
-        Assert.Contains(driverDesk.Desk.Orders, item => item.Id == handedOff);
-        Assert.Contains(driverDesk.Desk.Orders, item => item.Id == future);
-        Assert.DoesNotContain(driverDesk.Desk.Orders, item => item.Id == drovePast);
+        // 公司账户选「调度」：只看自己调度台上的单（和公司账户的调度台同一条规则）；「司导」：派给自己跑的，这里没有。
+        Assert.Equal(new[] { drovePast, companyPast }, (await RecordsAsync(companyClient, "desk")).Select(item => item.Id).ToArray());
+        Assert.Empty(await RecordsAsync(companyClient, "driver"));
+        Assert.Equal(
+            companyRecords.Select(item => item.Id).ToArray(),
+            (await RecordsAsync(companyClient, "all")).Select(item => item.Id).ToArray());
+
+        // 调度员：只看分配给自己的单（自己建的，交给别人派的也算），不管完成没有。
+        var dispatcherRecords = await RecordsAsync(dispatcherClient);
+        Assert.Equal(
+            new[] { handedOff, openPast, assignedPast, future },
+            dispatcherRecords.Select(item => item.Id).ToArray());
+        Assert.All(dispatcherRecords, item => Assert.True(item.CanReturn && item.CanSetShareLevel && item.CanEdit && item.OnDesk));
+
+        // 调度员选「司导」：这家公司派给自己跑的单；不是自己调度台上的，只能看。不能看公司全部。
+        var dispatcherDriven = await RecordsAsync(dispatcherClient, "driver");
+        Assert.Equal(new[] { drovePast }, dispatcherDriven.Select(item => item.Id).ToArray());
+        Assert.All(dispatcherDriven, item => Assert.False(item.CanEdit || item.CanReturn || item.CanSetShareLevel || item.OnDesk));
+        Assert.Equal(HttpStatusCode.Forbidden, await ScopeStatusAsync(dispatcherClient, "all"));
+
+        // 司导：自己跑的单，只能看；不能看公司全部，也不能看调度手里的。
+        Assert.Equal(HttpStatusCode.Forbidden, await ScopeStatusAsync(driverClient, "all"));
+        Assert.Equal(HttpStatusCode.Forbidden, await ScopeStatusAsync(driverClient, "desk"));
+        var driverRecords = await RecordsAsync(driverClient);
+        Assert.Equal(
+            new[] { handedOff, assignedPast, companyPast, future },
+            driverRecords.Select(item => item.Id).ToArray());
+        Assert.All(driverRecords, item => Assert.False(item.CanEdit || item.CanReturn || item.CanSetShareLevel || item.OnDesk));
+
+        // 人数、车型、南北岛写进订单，订单记录跟着显示；司导保存备注不会清掉它们。
+        var futureRead = await dispatcherClient.GetFromJsonAsync<OrderReadDto>($"/api/orders/{future}");
+        (await dispatcherClient.PutAsJsonAsync($"/api/orders/{future}", new OrderWriteDto
+        {
+            StartDate = futureRead!.StartDate,
+            GuestCount = 4,
+            VehicleType = "7座阿尔法或威尔法",
+            Island = "both",
+            SharedNotes = "基督城-特卡波-库克山-瓦纳卡-皇后镇",
+            CompanyId = companyId
+        })).EnsureSuccessStatusCode();
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await dispatcherClient.PutAsJsonAsync($"/api/orders/{future}", new OrderWriteDto
+        {
+            StartDate = futureRead.StartDate,
+            Island = "east",
+            CompanyId = companyId
+        })).StatusCode);
+        (await driverClient.PutAsJsonAsync($"/api/orders/{future}", new OrderWriteDto
+        {
+            StartDate = futureRead.StartDate,
+            DriverNotes = "司导自己的备注",
+            SharedNotes = "基督城-特卡波-库克山-瓦纳卡-皇后镇"
+        })).EnsureSuccessStatusCode();
+        var futureRecord = (await RecordsAsync(dispatcherClient)).Single(item => item.Id == future);
+        Assert.Equal(4, futureRecord.GuestCount);
+        Assert.Equal("7座阿尔法或威尔法", futureRecord.VehicleType);
+        Assert.Equal("both", futureRecord.Island);
+        Assert.Equal("基督城-特卡波-库克山-瓦纳卡-皇后镇", futureRecord.Route);
 
         var driverOrders = await driverClient.GetFromJsonAsync<List<OrderReadDto>>("/api/orders");
         Assert.Contains(driverOrders!, item => item.Id == assignedPast);
@@ -570,10 +636,9 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
             ServiceDate = futureDay.ServiceDate,
             DriverId = replacement.DriverId
         })).EnsureSuccessStatusCode();
-        var dispatcherAfter = await dispatcherClient.GetFromJsonAsync<CompanyHomeDto>("/api/company");
-        var driverAfter = await driverClient.GetFromJsonAsync<CompanyHomeDto>("/api/company");
-        Assert.DoesNotContain(dispatcherAfter!.Desk!.Orders, item => item.Id == future);
-        Assert.DoesNotContain(driverAfter!.Desk!.Orders, item => item.Id == future);
+        // 换了司导：调度员仍然看得到（单子还分配给他），原来的司导看不到了。
+        Assert.Contains(await RecordsAsync(dispatcherClient), item => item.Id == future);
+        Assert.DoesNotContain(await RecordsAsync(driverClient), item => item.Id == future);
     }
 
     [Fact]
@@ -1043,7 +1108,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         {
             Username = $"firm_{suffix}",
             Password = "Passw0rd!",
-            Name = "人事公司",
+            Name = $"人事公司{suffix}",
             AccountType = "company",
             CompanyName = $"人事公司{suffix}"
         })).EnsureSuccessStatusCode();
@@ -1084,7 +1149,7 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
         var companyRoster = await company.GetFromJsonAsync<List<DriverReadDto>>("/api/drivers");
         Assert.DoesNotContain(companyRoster!, item => item.Id == driverUser!.DriverId);
 
-        var found = await driver.GetFromJsonAsync<List<DispatcherSearchDto>>("/api/dispatchers?name=人事公司");
+        var found = await driver.GetFromJsonAsync<List<DispatcherSearchDto>>($"/api/dispatchers?name=人事公司{suffix}");
         Assert.Contains(found!, item => item.Id == companyUser.Id);
         (await driver.PostAsJsonAsync("/api/dispatchers/applications", new ApplyDriverDto
         {

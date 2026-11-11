@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from 'react'
-import { CalendarInkBar, useCalendarInk } from '../../calendarInk'
+import { useLayoutEffect, useRef, useState, type ComponentProps, type PointerEvent, type ReactNode, type Ref } from 'react'
+import { CalendarInkBar, useCalendarInk, type CalendarInk } from '../../calendarInk'
 import { CALENDAR_DATE_ATTR, CalendarDayCaption, captureCalendarPointer } from '../../calendarDay'
 import { WEEKDAYS, formatLocalDate, monthCells, monthsBetween, orderedRange, pad, todayLocal } from '../../localDate'
-import { CloseIcon, TrashIcon } from '../icons'
-import { OrderInfoFields, OrderInfoPanel } from '../OrderInfoFields'
+import { CloseIcon, DeleteIcon } from '../icons'
+import { OrderInfoFields, OrderInfoPanel, SaveSlotContext } from '../OrderInfoFields'
+import type { ShareLevel } from '../../types'
+import { SHARE_LEVEL_LABELS } from '../../api/grab'
 
 export interface CalendarMark {
   date: string
@@ -11,6 +13,8 @@ export interface CalendarMark {
   orderId: string
   label?: string
   place?: string
+  /** 这一天的天气（和司导日历同一份数据），和背景字放在一起。 */
+  weather?: string | null
   assigned?: boolean
   owned?: boolean
   color?: string
@@ -18,10 +22,21 @@ export interface CalendarMark {
   conflict?: boolean
   orderStart?: boolean
   orderEnd?: boolean
+  /** 抢单待确认的日期：橙色虚线框（抢单专用色）。 */
+  grab?: boolean
+  /** 只用来标出日期，不能点也不能拖（例如司导日历上标出他抢的单）。 */
+  inert?: boolean
 }
 
 interface DispatcherCalendarCardProps {
   title: string
+  /** 抢单范围；有 onShareLevelChange 时在编辑订单里显示三个互斥按钮。 */
+  shareLevel?: ShareLevel
+  onShareLevelChange?: (level: ShareLevel) => void
+  /** 没绑公司：只能调度自留。 */
+  shareLevelLocked?: boolean
+  /** 编辑订单里的「行程日期」（重新选择起止日期）。 */
+  datesField?: ReactNode
   subtitle?: string
   meta?: string | null
   marks: CalendarMark[]
@@ -29,6 +44,10 @@ interface DispatcherCalendarCardProps {
   rangeEnd: string
   onClose: () => void
   inkBar?: boolean
+  /** 外面传进来的透明度设置（和别的卡片共用）；不传就用自己的。 */
+  ink?: CalendarInk
+  /** 不显示控制条，只跟着 `ink` 改日期文字和背景字的透明度（调度台的订单卡片跟着司导卡片）。 */
+  inkFollow?: boolean
   onEdit?: () => void
   editLabel?: string
   onCardPointerDown?: (event: PointerEvent<HTMLElement>) => void
@@ -48,6 +67,10 @@ interface DispatcherCalendarCardProps {
   onInfoOpenChange?: (open: boolean) => void
   platformOrderNo?: string
   onPlatformOrderNoChange?: (value: string) => void
+  /** 头上关闭按钮左边的主按钮（创建订单的「创建订单」、改日期的「保存」）。 */
+  headAction?: ReactNode
+  /** 编辑订单里的人数、车型、南/北岛。 */
+  orderBasics?: ComponentProps<typeof OrderInfoFields>['basics']
   companyId?: string | null
   companyName?: string | null
   onCompanyChange?: (companyId: string, companyName: string) => void
@@ -55,7 +78,9 @@ interface DispatcherCalendarCardProps {
   onNotesChange?: (value: string) => void
   sharedNotes?: string
   onSharedNotesChange?: (value: string) => void
-  onNotesSave?: () => void
+  onNotesSave?: () => void | boolean | Promise<boolean | void>
+  /** 放在日期天数（司导卡片是备注）下方的一条，例如抢单确认。编辑时不显示。 */
+  action?: ReactNode
   notesExtra?: ReactNode
   notesLabel?: string
   notesPlaceholder?: string
@@ -76,6 +101,8 @@ export function DispatcherCalendarCard({
   rangeEnd,
   onClose,
   inkBar = false,
+  ink: sharedInk,
+  inkFollow = false,
   onEdit,
   editLabel,
   onCardPointerDown,
@@ -95,6 +122,8 @@ export function DispatcherCalendarCard({
   onInfoOpenChange,
   platformOrderNo,
   onPlatformOrderNoChange,
+  orderBasics,
+  headAction,
   companyId,
   companyName,
   onCompanyChange,
@@ -103,6 +132,7 @@ export function DispatcherCalendarCard({
   sharedNotes,
   onSharedNotesChange,
   onNotesSave,
+  action,
   notesExtra,
   notesLabel,
   notesPlaceholder,
@@ -112,8 +142,16 @@ export function DispatcherCalendarCard({
   bodyRef,
   bodyKey,
   onBodyScroll,
+  shareLevel,
+  onShareLevelChange,
+  shareLevelLocked = false,
+  datesField,
 }: DispatcherCalendarCardProps) {
-  const ink = useCalendarInk()
+  const localInk = useCalendarInk()
+  const ink = sharedInk ?? localInk
+  const inkHost = inkBar || inkFollow
+  /** 头上关闭按钮左边「保存」的空位，交给编辑订单区。 */
+  const [saveSlot, setSaveSlot] = useState<HTMLElement | null>(null)
   const [localInfoOpen, setLocalInfoOpen] = useState(false)
   const notesOpen = onInfoOpenChange ? Boolean(infoOpen) : localInfoOpen
   const byDate = new Map(marks.map((mark) => [mark.date, mark]))
@@ -124,11 +162,19 @@ export function DispatcherCalendarCard({
   const canEditNotes = Boolean(onNotesChange)
   const showEditIcon = Boolean(onEdit) || canEditNotes || canEditOrder
   const scrollRef = useRef<HTMLDivElement>(null)
+  /** 打开编辑前日历滚到的位置，收起编辑后回到这里。 */
+  const calendarScroll = useRef(0)
+  const wasEditing = useRef(notesOpen)
 
-  useEffect(() => {
-    if (notesOpen) {
-      scrollRef.current?.scrollTo({ top: 0 })
+  // 编辑订单信息 / 备注时，卡片里只显示编辑内容，不接着显示日历；收起后日历回到原来的位置。
+  useLayoutEffect(() => {
+    const body = scrollRef.current
+    if (body && notesOpen) {
+      body.scrollTop = 0
+    } else if (body && wasEditing.current) {
+      body.scrollTop = calendarScroll.current
     }
+    wasEditing.current = notesOpen
   }, [notesOpen])
 
   function setBody(node: HTMLDivElement | null) {
@@ -141,9 +187,10 @@ export function DispatcherCalendarCard({
   }
 
   return (
+    <SaveSlotContext.Provider value={saveSlot}>
     <article
-      className={`dispatcher-card${inkBar ? ' calendar-ink-host' : ''}`}
-      style={inkBar ? ink.style : undefined}
+      className={`dispatcher-card${inkHost ? ' calendar-ink-host' : ''}`}
+      style={inkHost ? ink.style : undefined}
       onPointerDown={onFramePointerDown}
     >
       <OrderInfoPanel
@@ -165,29 +212,45 @@ export function DispatcherCalendarCard({
         onEdit={onEdit}
         onHeadPointerDown={onCardPointerDown}
         extraActions={cardRemoveButton(onRemove, removeLabel, removeArmed)}
+        onSaveSlot={setSaveSlot}
         trailing={
-          <button
-            type="button"
-            className="dispatcher-icon-btn"
-            aria-label="关闭"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={onClose}
-          >
-            <CloseIcon />
-          </button>
+          <>
+            {headAction}
+            <button
+              type="button"
+              className="dispatcher-icon-btn"
+              aria-label="关闭"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={onClose}
+            >
+              <CloseIcon />
+            </button>
+          </>
         }
       />
+      {action && !notesOpen ? action : null}
       <div
         ref={setBody}
         className="dispatcher-card-body"
         data-calendar={bodyKey}
-        onScroll={onBodyScroll}
+        onScroll={(event) => {
+          if (notesOpen) {
+            return
+          }
+          calendarScroll.current = event.currentTarget.scrollTop
+          onBodyScroll?.()
+        }}
       >
+        {notesOpen && onShareLevelChange && shareLevel !== undefined ? (
+          <ShareLevelBar level={shareLevel} locked={shareLevelLocked} onChange={onShareLevelChange} />
+        ) : null}
+        {notesOpen && datesField ? <div className="dispatcher-dates-slot">{datesField}</div> : null}
         {notesOpen ? (
           <OrderInfoFields
             heading={canEditOrder ? '订单信息' : '备注'}
             platformOrderNo={platformOrderNo}
             onPlatformOrderNoChange={onPlatformOrderNoChange}
+            basics={orderBasics}
             companyId={companyId}
             companyName={companyName}
             onCompanyChange={onCompanyChange}
@@ -198,11 +261,18 @@ export function DispatcherCalendarCard({
             notesLabel={notesLabel}
             notesPlaceholder={notesPlaceholder}
             onSave={onNotesSave}
+            afterSave={() => {
+              if (onInfoOpenChange) {
+                onInfoOpenChange(false)
+              } else {
+                setLocalInfoOpen(false)
+              }
+            }}
             extra={notesExtra}
             autoFocus
           />
         ) : null}
-        {months.map((month) => (
+        {notesOpen ? null : months.map((month) => (
           <section
             key={`${month.getFullYear()}-${month.getMonth()}`}
             data-month={`${month.getFullYear()}-${pad(month.getMonth() + 1)}`}
@@ -226,7 +296,7 @@ export function DispatcherCalendarCard({
                   <button
                     key={date + String(cell.inMonth)}
                     type="button"
-                    className={`calendar-day dispatcher-day${!cell.inMonth ? ' outside' : ''}${mark ? ' marked' : ''}${mark?.conflict ? ' conflict' : ''}${mark?.assigned === false ? ' unassigned' : ''}${mark?.owned === false ? ' locked' : ''}${cell.inMonth && mark?.orderStart ? ' order-start' : ''}${cell.inMonth && mark?.orderEnd ? ' order-end' : ''}${inRange ? ' in-range' : ''}${rangeEdge ? ' range-edge' : ''}${date === today && cell.inMonth ? ' today' : ''}`}
+                    className={`calendar-day dispatcher-day${!cell.inMonth ? ' outside' : ''}${mark ? ' marked' : ''}${mark?.conflict ? ' conflict' : ''}${mark?.assigned === false ? ' unassigned' : ''}${mark?.owned === false ? ' locked' : ''}${cell.inMonth && mark?.orderStart ? ' order-start' : ''}${cell.inMonth && mark?.orderEnd ? ' order-end' : ''}${inRange ? ' in-range' : ''}${rangeEdge ? ' range-edge' : ''}${date === today && cell.inMonth ? ' today' : ''}${mark?.grab ? ' grab' : ''}`}
                     disabled={!mark && !selectableDay}
                     style={
                       mark?.color
@@ -242,7 +312,7 @@ export function DispatcherCalendarCard({
                     {...(cell.inMonth ? { 'data-service-date': date } : {})}
                     {...(selectableDay ? { [CALENDAR_DATE_ATTR]: date } : {})}
                     onClick={
-                      mark && (dayClicks || mark.conflict || mark.owned === false)
+                      mark && !mark.inert && (dayClicks || mark.conflict || mark.owned === false)
                         ? (event) => {
                             event.stopPropagation()
                             onDayClick?.(mark, event.currentTarget)
@@ -253,7 +323,7 @@ export function DispatcherCalendarCard({
                       mark || selectableDay
                         ? (event) => {
                             event.stopPropagation()
-                            if (mark?.conflict && !dragConflict) {
+                            if (mark?.inert || (mark?.conflict && !dragConflict)) {
                               return
                             }
                             if (selectableDay) {
@@ -293,7 +363,8 @@ export function DispatcherCalendarCard({
                     }
                     onPointerEnter={selectableDay ? () => onDatePointerEnter?.(date) : undefined}
                   >
-                    <CalendarDayCaption day={cell.date.getDate()} label={mark?.label} place={mark?.place} />
+                    <CalendarDayCaption day={cell.date.getDate()} label={mark?.label} place={mark?.place} weather={mark?.weather} />
+                    {mark?.grab && cell.inMonth ? <span className="grab-mark" aria-hidden="true" /> : null}
                   </button>
                 )
               })}
@@ -301,11 +372,47 @@ export function DispatcherCalendarCard({
           </section>
         ))}
       </div>
-      {inkBar ? (
-        <CalendarInkBar balance={ink.balance} side={ink.side} onChange={ink.setBalance} onSideChange={ink.setSide} />
+      {inkBar && !notesOpen ? (
+        <CalendarInkBar ink={ink} />
       ) : null}
       {footer ? <div className="dispatcher-card-footer">{footer}</div> : null}
     </article>
+    </SaveSlotContext.Provider>
+  )
+}
+
+/**
+ * 编辑订单里的抢单范围：调度自留、公司内部、面向所有人，三个互斥，必须选一个（再点已选的不变）。
+ * 样式和当日详情的住宿位置按钮一样。没绑公司时只能调度自留。
+ */
+export function ShareLevelBar({ level, locked, onChange }: { level: ShareLevel; locked: boolean; onChange: (level: ShareLevel) => void }) {
+  return (
+    <div className="share-level">
+      <div className="place-mark-bar share-level-bar" role="radiogroup" aria-label="抢单范围">
+        {SHARE_LEVEL_LABELS.map((label, index) => {
+          const value = index as ShareLevel
+          return (
+            <button
+              key={label}
+              type="button"
+              role="radio"
+              aria-checked={level === value}
+              aria-pressed={level === value}
+              disabled={locked && value !== 0}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => {
+                if (value !== level) {
+                  onChange(value)
+                }
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      {locked ? <p className="share-level-hint">绑定所属公司后，才能放给公司内部或所有人</p> : null}
+    </div>
   )
 }
 
@@ -335,7 +442,7 @@ export function DispatcherDayCard({
   closeLabel?: string
   notes?: string
   onNotesChange?: (value: string) => void
-  onNotesSave?: () => void
+  onNotesSave?: () => void | boolean | Promise<boolean | void>
   notesLabel?: string
   notesPlaceholder?: string
   onRemove?: () => void
@@ -349,10 +456,12 @@ export function DispatcherDayCard({
   children: ReactNode
 }) {
   const [notesOpen, setNotesOpen] = useState(false)
+  const [saveSlot, setSaveSlot] = useState<HTMLElement | null>(null)
   const noteEditor = Boolean(onNotesChange)
   const customEditor = Boolean(onEditOpenChange)
 
   return (
+    <SaveSlotContext.Provider value={saveSlot}>
     <article className="dispatcher-card">
       <OrderInfoPanel
         title={title}
@@ -364,6 +473,7 @@ export function DispatcherDayCard({
         editLabel={editLabel}
         onHeadPointerDown={onHeadPointerDown}
         extraActions={cardRemoveButton(onRemove, removeLabel, removeArmed)}
+        onSaveSlot={setSaveSlot}
         trailing={
           <button type="button" className="dispatcher-icon-btn" aria-label={closeLabel} onClick={onClose}>
             <CloseIcon />
@@ -379,6 +489,7 @@ export function DispatcherDayCard({
             notesLabel={notesLabel ?? '备注'}
             notesPlaceholder={notesPlaceholder}
             onSave={onNotesSave}
+            afterSave={() => setNotesOpen(false)}
             autoFocus
           />
         ) : null}
@@ -386,12 +497,29 @@ export function DispatcherDayCard({
       </div>
       {footer}
     </article>
+    </SaveSlotContext.Provider>
   )
 }
 
 function cardRemoveButton(onRemove: (() => void) | undefined, removeLabel: string, armed = false) {
   if (!onRemove) {
     return null
+  }
+  // 调度台上公司的单是退回，不是删除：按钮直接写「退回公司」，不用垃圾桶。同样先套红框，再点一次才执行。
+  if (removeLabel === '退回公司') {
+    return (
+      <button
+        type="button"
+        className={`dispatcher-chip dispatcher-card-return${armed ? ' release' : ''}`}
+        aria-label={armed ? '确认退回公司' : '退回公司'}
+        aria-pressed={armed}
+        data-card-remove={armed ? 'true' : undefined}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={onRemove}
+      >
+        退回公司
+      </button>
+    )
   }
   return (
     <button
@@ -400,10 +528,11 @@ function cardRemoveButton(onRemove: (() => void) | undefined, removeLabel: strin
       aria-label={armed ? `确认${removeLabel}` : removeLabel}
       aria-pressed={armed}
       data-vehicle-delete={armed ? 'true' : undefined}
+      data-card-remove={armed ? 'true' : undefined}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={onRemove}
     >
-      <TrashIcon />
+      <DeleteIcon />
     </button>
   )
 }

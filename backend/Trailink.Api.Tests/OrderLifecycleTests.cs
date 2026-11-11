@@ -317,6 +317,131 @@ public class OrderLifecycleTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Whole_order_drop_on_a_split_order_assigns_only_the_open_days()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var company = _factory.CreateClient();
+        var companyUser = await TestAuth.RegisterAsync(company, $"sw_{suffix}", "拆单拖动公司", "company", $"拆单拖动公司{suffix}");
+        var dispatcher = _factory.CreateClient();
+        var dispatcherUser = await TestAuth.RegisterAsync(dispatcher, $"swd_{suffix}", "拆单拖动调度", "driver");
+        await TestAuth.PromoteDispatcherAsync(_factory.Services, dispatcherUser.Id, companyUser.CompanyId!.Value);
+        var first = await TestAuth.RegisterAsync(_factory.CreateClient(), $"sw1_{suffix}", "已派司导", "driver");
+        var second = await TestAuth.RegisterAsync(_factory.CreateClient(), $"sw2_{suffix}", "新派司导", "driver");
+        var third = await TestAuth.RegisterAsync(_factory.CreateClient(), $"sw3_{suffix}", "改派司导", "driver");
+
+        var order = await PostAsync<OrderReadDto>(dispatcher, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 6, 1),
+            GuestCount = 2
+        });
+        var days = new List<ItineraryDayReadDto>();
+        for (var i = 0; i < 3; i++)
+        {
+            days.Add(await PostAsync<ItineraryDayReadDto>(dispatcher, $"/api/orders/{order.Id}/days", new ItineraryDayWriteDto
+            {
+                ServiceDate = new DateOnly(2037, 6, 1 + i)
+            }));
+        }
+
+        await PutAsync<ItineraryDayReadDto>(dispatcher, $"/api/orders/{order.Id}/days/{days[0].Id}", new ItineraryDayWriteDto
+        {
+            ServiceDate = days[0].ServiceDate,
+            DriverId = first.DriverId
+        });
+
+        // 新司导在 6 月 1 日另有一单：只派空日期时，这一天不算冲突。
+        var busy = await PostAsync<OrderReadDto>(dispatcher, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 6, 1),
+            GuestCount = 1
+        });
+        await PostAsync<ItineraryDayReadDto>(dispatcher, $"/api/orders/{busy.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2037, 6, 1),
+            DriverId = second.DriverId
+        });
+
+        var assigned = await PutAsync<AssignmentResultDto>(dispatcher, $"/api/orders/{order.Id}/driver", new AssignDriverDto
+        {
+            DriverId = second.DriverId,
+            FailOnConflict = true
+        });
+        Assert.Equal(2, assigned.UpdatedDayCount);
+        Assert.Empty(assigned.Warnings);
+
+        var afterSplitDrop = await dispatcher.GetFromJsonAsync<OrderReadDto>($"/api/orders/{order.Id}", JsonOptions);
+        var byDate = afterSplitDrop!.Days.ToDictionary(day => day.ServiceDate, day => day.DriverId);
+        Assert.Equal(first.DriverId, byDate[new DateOnly(2037, 6, 1)]);
+        Assert.Equal(second.DriverId, byDate[new DateOnly(2037, 6, 2)]);
+        Assert.Equal(second.DriverId, byDate[new DateOnly(2037, 6, 3)]);
+
+        // 全部日期都已分配时，整单拖动仍是整单改派。
+        var reassigned = await PutAsync<AssignmentResultDto>(dispatcher, $"/api/orders/{order.Id}/driver", new AssignDriverDto
+        {
+            DriverId = third.DriverId
+        });
+        Assert.Equal(3, reassigned.UpdatedDayCount);
+        var afterReassign = await dispatcher.GetFromJsonAsync<OrderReadDto>($"/api/orders/{order.Id}", JsonOptions);
+        Assert.All(afterReassign!.Days, day => Assert.Equal(third.DriverId, day.DriverId));
+
+        await dispatcher.DeleteAsync($"/api/orders/{order.Id}");
+        await dispatcher.DeleteAsync($"/api/orders/{busy.Id}");
+    }
+
+    [Fact]
+    public async Task My_trips_show_days_other_dispatchers_gave_a_dispatcher_as_driver()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var company = _factory.CreateClient();
+        var companyUser = await TestAuth.RegisterAsync(company, $"mt_{suffix}", "行程公司", "company", $"行程公司{suffix}");
+        var chen = _factory.CreateClient();
+        var chenUser = await TestAuth.RegisterAsync(chen, $"mtc_{suffix}", "陈调度", "driver");
+        var wang = _factory.CreateClient();
+        var wangUser = await TestAuth.RegisterAsync(wang, $"mtw_{suffix}", "王调度", "driver");
+        await TestAuth.PromoteDispatcherAsync(_factory.Services, chenUser.Id, companyUser.CompanyId!.Value);
+        await TestAuth.PromoteDispatcherAsync(_factory.Services, wangUser.Id, companyUser.CompanyId.Value);
+
+        // 王调度把自己的单派给陈调度的司导身份（比如陈抢了这张单、王确认）。
+        var wangOrder = await PostAsync<OrderReadDto>(wang, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 1),
+            GuestCount = 2
+        });
+        await PostAsync<ItineraryDayReadDto>(wang, $"/api/orders/{wangOrder.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2037, 7, 1),
+            DriverId = chenUser.DriverId
+        });
+
+        // 陈调度自己派出、派给别人的单：在调度台，不在我的行程。
+        var chenOrder = await PostAsync<OrderReadDto>(chen, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 5),
+            GuestCount = 2
+        });
+        await PostAsync<ItineraryDayReadDto>(chen, $"/api/orders/{chenOrder.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2037, 7, 5),
+            DriverId = wangUser.DriverId
+        });
+
+        var mine = (await chen.GetFromJsonAsync<List<OrderReadDto>>("/api/orders?mine=true", JsonOptions))!.Select(order => order.Id).ToList();
+        Assert.Contains(wangOrder.Id, mine);
+        Assert.DoesNotContain(chenOrder.Id, mine);
+
+        // 调度台照旧只列自己负责的单。
+        var desk = await OrderIdsAsync(chen);
+        Assert.Contains(chenOrder.Id, desk);
+        Assert.DoesNotContain(wangOrder.Id, desk);
+
+        // 没有司导身份的公司账户用 mine 什么也拿不到。
+        Assert.Empty((await company.GetFromJsonAsync<List<OrderReadDto>>("/api/orders?mine=true", JsonOptions))!);
+
+        await wang.DeleteAsync($"/api/orders/{wangOrder.Id}");
+        await chen.DeleteAsync($"/api/orders/{chenOrder.Id}");
+    }
+
+    [Fact]
     public async Task Real_order_overwrites_driver_placeholder_and_unbound_cannot()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
@@ -879,6 +1004,177 @@ public class OrderLifecycleTests : IClassFixture<ApiFactory>
         Assert.Empty((await company.GetFromJsonAsync<List<OrderReadDto>>(
             $"/api/orders?driverId={stranger.DriverId}", JsonOptions))!);
         Assert.Contains((await company.GetFromJsonAsync<List<OrderReadDto>>("/api/orders", JsonOptions))!, item => item.Id == own.Id);
+    }
+
+    [Fact]
+    public async Task Rescheduling_moves_days_in_order_and_unassigns_conflicting_days()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var companyUser = await TestAuth.RegisterAsync(_factory.CreateClient(), $"rsc_{suffix}", "改期公司", "company", $"改期公司{suffix}");
+        var dispatcher = _factory.CreateClient();
+        var dispatcherUser = await TestAuth.RegisterAsync(dispatcher, $"rs_{suffix}", "改期调度", "driver");
+        await TestAuth.PromoteDispatcherAsync(_factory.Services, dispatcherUser.Id, companyUser.CompanyId!.Value);
+        var driver = await TestAuth.RegisterAsync(_factory.CreateClient(), $"rsd_{suffix}", "改期司导", "driver");
+
+        var order = await PostAsync<OrderReadDto>(dispatcher, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 1),
+            GuestCount = 2
+        });
+        var days = new List<ItineraryDayReadDto>();
+        for (var i = 0; i < 3; i++)
+        {
+            days.Add(await PostAsync<ItineraryDayReadDto>(dispatcher, $"/api/orders/{order.Id}/days", new ItineraryDayWriteDto
+            {
+                ServiceDate = new DateOnly(2037, 7, 1 + i),
+                Description = $"第{i + 1}天",
+                DriverId = driver.DriverId
+            }));
+        }
+
+        await PostAsync<OrderActivityReadDto>(dispatcher, $"/api/orders/{order.Id}/days/{days[0].Id}/activities", new OrderActivityWriteDto
+        {
+            Content = "冰川徒步",
+            BookingTime = new DateTime(2037, 7, 1, 9, 30, 0)
+        });
+
+        // 司导在 7 月 11 日另有一单：第二天搬过去会冲突。
+        var busy = await PostAsync<OrderReadDto>(dispatcher, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 11),
+            GuestCount = 1
+        });
+        await PostAsync<ItineraryDayReadDto>(dispatcher, $"/api/orders/{busy.Id}/days", new ItineraryDayWriteDto
+        {
+            ServiceDate = new DateOnly(2037, 7, 11),
+            DriverId = driver.DriverId
+        });
+
+        // 整段拖到 7 月 10 日，同时把末尾缩掉一天：原来 1、2 日搬到 10、11 日，3 日（搬过去是 12 日）删掉。
+        var shorter = await PutAsync<OrderDatesResultDto>(dispatcher, $"/api/orders/{order.Id}/dates", new OrderDatesWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 10),
+            EndDate = new DateOnly(2037, 7, 11),
+            ShiftDays = 9
+        });
+        Assert.Equal(1, shorter.RemovedDayCount);
+        Assert.Single(shorter.Warnings);
+        Assert.Equal(new DateOnly(2037, 7, 10), shorter.Order.StartDate);
+        var moved = shorter.Order.Days.OrderBy(day => day.ServiceDate).ToList();
+        Assert.Equal(2, moved.Count);
+        Assert.Equal(days[0].Id, moved[0].Id);
+        Assert.Equal(driver.DriverId, moved[0].DriverId);
+        Assert.Equal("第2天", moved[1].Description);
+        Assert.Null(moved[1].DriverId);
+
+        var detail = await dispatcher.GetFromJsonAsync<OrderReadDto>($"/api/orders/{order.Id}", JsonOptions);
+        var activity = Assert.Single(detail!.Days.Single(day => day.Id == days[0].Id).Activities);
+        Assert.Equal(new DateTime(2037, 7, 10, 9, 30, 0), activity.BookingTime);
+
+        // 拖开头往前、拖末尾往后：原来的 10、11 日不动，两头补空白日。
+        var longer = await PutAsync<OrderDatesResultDto>(dispatcher, $"/api/orders/{order.Id}/dates", new OrderDatesWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 8),
+            EndDate = new DateOnly(2037, 7, 13)
+        });
+        Assert.Equal(0, longer.RemovedDayCount);
+        Assert.Equal(
+            Enumerable.Range(8, 6).Select(day => new DateOnly(2037, 7, day)),
+            longer.Order.Days.Select(day => day.ServiceDate).OrderBy(date => date));
+        Assert.Equal(driver.DriverId, longer.Order.Days.Single(day => day.ServiceDate == new DateOnly(2037, 7, 10)).DriverId);
+        Assert.Equal(new DateOnly(2037, 7, 8), longer.Order.StartDate);
+
+        // 拖开头往后：缩掉前面两天，后面的日期不动。
+        var trimmed = await PutAsync<OrderDatesResultDto>(dispatcher, $"/api/orders/{order.Id}/dates", new OrderDatesWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 10),
+            EndDate = new DateOnly(2037, 7, 13)
+        });
+        Assert.Equal(2, trimmed.RemovedDayCount);
+        Assert.Equal(days[0].Id, trimmed.Order.Days.Single(day => day.ServiceDate == new DateOnly(2037, 7, 10)).Id);
+
+        // 整段往后挪一天：新旧日期重叠（10–13 → 11–14），不能撞上「同一单同一天只能一条」。
+        var nudged = await PutAsync<OrderDatesResultDto>(dispatcher, $"/api/orders/{order.Id}/dates", new OrderDatesWriteDto
+        {
+            StartDate = new DateOnly(2037, 7, 11),
+            EndDate = new DateOnly(2037, 7, 14),
+            ShiftDays = 1
+        });
+        Assert.Equal(0, nudged.RemovedDayCount);
+        Assert.Equal(days[0].Id, nudged.Order.Days.Single(day => day.ServiceDate == new DateOnly(2037, 7, 11)).Id);
+        Assert.Equal(4, nudged.Order.Days.Count);
+
+        var stranger = _factory.CreateClient();
+        var strangerUser = await TestAuth.RegisterAsync(stranger, $"rss_{suffix}", "别的调度", "driver");
+        await TestAuth.PromoteDispatcherAsync(_factory.Services, strangerUser.Id, companyUser.CompanyId!.Value);
+        var forbidden = await stranger.PutAsJsonAsync($"/api/orders/{order.Id}/dates", new OrderDatesWriteDto
+        {
+            StartDate = new DateOnly(2037, 8, 1),
+            EndDate = new DateOnly(2037, 8, 2)
+        }, JsonOptions);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+        var reversed = await dispatcher.PutAsJsonAsync($"/api/orders/{order.Id}/dates", new OrderDatesWriteDto
+        {
+            StartDate = new DateOnly(2037, 8, 2),
+            EndDate = new DateOnly(2037, 8, 1)
+        }, JsonOptions);
+        Assert.Equal(HttpStatusCode.BadRequest, reversed.StatusCode);
+
+        await dispatcher.DeleteAsync($"/api/orders/{order.Id}");
+        await dispatcher.DeleteAsync($"/api/orders/{busy.Id}");
+    }
+
+    [Fact]
+    public async Task Company_account_follows_the_screen_on_its_desk_and_in_the_pool()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var company = _factory.CreateClient();
+        var me = await TestAuth.RegisterAsync(company, $"cd_{suffix}", "界面公司", "company", $"界面公司{suffix}");
+
+        // 调度台上建：放在自己的调度台。派给调度里建：留在公司订单池。
+        var onDesk = await PostAsync<OrderReadDto>(company, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 9, 1),
+            GuestCount = 1,
+            OnMyDesk = true
+        });
+        var inPool = await PostAsync<OrderReadDto>(company, "/api/orders", new OrderWriteDto
+        {
+            StartDate = new DateOnly(2037, 9, 5),
+            GuestCount = 1
+        });
+        Assert.Equal(me.Id, onDesk.AssignedDispatcherUserId);
+        Assert.Null(inPool.AssignedDispatcherUserId);
+
+        async Task<List<Guid>> DeskAsync() =>
+            (await company.GetFromJsonAsync<List<OrderReadDto>>("/api/orders?desk=true", JsonOptions))!.Select(order => order.Id).ToList();
+        var desk = await DeskAsync();
+        Assert.Contains(onDesk.Id, desk);
+        Assert.DoesNotContain(inPool.Id, desk);
+
+        // 在派给调度里把池里的单分给自己，调度台就有了。
+        await PutAsync<OrderReadDto>(company, $"/api/orders/{inPool.Id}/dispatcher", new AssignDispatcherDto { DispatcherUserId = me.Id });
+        Assert.Contains(inPool.Id, await DeskAsync());
+
+        // 调度台上删除：退回公司订单池，订单还在。
+        (await company.DeleteAsync($"/api/orders/{onDesk.Id}?release=true")).EnsureSuccessStatusCode();
+        var returned = await company.GetFromJsonAsync<OrderReadDto>($"/api/orders/{onDesk.Id}", JsonOptions);
+        Assert.Null(returned!.AssignedDispatcherUserId);
+        Assert.DoesNotContain(onDesk.Id, await DeskAsync());
+
+        // 不在自己调度台上的单不能从调度台退回。
+        Assert.Equal(HttpStatusCode.Forbidden, (await company.DeleteAsync($"/api/orders/{onDesk.Id}?release=true")).StatusCode);
+
+        // 别家公司不能删。
+        var other = _factory.CreateClient();
+        await TestAuth.RegisterAsync(other, $"cdo_{suffix}", "别家公司", "company", $"别家公司{suffix}");
+        Assert.Equal(HttpStatusCode.Forbidden, (await other.DeleteAsync($"/api/orders/{onDesk.Id}")).StatusCode);
+
+        // 派给调度里删除：真删。
+        (await company.DeleteAsync($"/api/orders/{onDesk.Id}")).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.NotFound, (await company.GetAsync($"/api/orders/{onDesk.Id}")).StatusCode);
+        await company.DeleteAsync($"/api/orders/{inPool.Id}");
     }
 
     private async Task<List<Guid>> DriverIdsAsync(HttpClient client)

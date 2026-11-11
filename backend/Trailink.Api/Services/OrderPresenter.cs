@@ -33,6 +33,8 @@ public class OrderPresenter(TrailinkDbContext db, OrderScheduling scheduling, We
         {
             var dto = Map(order, today, historical(order), overlaps, weatherByDay);
             dto.Notes = notes.GetValueOrDefault(order.Id);
+            dto.CanSetShareLevel = OrderRules.CanSetShareLevel(order, user);
+            dto.CanReschedule = OrderReschedule.CanReschedule(order, user);
             if (outsideDeskDriverTrips && !InDeskScope(user, order))
             {
                 HideOutsideDesk(dto);
@@ -96,6 +98,8 @@ public class OrderPresenter(TrailinkDbContext db, OrderScheduling scheduling, We
             DayCount = order.Days.Count,
             AssignedDayCount = order.Days.Count(day => day.DriverId is not null),
             GuestCount = order.GuestCount,
+            VehicleType = order.VehicleType,
+            Island = order.Island,
             DriverNotes = order.DriverNotes,
             SharedNotes = order.SharedNotes,
             CompanyId = order.CompanyId,
@@ -110,6 +114,7 @@ public class OrderPresenter(TrailinkDbContext db, OrderScheduling scheduling, We
             IsInProgress = OrderRules.IsInProgress(order, today),
             IsHistorical = historical,
             HasDriverConflict = days.Any(day => day.HasDriverConflict),
+            ShareLevel = order.ShareLevel,
             Days = days,
             Files = order.Files.OrderBy(file => file.FileName).Select(ToRead).ToList()
         };
@@ -199,12 +204,9 @@ public class OrderPresenter(TrailinkDbContext db, OrderScheduling scheduling, We
         return CompanyNotes.EnsureAsync(db, user.Id, companies, cancellationToken);
     }
 
-    private static bool InDeskScope(User? user, Order order) => user?.Role switch
-    {
-        UserRoles.Company => order.CompanyId == user.CompanyId,
-        UserRoles.Dispatcher => order.AssignedDispatcherUserId == user.Id,
-        _ => false
-    };
+    /// <summary>调度台上查看司导行程时，自己调度台上的单才带回详情（公司账户也按调度台算，不按全公司）。</summary>
+    private static bool InDeskScope(User? user, Order order) =>
+        user is { Role: UserRoles.Company or UserRoles.Dispatcher } && OrderRules.IsOnDesk(order, user);
 
     /// <summary>别人的订单只留下日期和住宿地点的第一个字，用来表示这天已有行程。</summary>
     private static void HideOutsideDesk(OrderReadDto dto)
@@ -220,6 +222,8 @@ public class OrderPresenter(TrailinkDbContext db, OrderScheduling scheduling, We
         dto.DriverNotes = null;
         dto.SharedNotes = null;
         dto.GuestCount = 0;
+        dto.VehicleType = null;
+        dto.Island = null;
         dto.Files = [];
         foreach (var day in dto.Days)
         {

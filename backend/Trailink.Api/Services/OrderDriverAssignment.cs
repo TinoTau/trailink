@@ -17,6 +17,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
     public static void ReturnToCompanyPool(Order order)
     {
         order.AssignedDispatcherUserId = null;
+        order.ShareLevel = OrderShareLevels.Own;
         foreach (var day in order.Days)
         {
             SetDayDriver(day, null, null);
@@ -103,10 +104,11 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
         CancellationToken cancellationToken,
         bool failOnConflict = false)
     {
+        var targets = TargetDays(order, driverId);
         var warnings = driverId is Guid assignedId
             ? await scheduling.FindDriverConflictsAsync(
                 assignedId,
-                order.Days.Select(day => day.ServiceDate),
+                targets.Select(day => day.ServiceDate),
                 order.Id,
                 cancellationToken,
                 order.CompanyId)
@@ -114,7 +116,7 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
 
         if (failOnConflict && warnings.Count > 0)
         {
-            return new OrderDriverAssignmentResult(order.Id, driverId, order.Days.Count, warnings, false);
+            return new OrderDriverAssignmentResult(order.Id, driverId, targets.Count, warnings, false);
         }
 
         if (driverId is Guid replaceDriverId)
@@ -122,11 +124,11 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
             await RemoveDriverPlaceholdersAsync(
                 order,
                 replaceDriverId,
-                order.Days.Select(day => day.ServiceDate),
+                targets.Select(day => day.ServiceDate),
                 cancellationToken);
         }
 
-        foreach (var day in order.Days)
+        foreach (var day in targets)
         {
             SetDayDriver(day, driverId, assignedByUserId);
         }
@@ -138,7 +140,22 @@ public class OrderDriverAssignment(TrailinkDbContext db, OrderScheduling schedul
 
         await db.SaveChangesAsync(cancellationToken);
 
-        return new OrderDriverAssignmentResult(order.Id, driverId, order.Days.Count, warnings);
+        return new OrderDriverAssignmentResult(order.Id, driverId, targets.Count, warnings);
+    }
+
+    /// <summary>
+    /// 整单派给司导时改哪些日期：还有未分配的日期就只派这些（拆单里已派给别人的日期不动）；
+    /// 全部都已分配时才整单改派。取消整单（driverId 为 null）清空所有日期。
+    /// </summary>
+    public static List<ItineraryDay> TargetDays(Order order, Guid? driverId)
+    {
+        if (driverId is null)
+        {
+            return order.Days.ToList();
+        }
+
+        var open = order.Days.Where(day => day.DriverId is null).ToList();
+        return open.Count > 0 ? open : order.Days.ToList();
     }
 
     public async Task LinkDriverToCompanyAsync(

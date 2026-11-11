@@ -11,6 +11,7 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
     public DbSet<CompanyNote> CompanyNotes => Set<CompanyNote>();
     public DbSet<OrderNote> OrderNotes => Set<OrderNote>();
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderClaim> OrderClaims => Set<OrderClaim>();
     public DbSet<ItineraryDay> ItineraryDays => Set<ItineraryDay>();
     public DbSet<OrderActivity> OrderActivities => Set<OrderActivity>();
     public DbSet<OrderFile> OrderFiles => Set<OrderFile>();
@@ -173,11 +174,14 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
             entity.Property(x => x.PlatformOrderNo).HasColumnName("platform_order_no").HasMaxLength(100);
             entity.Property(x => x.StartDate).HasColumnName("start_date");
             entity.Property(x => x.GuestCount).HasColumnName("guest_count");
+            entity.Property(x => x.VehicleType).HasColumnName("vehicle_type").HasMaxLength(OrderIslands.VehicleTypeMaxLength);
+            entity.Property(x => x.Island).HasColumnName("island").HasMaxLength(10);
             entity.Property(x => x.DriverNotes).HasColumnName("driver_notes");
             entity.Property(x => x.SharedNotes).HasColumnName("shared_notes");
             entity.Property(x => x.CompanyId).HasColumnName("company_id");
             entity.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
             entity.Property(x => x.AssignedDispatcherUserId).HasColumnName("assigned_dispatcher_user_id");
+            entity.Property(x => x.ShareLevel).HasColumnName("share_level").HasDefaultValue(OrderShareLevels.Own);
             entity.HasIndex(x => x.OrderNo).IsUnique();
 
             entity.HasOne(x => x.Company)
@@ -388,6 +392,22 @@ public class TrailinkDbContext(DbContextOptions<TrailinkDbContext> options) : Db
         });
 
         ConfigureActivityLibrary(modelBuilder);
+
+        modelBuilder.Entity<OrderClaim>(entity =>
+        {
+            entity.ToTable("order_claims");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.OrderId).HasColumnName("order_id");
+            entity.Property(x => x.UserId).HasColumnName("user_id");
+            entity.Property(x => x.DriverId).HasColumnName("driver_id");
+            entity.Property(x => x.ShareLevel).HasColumnName("share_level");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(x => new { x.OrderId, x.UserId }).IsUnique();
+            entity.HasIndex(x => x.DriverId);
+            entity.HasOne(x => x.Order).WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
     }
 
     private static void ConfigureActivityLibrary(ModelBuilder modelBuilder)

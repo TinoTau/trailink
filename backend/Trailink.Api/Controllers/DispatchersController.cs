@@ -198,7 +198,8 @@ public class DispatchersController(TrailinkDbContext db, AuthSession session, Or
             return Unauthorized();
         }
 
-        if (user.Role != UserRoles.Dispatcher)
+        // 按界面不按角色：公司账户在自己的调度台上也能解除自己的司导。
+        if (user.Role is not (UserRoles.Dispatcher or UserRoles.Company))
         {
             return Forbid();
         }

@@ -166,9 +166,9 @@ export function useBoardDrag(busy: boolean, actionsRef: RefObject<BoardDragActio
             }
           }
         }
-        if (act.vehiclePane || overOrderPane) {
-          return
-        }
+        // 从司导卡片拖起的订单 / 日期只能拖回订单区取消（车辆管理时是解绑车辆），
+        // 放回司导区或拖到别的司导都不派单：派单只从订单区拖下来，免得误触把拆单整单派给一位司导。
+        return
       }
       if (current.kind === 'day' && current.from === 'order' && current.dayId && !driverId) {
         act.selectOrderDay(current.dayId)

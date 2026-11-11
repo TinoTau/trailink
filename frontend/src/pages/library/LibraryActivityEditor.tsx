@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { message } from 'antd'
 import { libraryApi, ratingLabel } from '../../api/library'
@@ -7,6 +7,7 @@ import { compressPhoto } from '../../photoImage'
 import { FileField } from '../FileField'
 import { PHOTO_ACCEPT } from '../PhotoViewer'
 import { LibraryPhotos } from './LibraryPhotos'
+import { useDisarmOnOutside } from '../../useDisarmOnOutside'
 import './library.css'
 
 const HAS_CJK = /[㐀-鿿]/
@@ -54,6 +55,8 @@ export function LibraryActivityEditor({
   const [similar, setSimilar] = useState<LibraryActivity[]>([])
   const [busy, setBusy] = useState(false)
   const [armedDelete, setArmedDelete] = useState(false)
+  const clearArmedDelete = useCallback(() => setArmedDelete(false), [])
+  useDisarmOnOutside(armedDelete, '[data-library-delete]', clearArmedDelete)
   const [pending, setPending] = useState<{ key: string; file: File; url: string }[]>([])
   const zhQuery = useDebounced(nameZh.trim())
   const enQuery = useDebounced(nameEn.trim())
@@ -202,9 +205,14 @@ export function LibraryActivityEditor({
       <div className="library-sheet" role="dialog" aria-label={saved ? '编辑活动' : '添加活动'}>
         <header className="library-sheet-bar">
           <h2>{saved ? `编辑：${saved.name}` : '添加活动'}</h2>
-          <button type="button" className="library-chip" onClick={onClose}>
-            关闭
-          </button>
+          <div className="library-sheet-bar-actions">
+            <button type="button" className="library-chip primary" disabled={busy} onClick={() => void save()}>
+              {saved ? '保存' : '添加到活动库'}
+            </button>
+            <button type="button" className="library-chip" onClick={onClose}>
+              关闭
+            </button>
+          </div>
         </header>
         <div className="library-list">
           <div className="library-inline">
@@ -325,18 +333,13 @@ export function LibraryActivityEditor({
             </div>
           )}
         </div>
-        <footer className="library-sheet-actions">
-          {saved ? (
-            <button type="button" className={`library-chip danger${armedDelete ? ' armed' : ''}`} disabled={busy} onClick={() => void remove()}>
+        {saved ? (
+          <footer className="library-sheet-actions">
+            <button type="button" className={`library-chip danger${armedDelete ? ' armed' : ''}`} data-library-delete="true" disabled={busy} onClick={() => void remove()}>
               {armedDelete ? '确认删除' : '删除活动'}
             </button>
-          ) : (
-            <span />
-          )}
-          <button type="button" className="library-chip primary" disabled={busy} onClick={() => void save()}>
-            {saved ? '保存' : '添加到活动库'}
-          </button>
-        </footer>
+          </footer>
+        ) : null}
       </div>
     </div>,
     document.body,

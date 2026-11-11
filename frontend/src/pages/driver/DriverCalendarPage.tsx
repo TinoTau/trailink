@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { usePageLoad } from '../../usePageLoad'
+import { useSearchParams } from 'react-router-dom'
 import { message } from 'antd'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { AccountMenu } from '../AccountMenu'
@@ -26,6 +27,7 @@ import { CalendarInkBar, useCalendarInk } from '../../calendarInk'
 import { DriverDayEditor } from './DriverDayEditor'
 import { useCalendarRangePick } from '../../useCalendarRangePick'
 import { useWeatherSource } from '../../api/weather'
+import { useDisarmOnOutside } from '../../useDisarmOnOutside'
 import './driver-calendar.css'
 
 function monthsAroundDate(dateText: string, today: Date) {
@@ -72,6 +74,10 @@ function daysByDriver(orders: Order[], driverId: string | null): Record<string, 
       if (!bucket.assignerName) {
         bucket.assignerName = assignerName
       }
+      const plate = day.vehiclePlate?.trim()
+      if (plate && !(bucket.vehiclePlate ?? '').split('/').includes(plate)) {
+        bucket.vehiclePlate = bucket.vehiclePlate ? `${bucket.vehiclePlate}/${plate}` : plate
+      }
       next[day.serviceDate] = bucket
     }
   }
@@ -87,11 +93,27 @@ export function DriverCalendarPage() {
   const todayKey = formatLocalDate(today)
   const earliestMonth = monthKey(addMonths(today, -CALENDAR_MONTH_SPAN))
   const latestMonth = monthKey(addMonths(today, CALENDAR_MONTH_SPAN))
-  const [months, setMonths] = useState(() => [-2, -1, 0, 1, 2].map((offset) => addMonths(today, offset)))
+  // 从抢单等页面跳过来时带 ?date=YYYY-MM-DD：日历停在这一天并展开当日详情。
+  const [searchParams] = useSearchParams()
+  const [openDate] = useState(() => {
+    const value = searchParams.get('date')
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return null
+    }
+    const month = monthKey(parseYmd(value))
+    return month >= earliestMonth && month <= latestMonth ? value : null
+  })
+  // 从抢单页跳过来时带 ?grab=日期,日期：这些日期用橙色虚线框标出来，和已有行程重叠也照样标。
+  const [grabDates, setGrabDates] = useState<Set<string>>(
+    () => new Set((searchParams.get('grab') ?? '').split(',').filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))),
+  )
+  const [months, setMonths] = useState(() =>
+    openDate ? monthsAroundDate(openDate, today) : [-2, -1, 0, 1, 2].map((offset) => addMonths(today, offset)),
+  )
   const [orders, setOrders] = useState<Order[]>([])
   const [colors, setColors] = useState<DriverCalendarColors>(readDriverCalendarColors)
   const [colorTarget, setColorTarget] = useState<'past' | 'upcoming' | null>(null)
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [selectedDate, setSelectedDate] = useState<string | null>(openDate)
   const [conflictPick, setConflictPick] = useState<{ date: string; anchor: DOMRect } | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [canceling, setCanceling] = useState(false)
@@ -102,11 +124,18 @@ export function DriverCalendarPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const expandingRef = useRef(false)
   const didScrollToToday = useRef(false)
-  const pendingRevealDate = useRef<string | null>(null)
+  const pendingRevealDate = useRef<string | null>(openDate)
   const range = useCalendarRangePick(scrollRef, () => setSelectedDate(null))
   const rangeFrom = range.from
   const rangeTo = range.to
   const unbindLock = useRef(false)
+  const clearArmedRelease = useCallback(() => setArmedRelease(null), [])
+  // 解除这一天：套红框后，点这一天的格子或垃圾桶以外的地方就取消。
+  useDisarmOnOutside(
+    armedRelease !== null,
+    armedRelease ? `#driver-day-${armedRelease.date}, [data-release-day]` : '[data-release-day]',
+    clearArmedRelease,
+  )
 
   const daysByDate = useMemo(() => daysByDriver(orders, driverId), [orders, driverId])
   const visibleSelectedDate = selectedDate && daysByDate[selectedDate] ? selectedDate : null
@@ -117,7 +146,7 @@ export function DriverCalendarPage() {
 
   async function loadBoard() {
     try {
-      setOrders(await ordersApi.list())
+      setOrders(await ordersApi.list({ mine: true }))
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载行程失败')
     }
@@ -654,6 +683,15 @@ export function DriverCalendarPage() {
           onClose={() => setConflictPick(null)}
         />
       ) : null}
+      {grabDates.size > 0 ? (
+        <div className="driver-grab-note" role="status">
+          <span className="grab-mark-sample" aria-hidden="true" />
+          <span>橙色虚线框是抢单的 {grabDates.size} 天</span>
+          <button type="button" onClick={() => setGrabDates(new Set())}>
+            不再标出
+          </button>
+        </div>
+      ) : null}
       <div className="driver-calendar-stage calendar-ink-host">
       <div className="driver-calendar-scroll" ref={scrollRef} onScroll={onScroll}>
         {months.map((month) => (
@@ -665,6 +703,8 @@ export function DriverCalendarPage() {
             daysByDate={daysByDate}
             orders={orders}
             tripFill={tripFill}
+            showPlate={ink.plate}
+            grabDates={grabDates}
             addingTrip={addingTrip}
             canceling={canceling}
             releaseDate={armedRelease?.date ?? null}
@@ -688,7 +728,7 @@ export function DriverCalendarPage() {
           </MonthSection>
         ))}
       </div>
-      <CalendarInkBar balance={ink.balance} side={ink.side} onChange={ink.setBalance} onSideChange={ink.setSide} />
+      <CalendarInkBar ink={ink} plateStep />
       </div>
       {detailBelow && detailHintBox ? (
         <button
@@ -761,6 +801,8 @@ function MonthSection({
   daysByDate,
   orders,
   tripFill,
+  showPlate,
+  grabDates,
   addingTrip,
   canceling,
   releaseDate,
@@ -778,6 +820,9 @@ function MonthSection({
   daysByDate: Record<string, DriverCalendarDay>
   orders: Order[]
   tripFill: (dateText: string) => string
+  /** 控制条在车牌挡：日期下面写车牌而不是公司。 */
+  showPlate: boolean
+  grabDates: Set<string>
   addingTrip: boolean
   canceling: boolean
   releaseDate: string | null
@@ -833,6 +878,7 @@ function MonthSection({
                 inRange ? 'in-range' : '',
                 rangeEdge ? 'range-edge' : '',
                 dateText === todayKey && cell.inMonth ? 'today' : '',
+                cell.inMonth && grabDates.has(dateText) ? 'grab-marked' : '',
               ].join(' ')}
               aria-label={
                 releaseDate === dateText
@@ -895,13 +941,14 @@ function MonthSection({
             >
               {cell.inMonth ? (
                 hasTrip ? (
-                  <TripDayCaption day={cell.date.getDate()} trips={daysByDate[dateText]} />
+                  <TripDayCaption day={cell.date.getDate()} trips={daysByDate[dateText]} plate={showPlate} />
                 ) : (
                   <b>{cell.date.getDate()}</b>
                 )
               ) : (
                 ''
               )}
+              {cell.inMonth && grabDates.has(dateText) ? <span className="grab-mark" aria-hidden="true" /> : null}
             </button>
           )
         })}
@@ -912,12 +959,13 @@ function MonthSection({
 }
 
 /** 有行程的日期格：浮雕字和天气都取这一天第一张写了住宿位置的单。 */
-function TripDayCaption({ day, trips }: { day: number; trips: DriverCalendarDay }) {
+function TripDayCaption({ day, trips, plate }: { day: number; trips: DriverCalendarDay; plate: boolean }) {
   const stay = trips.items.find((item) => item.endLocation)
   return (
     <CalendarDayCaption
       day={day}
-      label={trips.assignerName}
+      // 控制条拉到最上面一挡：公司换成这一天的车牌，没配车只显示日期。
+      label={plate ? trips.vehiclePlate : trips.assignerName}
       place={placeMark(stay?.endLocation)}
       weather={stay?.weather}
     />

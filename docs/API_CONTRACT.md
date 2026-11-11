@@ -107,7 +107,7 @@ DELETE /api/dispatchers/drivers/{driverId}
 - 向调度员申请并批准后，关系留在 `driver_applications`，并写入该调度员所在公司的 `company_members`，`role=driver`，司导资源跟着调度员进公司，公司账户的调度台不因此列出。
 - 向公司账户申请并批准后，同一张表的 `dispatcher_user_id` 指向公司账户，公司调度台只看这一行。
 - 公司和调度员都在个人信息页看到待批准申请，每行是申请人姓名和其 `users.contact`，没有联系方式时前端写「暂未填写」，不显示登录用户名。
-- `DELETE /api/dispatchers/drivers/{driverId}` 删除当前调度员与这位司导已批准的 `driver_applications` 行，不能删除自己这一行。
+- `DELETE /api/dispatchers/drivers/{driverId}` 删除当前账号（调度员或公司账户，按调度台算不按角色）与这位司导已批准的 `driver_applications` 行，并收回自己派给他的未完成日期；不是自己名下的司导 404，不能删除自己这一行。
 - 同时收回未完成订单里分给这位司导、且由该调度员派出或挂在该调度员名下的日期：这些行程日清空 `driver_id`，有几天清几天，不删订单。
 - 最后一天早于今天的订单不动。
 - 不删司导账号，不改 `company_members`。
@@ -122,7 +122,21 @@ DELETE /api/dispatchers/drivers/{driverId}
 - 点开后每个行程日先展示该日活动内容，多个活动用 `-` 连接，活动后再展示当天司导姓名（`itinerary_days.driver_id`）。
 - 没派司导时前端写未分配。
 - 活动输入不放占位文字，弹框不再另写一行公司订单号；公司、调度员、司导都改 `order_activities.content`，不另存一份。
-- 公司账户只看本公司已派完、且最后一天早于今天的历史单。
+- 桌面不再带订单（原来的历史订单）；订单改由下面的订单记录接口给。
+- `GET /api/company/orders?companyId=&scope=` 订单记录（`CompanyOrderRecordDto[]`），不管完成没有，按开始日期从早到晚。界面上 `desk` 叫「调度中」，`driver` 叫「已接单」。`scope` 跟着角色：
+  - `all` 本公司全部：只有这家公司的公司账户。
+  - `desk` 调度：自己调度台上的（`OrderRules.OnDesk`，调度员是分配给自己的，公司账户同它的调度台）：公司账户、调度员。
+  - `driver` 司导：这家公司的单里派给自己跑的（行程日 `driver_id` 是自己）：所有人。
+  - 不传用角色能选的第一项（公司账户 `all`、调度员 `desk`、司导 `driver`）；不在角色范围里的 403。
+  - 每行：`id`、`label`、`guestCount`、`vehicleType`、`island`、`startDate`、`endDate`、`dayCount`、`route`（共用备注）、`drivers[]`、`plates[]`（按日期先后、不重复）、`driverIds[]`、`vehicleIds[]`（和 `drivers`、`plates` 一一对应）、`onDesk`（单子在自己调度台上：公司账户、调度员，点司导、车牌跳调度台用；`canReturn` 是它再加已绑公司）、`unassignedDays`（没派司导的天数）、`noVehicleDays`（没配车的天数）、`shareLevel`。
+  - 操作权限只给自己管的单：`canEdit`（公司账户管本公司全部，调度员管自己调度台上的；只是自己跑的单为 false）、`canSetShareLevel`（同订单的 `canSetShareLevel`）、`canReturn`（单子在自己调度台上且已绑公司，同调度台删除的退回）。操作仍走 `PUT /api/orders/{id}`、`PUT /api/orders/{id}/share-level`、`DELETE /api/orders/{id}?release=true`。
+- `GET /api/company/orders/export?companyId=&scope=` 订单记录导出成默认样式的 Excel（.xlsx）。范围和权限同上（范围不对 403），导出这个范围的全部记录。响应头 `X-Export-Added` 是条数；文件名「订单记录-调度中-yyyyMMdd-HHmmss.xlsx」（新西兰时间）。
+- `POST /api/company/orders/export?companyId=&scope=`（multipart，字段 `file`）把订单记录填进上传的表格，返回填好的 .xlsx（文件名「原文件名-yyyyMMdd-HHmmss.xlsx」，新西兰时间）。
+  - 只收 .xlsx / .xlsm，最大 5MB；服务器一次只填一张表（第二个请求最多等 1 分钟）；其他格式、打不开、认不出表头时 400 并说明原因。
+  - 配了 `Recognition__ApiKey` 时，把各工作表的前 25 行和最后 12 行文字（每格 30 字以内，带合并单元格和底色）交给 AI。AI 回填：工作表、表头行、各信息所在列、已有内容的最后一行、样式行、年份行、日期写法、人数是否纯数字。
+  - 回答对不上表格（表不存在、行号超出、认出的列少于两列）或 AI 出错时，改按表头文字找（订单来源 / 客人 / 人数 / 负责人 / 司导 / 司机 / 车型 / 车牌 / 起止 / 日期 / 南北岛 / 行程 / 路线 / 线路）。
+  - 只往后追加，不改已有格子。已有的单（起止日期的月日数字，加行程开头 6 个字；没有行程列时用负责人）跳过。
+  - 响应头：`X-Export-Added`、`X-Export-Skipped`，以及 `X-Export-Mode`（`ai` 或 `auto`）。
 - 司导看自己当前跑着的单，调度员看自己当前跑着的和自己当前分配的单（行程日 `assigned_by_user_id` 是自己）；已结束（最后一天早于今天）和尚未结束的都在内。
 - 只创建或只被指派为调度、但没有自己跑或分配的单不出现。
 - 分配改掉后，当前行程日不再属于自己，这张单就不再出现。
@@ -199,7 +213,9 @@ GET    /api/orders/{id}
 POST   /api/orders
 PUT    /api/orders/{id}
 DELETE /api/orders/{id}
+PUT    /api/orders/{id}/dates
 PUT    /api/orders/{orderId}/dispatcher
+PUT    /api/orders/{orderId}/share-level
 ```
 
 支持简单查询参数：
@@ -215,6 +231,8 @@ GET /api/orders?startDate=2026-11-01&endDate=2026-11-30
   "platformOrderNo": "P-1001",
   "startDate": "2026-11-12",
   "guestCount": 6,
+  "vehicleType": "五座车",
+  "island": "south",
   "notes": "",
   "driverNotes": ""
 }
@@ -222,11 +240,15 @@ GET /api/orders?startDate=2026-11-01&endDate=2026-11-30
 
 `orderNo` 由后端生成，请求中指定无效。  
 `platformOrderNo` 可为空。  
+`vehicleType` 车型，自由填写，最多 50 字，可为空。`island` 只能是 `south` / `north` / `both` 或空，其他值 400。  
+公司订单号、人数、车型、南/北岛只有调度员和公司账户的更新会写入；司导保存备注时这几项不变（司导看不到它们，传回的空值不能清掉）。  
 `startDate` 为当地日期 `YYYY-MM-DD`，不做时区换算。  
 `GET /api/orders/{id}` 返回订单主体、每日行程、每日活动项目和订单截图列表。  
 
 - `GET /api/orders` 可用 `orderNo` 精确匹配系统订单号或平台订单号。
-- 没有 `orderNo` 时，调度员只看到 `assignedDispatcherUserId` 是自己的单；公司账户只看到 `companyId` 是本公司的单；司导只看到行程日 `driver_id` 是自己的单，不按结束日过滤，已结束的单仍返回，我的行程日历照常画格。
+- `mine=true`（我的行程用）：不看账号角色，只返回行程日 `driver_id` 是当前账号自己司导身份的单；调度员、公司账户被别人派单（包括抢单后被确认）也在这里；没有司导身份返回空列表。
+- `desk=true`（调度台用）：按界面不按角色，只返回自己调度台上的单，即 `assignedDispatcherUserId` 是自己的单；公司账户另外带上没分调度员、但自己已经在上面派过司导的本公司订单（旧数据）。公司账户的调度台和调度员的调度台是同一套范围。
+- 没有 `orderNo` 时，调度员只看到 `assignedDispatcherUserId` 是自己的单；公司账户（派给调度用，不带 `desk`）看到 `companyId` 是本公司的全部单；司导只看到行程日 `driver_id` 是自己的单，不按结束日过滤，已结束的单仍返回，我的行程日历照常画格。
 - 另可用 `driverId`：公司和调度员只能查自己调度台上已批准的司导，返回这位司导的全部订单，不限所属公司，也不限是否分给自己。
 - 查不到这位司导时返回空列表。
 - 订单区不带 `driverId`，范围不变。
@@ -249,13 +271,27 @@ GET /api/orders?startDate=2026-11-01&endDate=2026-11-30
 
 - `companyId` / `companyName` 是订单所属公司。
 - 公司账户建单时强制写本公司，不能改绑。
+- `onMyDesk`（只在新建时有用）：公司账户在调度台上建单传 `true`，`assignedDispatcherUserId` 写成自己，单子在自己的调度台上；在派给调度里建单不传，留在公司订单池。调度员建单始终写成自己。AI 建单 `POST /api/recognition/import` 的 `order` 里同样有 `onMyDesk`。
 - 调度员和司导建单都不默认绑所属公司，即使只属于一家；不传 `companyId` 则保持空。
 - 调度员可指定任意已有公司。
 - 调度台点选公司后立即用同一套 `PUT /api/orders/{id}` 写入或改绑；调度员更新时明确传 `companyId: null` 表示解绑。
 - 改绑后原公司列表不再出现，新公司能看到。
 
 `assignedDispatcherUserId` / `assignedDispatcherName` / `assignedDispatcherContact` 是公司把整单交给哪位调度员，只读摘要。联系方式读该用户的 `users.contact`。调度员建单时默认写成自己。
-`DELETE /api/orders/{id}`：调度员对分给自己且已绑公司的单只做退回公司池（与 `PUT /dispatcher` 传 `null` 同一套清空），不删行；未绑公司则真正删除该单和附件。公司账户删除订单和附件。司导 403。只能处理分给自己的单。
+`DELETE /api/orders/{id}`：按界面区分，不按角色。
+
+- 调度台上删除带 `?release=true`：只能处理自己调度台上的单（同 `desk=true` 的范围），否则 403。已绑公司的单退回公司池（与 `PUT /dispatcher` 传 `null` 同一套清空），不删行，这张单上待确认的抢单（`order_claims`）一并删除；未绑公司的单真正删除该单和附件。公司账户在调度台上也一样。
+- 派给调度里删除不带 `release`：公司账户真正删除本公司的订单和附件，别家公司的单 403。
+- 调度员不能真删公司的单：不带 `release` 也按调度台处理。司导 403。
+
+`PUT /api/orders/{id}/dates`：改已建订单的日期（调度台订单日历上拖动）。请求 `{ "startDate": "2026-11-20", "endDate": "2026-11-23", "shiftDays": 3 }`，结束早于开始、超过 93 天或平移超过两年返回 400。
+
+- 原来的每一天平移 `shiftDays` 天（拖整段时不为 0，拖开头或末尾时为 0），行程说明、住宿地、活动、司导、派出人、车辆都跟着走；活动的预约和签到时间平移同样的天数。
+- 平移后落在新起止范围外的日子删掉（连同活动，电子票文件在写库成功后删）。新范围里、平移后原来行程首尾以外的日期补空白日；原来中间空着的日期保持空着。前端要删掉日子时，「保存」要再点一次确认（红框）。
+- 同一单同一天只能一条：整段平移时新旧日期重叠，后端先把要搬的日子挪到临时日期再一次放到新日期，全部在一个事务里。
+- 平移后，这位司导在新日期已有别的订单（真实订单不算他自己的占位单，占位单照常被覆盖），这一天改回未派、去掉车辆；只有车辆被别的订单占用时，只去掉车辆。都写进 `warnings`。
+- 能改：所属公司的公司账户；已绑公司的单只有分到它的调度员；未绑公司的单是建单人（含司导自己的占位单）或负责的调度员。其他人 403。订单响应的 `canReschedule` 给出当前用户能不能改。
+- 返回 `{ "order": 订单, "removedDayCount": 1, "warnings": ["11-21 王司导那天已有别的行程，这天改回未派"] }`。
 
 - 行程日另有 `assignedByUserId` / `assignedByName` / `assignedByContact`：当前是谁把这天派给司导，联系方式读该用户的 `users.contact`。旧数据没有记录派出人时，后端已经回退成建单人，前端直接用；没派司导的日期这三项为 null。
 - 我的行程点开某一天，在公司订单号下面显示这位调度员的姓名和联系方式。
@@ -346,7 +382,7 @@ PUT /api/orders/{orderId}/driver
 }
 ```
 
-语义：覆盖该订单所有行程日的司机。  
+语义：订单还有未分配的行程日时，只把这些日期派给该司机，拆单里已派给其他司机的日期不动；全部日期都已分配时才整单改派。冲突检查和占位单覆盖也只算这次被派的日期，`updatedDayCount` 是这次改动的天数。  
 
 - `driverId` 可以为 `null`，表示取消整单分配。
 - 调度员或公司账户整单解绑时，仅各天 `assignedByUserId`（旧数据回退 `createdByUserId`）都是本人，或全部已派日期都属于本人司导身份，才允许；否则 403。
@@ -477,7 +513,7 @@ PUT  /api/orders/{orderId}/driver
 - 调度台订单卡片和司导点日期展开的订单信息都走 `PUT /api/orders/{id}` 与共用的 `updateOrderInfo` / `OrderInfoFields`。
 - 调度台写入 `notes`，我的行程写入 `driverNotes`，互不可见。
 - 我的行程不改公司订单号；司导即使在请求里带上公司订单号，也保持原值。
-- `DELETE /api/orders/{id}` 按角色分叉：调度员把已绑公司、分给自己的单退回公司池（清空 `assigned_dispatcher_user_id` 和各行程日 `driver_id` / `assigned_by_user_id`，与公司 `PUT /dispatcher` 传 `null` 同一套收回）；未绑公司则真正删除该单和附件。
+- `DELETE /api/orders/{id}` 按界面分叉（见第 2 节）：调度台上（`release=true`，调度员总是按调度台）把已绑公司、在自己调度台上的单退回公司池（清空 `assigned_dispatcher_user_id` 和各行程日 `driver_id` / `assigned_by_user_id`，与公司 `PUT /dispatcher` 传 `null` 同一套收回，并删掉这张单待确认的抢单）；未绑公司则真正删除该单和附件。
 - 公司账户删除订单和附件。
 - 司导 403。
 - 点某一天编辑行程复用现有活动接口，与司导日历同一套 `DriverDayEditor`。
@@ -576,6 +612,25 @@ GET /api/weather/source
 
 返回 `{ "name": "MET Norway", "url": "https://www.met.no/en" }`，「我的行程」底部用它注明来源。所选来源需要密钥但没有配置（不查天气）时返回 204。
 
+## AI 建单
+
+```http
+GET  /api/recognition/status
+POST /api/recognition/order-draft
+POST /api/recognition/import
+```
+
+- 只有调度员和公司账户能用，其他人 403。`status` 返回 `{ enabled, model }`：服务器配了 `Recognition__ApiKey` 且当前用户能用时 `enabled` 为 `true`。
+- `order-draft`：`multipart/form-data`，文件字段都叫 `files`，按选择顺序；jpg / png / webp / pdf，单个 10MB、合计 40MB、最多 12 个。粘贴的行程文字放在 `text`（最多 20000 字，连续空行压成一行），交给模型时放在文件后面、标成「粘贴的文字」，电子票序号只算文件。文件和文字至少一样，都没有或文字太长 400；文字里认不出日期 422。只返回草稿，不写数据库。
+  - 返回 `OrderDraftDto`：`platformOrderNo`、`guestCount`、`vehicleType`（照原文简短写的车型，没写为 null）、`island`（`south` / `north` / `both`，只看要导入的日子，看不出为 null）、`notes`、`days[]`、`warnings[]`、`files[]`（上传的文件名，序号从 0 开始）、`model`、`inputTokens`、`outputTokens`。
+  - `days[]`：`serviceDate`、`include`（默认是否导入）、`note`、`description`、`endLocation`、`uncertain[]`、`activities[]`。
+  - `activities[]`：`content`、`kind`（`activity` / `hotel`）、`provider`、`libraryActivityId`、`bookingTime`、`checkinTime`（当地时间 `YYYY-MM-DDTHH:mm:ss`）、`ticketIndex`（指向 `files` 的序号）、`uncertain[]`。
+  - 识别不出任何日期、模型出错、未配密钥时返回 422，`detail` 是中文原因。
+- `import`：`multipart/form-data`。字段 `order` 是 JSON（`island` 不传或为空时按 `south` 写入）：`{ platformOrderNo, guestCount, vehicleType, island, notes, days: [{ serviceDate, description, endLocation, activities: [{ content, provider, libraryActivityId, bookingTime, checkinTime, ticketIndex }] }] }`，只放要导入的日期；文件字段 `file-{序号}` 是识别时的第几个文件。
+  - 被活动 `ticketIndex` 引用的文件存为该活动的电子票（8MB 以内）；其余图片存为订单截图；其他 PDF 不保存。
+  - 订单的起始日期取最早一天；建单归属和 `POST /api/orders` 一样；`notes` 写进建单人自己的备注。不存在的活动库 id 当作手填。
+  - 成功返回 `{ orderId }`；同一天出现两次、没有日期等返回 400。
+
 ## 活动库
 
 所有登录用户可以查看、搜索、评分、保存自己的顺序。标「公司账户」的接口其他身份返回 403。
@@ -616,3 +671,29 @@ GET    /api/library/activities/{id}/photos/{photoId}  查看图片（登录即�
 - 详情另带 `reviews`：每条有 `userName`、`score`、`comment`、`updatedAt`、`mine`。
 
 `pick` 的排序：本人在这个目的地保存过的顺序在前，其余按平均评分降序、评分人数降序、名称。住宿位置找不到目的地时，`destination` 为 null，`activities` 为空数组。
+
+## 抢单
+
+```http
+PUT    /api/orders/{orderId}/share-level   { "shareLevel": 0 | 1 | 2 }
+GET    /api/grab                           司导：能抢的单
+POST   /api/grab/{orderId}                 司导：抢单 { "dayIds": ["待抢日期ID", ...] }
+DELETE /api/grab/{orderId}                 司导：撤回自己的抢单
+GET    /api/grab/claims                    调度员 / 公司：自己订单上待确认的抢单
+POST   /api/grab/{orderId}/confirm         调度员 / 公司：确认派单 { "driverId": "..." }
+```
+
+- 订单响应新增 `shareLevel`（0 调度自留，1 公司内部，2 面向所有人）和 `canSetShareLevel`（当前用户是这张单的调度员，或所属公司的公司账户）。
+- `PUT share-level`：这张单的调度员（`assignedDispatcherUserId`，没有时是建单人）或所属公司的公司账户可以改，否则 403；值不在 0–2 返回 400；订单没绑公司时只能是 0，否则 400。返回订单。公司账户把还没分调度员的单（公司订单池里的）改成 1 或 2 时，这张单同时分给公司账户自己（`assignedDispatcherUserId` 写成公司账户），由它在调度台上确认抢单。解绑公司、换调度员、退回公司池、确认抢单后回到 0。
+- 待确认抢单 `GET /api/grab/claims` 和调度台订单列表（`desk=true`）同一条范围；公司账户的调度台另外带上以前已经放出去、但没分调度员的本公司订单。
+- `GET /api/grab`：当前用户能抢的单，按第一天日期排序。条件：订单还有没派司导的日期且都不早于今天；不是自己当调度员的单；等级为 1 或 2 且可见（见 PRD 6.6，调度自留不出现，抢单 404）；被这张单的调度员隐藏（拉黑）的司导三种等级都看不到。每项：
+  - `orderId`、`shareLevel`、`companyName`、`dispatcherName`、`guestCount`、`totalDayCount`（整张单的天数）、`claimedByMe`（自己已抢、等确认）。
+  - `days`：要一起抢的日期（未派的全部日期），每天 `id`、`serviceDate`、`endLocation`、`description`、`activities`（`content`、`bookingTime`、`checkinTime`）。
+  - `conflicts`：这些日期里自己已有的行程（`orderId`、`serviceDate`、`orderLabel`）。有冲突时不能抢。
+  - 不带公司订单号、各人备注、共用备注、联系方式、附件。
+- `POST /api/grab/{orderId}`：抢单，写一条待确认记录（`order_claims`），不派单。`dayIds` 必须正好等于当前未派的日期，否则 409（提示刷新）；有冲突 409（写明日期）；看不到这张单 404；没有司导身份 400。重复抢不报错。返回 `{ orderId, dates }`。
+- `DELETE /api/grab/{orderId}`：撤回自己的抢单，没有时 404。
+- `GET /api/grab/claims`：调度员（订单的调度员是自己）和公司账户（本公司订单）看到的待确认抢单，只列还有未派日期、且未派日期都不早于今天的订单；被该单调度员隐藏的司导不列。每条：`orderId`、`driverId`、`driverName`、`contact`、`hasAvatar`、`inRoster`（已在自己名单里）、`createdAt`。
+  - 抢单的司导即使还不在名单里，调度员也能用 `GET /api/drivers/{id}`、`/avatar`、驾照、`GET /api/orders?driverId=` 查看，也能写备注、隐藏（拉黑）。`GET /api/drivers` 名单本身不变。
+- `POST /api/grab/{orderId}/confirm`：只有能改等级的人可以确认（403）；这位司导没抢或已撤回 404；没有可派的日期或这位司导这几天已有别的行程 409。成功后未派日期的 `driverId` 是这位司导、`assignedByUserId` 是这张单的调度员；按抢单时的等级建立关系（1 级成为调度员的司导并写公司成员；2 级再成为公司账户的司导）；这张单的抢单全部删除；`shareLevel` 改回 0。返回 `{ orderId, dates }`。同一张单同时确认按订单行加锁。
+

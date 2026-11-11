@@ -118,9 +118,19 @@ export function ActivityPicker({
       <div className="library-sheet" role="dialog" aria-label="添加活动">
         <header className="library-sheet-bar">
           <h2>{placeName ? `${placeName}的活动` : '添加活动'}</h2>
-          <button type="button" className="library-chip" onClick={onClose}>
-            取消
-          </button>
+          <div className="library-sheet-bar-actions">
+            <button
+              type="button"
+              className="library-chip primary"
+              disabled={picked.length === 0 || saving}
+              onClick={() => void confirm()}
+            >
+              {picked.length ? `添加 ${picked.length} 项` : '添加'}
+            </button>
+            <button type="button" className="library-chip" onClick={onClose}>
+              取消
+            </button>
+          </div>
         </header>
         <input
           className="library-search"
@@ -201,14 +211,6 @@ export function ActivityPicker({
         <footer className="library-sheet-actions">
           <button type="button" className="library-chip" onClick={onManual}>
             手动填写
-          </button>
-          <button
-            type="button"
-            className="library-chip primary"
-            disabled={picked.length === 0 || saving}
-            onClick={() => void confirm()}
-          >
-            {picked.length ? `添加 ${picked.length} 项` : '添加'}
           </button>
         </footer>
       </div>

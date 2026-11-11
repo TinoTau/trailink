@@ -62,7 +62,6 @@ export type CompanyDeskDto = {
     canManage?: boolean;
     applications?: Array<CompanyApplicationDto>;
     dispatchers?: Array<CompanyMemberDto>;
-    orders?: Array<CompanyOrderDto>;
 };
 
 export type CompanyHomeDto = {
@@ -85,17 +84,35 @@ export type CompanyNoteWriteDto = {
     notes?: null | string;
 };
 
-export type CompanyOrderDto = {
+export type CompanyOrderRecordDto = {
     id?: string;
-    orderNo?: string;
-    platformOrderNo?: null | string;
     label?: null | string;
-    notes?: null | string;
-    driverNotes?: null | string;
-    sharedNotes?: null | string;
+    guestCount?: number;
+    vehicleType?: null | string;
+    island?: null | string;
     startDate?: string;
+    endDate?: string;
     dayCount?: number;
-    kind?: string;
+    route?: null | string;
+    drivers?: Array<string>;
+    driverIds?: Array<string>;
+    plates?: Array<string>;
+    vehicleIds?: Array<string>;
+    onDesk?: boolean;
+    unassignedDays?: number;
+    noVehicleDays?: number;
+    shareLevel?: number;
+    canEdit?: boolean;
+    canSetShareLevel?: boolean;
+    canReturn?: boolean;
+};
+
+export type ConfirmClaimDto = {
+    driverId?: string;
+};
+
+export type CreatedOrderDto = {
+    orderId?: string;
 };
 
 export type DestinationDto = {
@@ -149,6 +166,47 @@ export type DriverReadDto = {
 export type DriverWriteDto = {
     name?: string;
     phone?: null | string;
+};
+
+export type GrabActivityDto = {
+    content?: string;
+    bookingTime?: unknown;
+    checkinTime?: unknown;
+};
+
+export type GrabConflictDto = {
+    orderId?: string;
+    serviceDate?: string;
+    orderLabel?: null | string;
+};
+
+export type GrabDayDto = {
+    id?: string;
+    serviceDate?: string;
+    endLocation?: null | string;
+    description?: null | string;
+    activities?: Array<GrabActivityDto>;
+};
+
+export type GrabOrderDto = {
+    orderId?: string;
+    shareLevel?: number;
+    companyName?: null | string;
+    dispatcherName?: string;
+    guestCount?: number;
+    totalDayCount?: number;
+    days?: Array<GrabDayDto>;
+    conflicts?: Array<GrabConflictDto>;
+    claimedByMe?: boolean;
+};
+
+export type GrabResultDto = {
+    orderId?: string;
+    dates?: Array<string>;
+};
+
+export type GrabWriteDto = {
+    dayIds?: Array<string>;
 };
 
 export type IFormFile = Blob | File;
@@ -286,6 +344,63 @@ export type OrderActivityWriteDto = {
     checkinTime?: unknown;
 };
 
+export type OrderClaimDto = {
+    orderId?: string;
+    driverId?: string;
+    driverName?: string;
+    contact?: null | string;
+    hasAvatar?: boolean;
+    inRoster?: boolean;
+    createdAt?: string;
+};
+
+export type OrderDatesResultDto = {
+    order?: OrderReadDto;
+    removedDayCount?: number;
+    warnings?: Array<string>;
+};
+
+export type OrderDatesWriteDto = {
+    startDate?: string;
+    endDate?: string;
+    shiftDays?: number;
+};
+
+export type OrderDraftActivityDto = {
+    content?: string;
+    kind?: string;
+    provider?: null | string;
+    libraryActivityId?: null | string;
+    bookingTime?: unknown;
+    checkinTime?: unknown;
+    ticketIndex?: null | number;
+    uncertain?: Array<string>;
+};
+
+export type OrderDraftDayDto = {
+    serviceDate?: string;
+    include?: boolean;
+    description?: null | string;
+    endLocation?: null | string;
+    activities?: Array<OrderDraftActivityDto>;
+    uncertain?: Array<string>;
+    note?: null | string;
+};
+
+export type OrderDraftDto = {
+    platformOrderNo?: null | string;
+    guestCount?: null | number;
+    vehicleType?: null | string;
+    island?: null | string;
+    notes?: null | string;
+    days?: Array<OrderDraftDayDto>;
+    warnings?: Array<string>;
+    files?: Array<string>;
+    model?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+};
+
 export type OrderFileReadDto = {
     id?: string;
     orderId?: string;
@@ -301,6 +416,8 @@ export type OrderReadDto = {
     endDate?: null | string;
     dayCount?: number;
     guestCount?: number;
+    vehicleType?: null | string;
+    island?: null | string;
     notes?: null | string;
     driverNotes?: null | string;
     sharedNotes?: null | string;
@@ -318,6 +435,9 @@ export type OrderReadDto = {
     isInProgress?: boolean;
     isHistorical?: boolean;
     hasDriverConflict?: boolean;
+    shareLevel?: number;
+    canSetShareLevel?: boolean;
+    canReschedule?: boolean;
     days?: Array<ItineraryDayReadDto>;
     files?: Array<OrderFileReadDto>;
 };
@@ -326,10 +446,13 @@ export type OrderWriteDto = {
     platformOrderNo?: null | string;
     startDate?: string;
     guestCount?: number;
+    vehicleType?: null | string;
+    island?: null | string;
     notes?: null | string;
     driverNotes?: null | string;
     sharedNotes?: null | string;
     companyId?: null | string;
+    onMyDesk?: null | boolean;
 };
 
 export type PendingApplicationDto = {
@@ -366,6 +489,11 @@ export type ProfileUsernameWriteDto = {
     username?: string;
 };
 
+export type RecognitionStatusDto = {
+    enabled?: boolean;
+    model?: string;
+};
+
 export type RegisterDto = {
     username?: string;
     password?: string;
@@ -388,6 +516,10 @@ export type SessionUserDto = {
     companies?: Array<CompanyBriefDto>;
     pendingApplications?: Array<PendingApplicationDto>;
     pendingDriverApplications?: Array<PendingDriverApplicationDto>;
+};
+
+export type ShareLevelWriteDto = {
+    shareLevel?: number;
 };
 
 export type VehicleBindDto = {
@@ -669,6 +801,61 @@ export type PutApiCompanyResponses = {
 };
 
 export type PutApiCompanyResponse = PutApiCompanyResponses[keyof PutApiCompanyResponses];
+
+export type GetApiCompanyOrdersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        companyId?: string;
+        scope?: string;
+    };
+    url: '/api/company/orders';
+};
+
+export type GetApiCompanyOrdersResponses = {
+    /**
+     * OK
+     */
+    200: Array<CompanyOrderRecordDto>;
+};
+
+export type GetApiCompanyOrdersResponse = GetApiCompanyOrdersResponses[keyof GetApiCompanyOrdersResponses];
+
+export type GetApiCompanyOrdersExportData = {
+    body?: never;
+    path?: never;
+    query?: {
+        companyId?: string;
+        scope?: string;
+    };
+    url: '/api/company/orders/export';
+};
+
+export type GetApiCompanyOrdersExportResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostApiCompanyOrdersExportData = {
+    body: {
+        file?: IFormFile;
+    };
+    path?: never;
+    query?: {
+        companyId?: string;
+        scope?: string;
+    };
+    url: '/api/company/orders/export';
+};
+
+export type PostApiCompanyOrdersExportResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
 
 export type PostApiCompanyQrData = {
     body: {
@@ -1027,6 +1214,90 @@ export type PutApiDriversByIdHiddenResponses = {
 };
 
 export type PutApiDriversByIdHiddenResponse = PutApiDriversByIdHiddenResponses[keyof PutApiDriversByIdHiddenResponses];
+
+export type GetApiGrabData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/grab';
+};
+
+export type GetApiGrabResponses = {
+    /**
+     * OK
+     */
+    200: Array<GrabOrderDto>;
+};
+
+export type GetApiGrabResponse = GetApiGrabResponses[keyof GetApiGrabResponses];
+
+export type DeleteApiGrabByOrderIdData = {
+    body?: never;
+    path: {
+        orderId: string;
+    };
+    query?: never;
+    url: '/api/grab/{orderId}';
+};
+
+export type DeleteApiGrabByOrderIdResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostApiGrabByOrderIdData = {
+    body: GrabWriteDto;
+    path: {
+        orderId: string;
+    };
+    query?: never;
+    url: '/api/grab/{orderId}';
+};
+
+export type PostApiGrabByOrderIdResponses = {
+    /**
+     * OK
+     */
+    200: GrabResultDto;
+};
+
+export type PostApiGrabByOrderIdResponse = PostApiGrabByOrderIdResponses[keyof PostApiGrabByOrderIdResponses];
+
+export type GetApiGrabClaimsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/grab/claims';
+};
+
+export type GetApiGrabClaimsResponses = {
+    /**
+     * OK
+     */
+    200: Array<OrderClaimDto>;
+};
+
+export type GetApiGrabClaimsResponse = GetApiGrabClaimsResponses[keyof GetApiGrabClaimsResponses];
+
+export type PostApiGrabByOrderIdConfirmData = {
+    body: ConfirmClaimDto;
+    path: {
+        orderId: string;
+    };
+    query?: never;
+    url: '/api/grab/{orderId}/confirm';
+};
+
+export type PostApiGrabByOrderIdConfirmResponses = {
+    /**
+     * OK
+     */
+    200: GrabResultDto;
+};
+
+export type PostApiGrabByOrderIdConfirmResponse = PostApiGrabByOrderIdConfirmResponses[keyof PostApiGrabByOrderIdConfirmResponses];
 
 export type GetApiHealthData = {
     body?: never;
@@ -1702,6 +1973,8 @@ export type GetApiOrdersData = {
         endDate?: string;
         orderNo?: string;
         driverId?: string;
+        mine?: boolean;
+        desk?: boolean;
     };
     url: '/api/orders';
 };
@@ -1736,7 +2009,9 @@ export type DeleteApiOrdersByIdData = {
     path: {
         id: string;
     };
-    query?: never;
+    query?: {
+        release?: boolean;
+    };
     url: '/api/orders/{id}';
 };
 
@@ -1782,6 +2057,24 @@ export type PutApiOrdersByIdResponses = {
 };
 
 export type PutApiOrdersByIdResponse = PutApiOrdersByIdResponses[keyof PutApiOrdersByIdResponses];
+
+export type PutApiOrdersByIdDatesData = {
+    body: OrderDatesWriteDto;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/orders/{id}/dates';
+};
+
+export type PutApiOrdersByIdDatesResponses = {
+    /**
+     * OK
+     */
+    200: OrderDatesResultDto;
+};
+
+export type PutApiOrdersByIdDatesResponse = PutApiOrdersByIdDatesResponses[keyof PutApiOrdersByIdDatesResponses];
 
 export type GetApiOrdersByIdFilesData = {
     body?: never;
@@ -1891,6 +2184,24 @@ export type PutApiOrdersByOrderIdDispatcherResponses = {
 
 export type PutApiOrdersByOrderIdDispatcherResponse = PutApiOrdersByOrderIdDispatcherResponses[keyof PutApiOrdersByOrderIdDispatcherResponses];
 
+export type PutApiOrdersByOrderIdShareLevelData = {
+    body: ShareLevelWriteDto;
+    path: {
+        orderId: string;
+    };
+    query?: never;
+    url: '/api/orders/{orderId}/share-level';
+};
+
+export type PutApiOrdersByOrderIdShareLevelResponses = {
+    /**
+     * OK
+     */
+    200: OrderReadDto;
+};
+
+export type PutApiOrdersByOrderIdShareLevelResponse = PutApiOrdersByOrderIdShareLevelResponses[keyof PutApiOrdersByOrderIdShareLevelResponses];
+
 export type GetApiPlacesData = {
     body?: never;
     path?: never;
@@ -1906,6 +2217,56 @@ export type GetApiPlacesResponses = {
 };
 
 export type GetApiPlacesResponse = GetApiPlacesResponses[keyof GetApiPlacesResponses];
+
+export type GetApiRecognitionStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/recognition/status';
+};
+
+export type GetApiRecognitionStatusResponses = {
+    /**
+     * OK
+     */
+    200: RecognitionStatusDto;
+};
+
+export type GetApiRecognitionStatusResponse = GetApiRecognitionStatusResponses[keyof GetApiRecognitionStatusResponses];
+
+export type PostApiRecognitionOrderDraftData = {
+    body: {
+        files?: Array<IFormFile>;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/recognition/order-draft';
+};
+
+export type PostApiRecognitionOrderDraftResponses = {
+    /**
+     * OK
+     */
+    200: OrderDraftDto;
+};
+
+export type PostApiRecognitionOrderDraftResponse = PostApiRecognitionOrderDraftResponses[keyof PostApiRecognitionOrderDraftResponses];
+
+export type PostApiRecognitionImportData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/recognition/import';
+};
+
+export type PostApiRecognitionImportResponses = {
+    /**
+     * OK
+     */
+    200: CreatedOrderDto;
+};
+
+export type PostApiRecognitionImportResponse = PostApiRecognitionImportResponses[keyof PostApiRecognitionImportResponses];
 
 export type GetApiVehiclesData = {
     body?: never;

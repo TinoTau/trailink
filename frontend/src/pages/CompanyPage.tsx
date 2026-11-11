@@ -5,14 +5,17 @@ import { companyApi } from '../api/auth'
 import { ordersApi } from '../api/orders'
 import { useAuthenticatedAuth } from '../auth/authState'
 import { AccountMenu } from './AccountMenu'
+import { CompanyOrderRecords } from './CompanyOrderRecords'
+import { OrderRescheduleDialog } from './dispatcher/OrderRescheduleDialog'
+import { useLockPageScroll } from '../useLockPageScroll'
 import { OrderFilesBlock } from './OrderFilesBlock'
 import { ActivityLibrarySection } from './library/ActivityLibrarySection'
-import { OrderDetailNotes } from './OrderInfoFields'
+import { OrderDetailNotes, SaveSlot, SaveSlotContext } from './OrderInfoFields'
 import { readCurrentCompanyId, writeCurrentCompanyId } from '../currentCompany'
 import { formatMonthDay } from '../localDate'
 import { dayActivityLine, formatActivityLine, orderDisplayLabel, parseActivityLine } from '../orderFlags'
 import { contactLabel } from '../text'
-import type { CompanyDesk, CompanySearch, Order } from '../types'
+import type { CompanyDesk, CompanyOrderScope, CompanySearch, Order } from '../types'
 import './account.css'
 
 export function CompanyPage() {
@@ -27,6 +30,20 @@ export function CompanyPage() {
   const [busy, setBusy] = useState(false)
   const [qrKey, setQrKey] = useState(0)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  /** 编辑订单保存后加一，订单记录重新读取。 */
+  const [recordsVersion, setRecordsVersion] = useState(0)
+  /** 订单弹框里点「调整日期」：打开和调度台同一套的改日期弹框。 */
+  const [rescheduling, setRescheduling] = useState(false)
+  /** 订单弹框头上「关闭」左边的「保存」空位。 */
+  const [orderSaveSlot, setOrderSaveSlot] = useState<HTMLElement | null>(null)
+  // 订单记录的过滤选项跟着角色：公司账户 全部 / 调度 / 司导，调度员 调度 / 司导，司导只有司导（和后端一致）。
+  const recordScopes: CompanyOrderScope[] = desk?.canManage
+    ? ['all', 'desk', 'driver']
+    : user.role === 'driver'
+      ? ['driver']
+      : ['desk', 'driver']
+  // 订单弹框开着时锁住后面的公司信息页，不让它跟着滑。
+  useLockPageScroll(Boolean(selectedOrder))
   const [ready, setReady] = useState(false)
   const selectedOrderRef = useRef<Order | null>(null)
   const nameRef = useRef(companyName)
@@ -411,24 +428,26 @@ export function CompanyPage() {
           {user.role === 'company' ? <ActivityLibrarySection /> : null}
 
           <section className="account-section profile-block">
-            <h2>历史订单</h2>
-            {desk.orders.length === 0 ? <p className="account-empty">暂无历史订单</p> : null}
-            <div className="account-grid">
-              {desk.orders.map((order) => (
-                <button
-                  type="button"
-                  className={`account-tile${selectedOrder?.id === order.id ? ' open' : ''}`}
-                  key={order.id}
-                  onClick={() => void openOrder(order.id)}
-                >
-                  <strong>{orderDisplayLabel(order)}</strong>
-                  <span>{formatMonthDay(order.startDate)}</span>
-                  <em>{order.dayCount}天</em>
-                </button>
-              ))}
-            </div>
+            <CompanyOrderRecords
+              companyId={desk.id}
+              version={recordsVersion}
+              // 过滤选项跟着角色：公司账户 全部 / 调度 / 司导，调度员 调度 / 司导，司导只有司导。
+              scopes={recordScopes}
+              onEdit={(id) => void openOrder(id)}
+            />
           </section>
         </main>
+      ) : null}
+
+      {selectedOrder && rescheduling ? (
+        <OrderRescheduleDialog
+          order={selectedOrder}
+          onClose={() => setRescheduling(false)}
+          onSaved={async () => {
+            await openOrder(selectedOrder.id)
+            setRecordsVersion((value) => value + 1)
+          }}
+        />
       ) : null}
 
       {selectedOrder ? (
@@ -437,26 +456,46 @@ export function CompanyPage() {
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
               setSelectedOrder(null)
+              setRescheduling(false)
             }
           }}
         >
+          <SaveSlotContext.Provider value={orderSaveSlot}>
           <div className="account-card">
             <div className="account-card-bar">
               <h2>{orderDisplayLabel(selectedOrder)}</h2>
-              <button type="button" className="account-chip" onClick={() => setSelectedOrder(null)}>
+              <div className="card-head-actions">
+              <SaveSlot onSlot={setOrderSaveSlot} />
+              <button
+                type="button"
+                className="account-chip"
+                onClick={() => {
+                  setSelectedOrder(null)
+                  setRescheduling(false)
+                }}
+              >
                 关闭
               </button>
+              </div>
             </div>
-            <p>
-              {formatMonthDay(selectedOrder.startDate)}
-              {selectedOrder.endDate ? ` 至 ${formatMonthDay(selectedOrder.endDate)}` : ''}
-              {selectedOrder.dayCount ? ` · ${selectedOrder.dayCount} 天` : ''}
-            </p>
+            <div className="account-order-dates">
+              <p>
+                {formatMonthDay(selectedOrder.startDate)}
+                {selectedOrder.endDate ? ` 至 ${formatMonthDay(selectedOrder.endDate)}` : ''}
+                {selectedOrder.dayCount ? ` · ${selectedOrder.dayCount} 天` : ''}
+              </p>
+              {selectedOrder.canReschedule ? (
+                <button type="button" className="account-chip" onClick={() => setRescheduling(true)}>
+                  调整日期
+                </button>
+              ) : null}
+            </div>
             <OrderDetailNotes
               order={selectedOrder}
               role={user.role}
               onSaved={(saved) => {
                 setSelectedOrder(saved)
+                setRecordsVersion((value) => value + 1)
               }}
             />
             <div className="account-files">
@@ -484,6 +523,7 @@ export function CompanyPage() {
               ))}
             </div>
           </div>
+          </SaveSlotContext.Provider>
         </div>
       ) : null}
     </div>

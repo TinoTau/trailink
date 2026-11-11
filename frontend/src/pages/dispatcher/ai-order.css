@@ -1,0 +1,614 @@
+/* 调度台「AI 建单」卡片：沿用订单卡片的白底、细边和圆角。
+   核对表单很长，所以盖住整个调度台，而不是只占订单区。 */
+.dispatcher-overlay.ai-overlay {
+  position: fixed;
+  z-index: 30;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(245, 245, 245, 0.72);
+}
+
+.ai-overlay .ai-order-card {
+  flex: 0 1 760px;
+  max-width: 760px;
+}
+
+@media (max-width: 800px) {
+  .dispatcher-overlay.ai-overlay {
+    padding: 8px;
+  }
+}
+
+.ai-order-card.drag-over {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.15), 0 12px 40px rgba(31, 31, 31, 0.12);
+}
+
+.ai-order-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 28px 16px;
+  border: 1.5px dashed #d9d9d9;
+  border-radius: 12px;
+  background: #fafafa;
+  color: #262626;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* 粘贴行程文字：和上面的上传框同一个样子（灰底虚线框），一眼能看到；点进去变蓝。 */
+.ai-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  color: #262626;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ai-paste textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 120px;
+  padding: 14px 16px;
+  border: 1.5px dashed #d9d9d9;
+  border-radius: 12px;
+  background: #fafafa;
+  color: #262626;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.ai-paste textarea::placeholder {
+  color: #8c8c8c;
+}
+
+.ai-paste textarea:hover,
+.ai-paste textarea:focus {
+  border-color: #1677ff;
+  background: #f0f7ff;
+  outline: none;
+}
+
+.ai-drop:hover,
+.ai-order-card.drag-over .ai-drop {
+  border-color: #1677ff;
+  background: #f0f7ff;
+}
+
+.ai-drop span {
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.ai-file-kind {
+  flex: none;
+  min-width: 28px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #f5f5f5;
+  color: #595959;
+  font-size: 11px;
+  text-align: center;
+}
+
+.ai-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-file-size {
+  flex: none;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.ai-files button,
+.ai-remove {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  /* 手指容易点到；上下负边距抵掉多出来的高度，行不变高。 */
+  width: 40px;
+  height: 40px;
+  margin: -9px -6px -9px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8c8c8c;
+}
+
+.ai-files button svg,
+.ai-remove svg {
+  width: 22px;
+  height: 22px;
+}
+
+.ai-wide {
+  width: 100%;
+}
+
+.ai-error {
+  margin: 0;
+  color: #cf1322;
+  font-size: 13px;
+}
+
+.ai-busy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 16px;
+  color: #262626;
+  font-size: 14px;
+  text-align: center;
+}
+
+.ai-busy span:last-child {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.ai-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #e6f0ff;
+  border-top-color: #1677ff;
+  border-radius: 50%;
+  animation: ai-spin 0.9s linear infinite;
+}
+
+@keyframes ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* ---------- 核对页：平时都是紧凑的文字，点一下才变成输入框 ---------- */
+.ai-warnings {
+  border-radius: 8px;
+  background: #fffbe6;
+  color: #614700;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-warnings summary {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-warnings summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-warnings summary span {
+  flex: none;
+  font-weight: 600;
+}
+
+.ai-warnings summary span::after {
+  content: ' ▸';
+}
+
+.ai-warnings[open] summary span::after {
+  content: ' ▾';
+}
+
+.ai-warnings summary em {
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-warnings[open] summary em {
+  display: none;
+}
+
+.ai-warnings ul {
+  margin: 0;
+  padding: 0 10px 6px 26px;
+}
+
+.ai-inline {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-inline-label {
+  flex: none;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.ai-inline > button {
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #262626;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
+
+
+.ai-inline > button.empty {
+  color: #bfbfbf;
+}
+
+.ai-inline input,
+.ai-inline textarea {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: 1px solid #1677ff;
+  border-radius: 6px;
+  outline: none;
+  background: #fff;
+  color: #262626;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ai-inline textarea {
+  field-sizing: content;
+  resize: none;
+}
+
+/* 只有鼠标才显示悬停底色；触屏点过之后不会一直灰着。 */
+@media (hover: hover) {
+  .ai-inline > button:hover,
+  .ai-day-date:hover {
+    background: #f5f5f5;
+  }
+
+  .ai-add:hover {
+    color: #1677ff;
+  }
+}
+
+/* AI 拿不准：黄底 */
+.ai-inline.uncertain > button,
+.ai-day-date.uncertain {
+  background: #fff1b8;
+  box-shadow: inset 0 0 0 1px #ffd666;
+}
+
+.ai-order-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: #fafafa;
+}
+
+.ai-order-fields .ai-inline:first-child {
+  flex: 1 1 140px;
+}
+
+.ai-order-fields .ai-span {
+  flex: 1 1 100%;
+}
+
+.ai-guests input {
+  width: 56px;
+}
+
+.ai-island {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.ai-island .island-toggle {
+  min-width: 56px;
+  height: 28px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.ai-days {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-day {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 0;
+  border-top: 1px solid #f0f0f0;
+}
+
+.ai-day-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.ai-day-check span {
+  flex: none;
+  text-decoration: line-through;
+}
+
+.ai-day-check em {
+  overflow: hidden;
+  font-style: normal;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-day input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.ai-day-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ai-day-date {
+  position: relative;
+  flex: none;
+  padding: 1px 4px;
+  border-radius: 6px;
+  color: #262626;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+
+.ai-day-date input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ai-stay {
+  margin-left: auto;
+  max-width: 50%;
+}
+
+.ai-stay input {
+  width: 96px;
+}
+
+.ai-desc {
+  padding-left: 22px;
+}
+
+.ai-desc > button {
+  color: #595959;
+}
+
+.ai-activity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 1px 0 1px 22px;
+}
+
+.ai-activity-name {
+  flex: 1;
+}
+
+.ai-tag {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.ai-tag.hotel {
+  background: #f9f0ff;
+  color: #531dab;
+}
+
+.ai-tag.library {
+  background: #f6ffed;
+  color: #389e0d;
+}
+
+.ai-time-wrap {
+  flex: none;
+}
+
+.ai-time > button {
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-time input {
+  width: 64px;
+}
+
+.ai-ticket {
+  position: relative;
+  flex: none;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #f5f5f5;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.ai-ticket.picked {
+  background: #e6f4ff;
+  color: #0958d9;
+}
+
+.ai-ticket.uncertain {
+  box-shadow: inset 0 0 0 1px #ffd666;
+}
+
+.ai-ticket select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ai-activity .ai-remove {
+  color: #bfbfbf;
+}
+
+.ai-add {
+  flex: none;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+
+.ai-caption {
+  margin: 0;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid #f0f0f0;
+  background: #fff;
+}
+
+.ai-footer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-footer-row .driver-primary-button {
+  flex: 1;
+}
+
+.ai-secondary {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #262626;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .dispatcher-overlay.ai-overlay {
+    padding: 0;
+  }
+
+  .ai-overlay .ai-order-card {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .ai-order-card .dispatcher-card-head {
+    padding: 10px 12px 6px;
+  }
+
+  .ai-footer {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 手机上正在编辑的那一个输入框用 16px，浏览器才不会放大整页；平时的文字保持小字。 */
+@media (pointer: coarse), (max-width: 800px) {
+  .ai-inline input,
+  .ai-inline textarea,
+  .ai-paste textarea {
+    font-size: 16px;
+  }
+}

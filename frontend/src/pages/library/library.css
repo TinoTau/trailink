@@ -37,6 +37,7 @@
 }
 
 .library-sheet-bar h2 {
+  min-width: 0;
   margin: 0;
   overflow: hidden;
   font-size: 16px;
@@ -193,6 +194,14 @@
   gap: 8px;
 }
 
+/* 弹框头右上角：「保存」/「添加」在「关闭」（「取消」）左边。 */
+.library-sheet-bar-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 /* 评价框 */
 .library-stars {
   display: flex;
@@ -288,8 +297,10 @@
 }
 
 .library-tag button {
-  width: 20px;
-  height: 20px;
+  width: 36px;
+  height: 36px;
+  margin: -8px -10px -8px -4px;
+  font-size: 18px;
   border: 0;
   background: none;
   color: #8c8c8c;
@@ -411,12 +422,13 @@
 
 .library-picked-remove {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
+  margin: -6px 0;
   border: 0;
   background: none;
   color: #8c8c8c;
-  font-size: 18px;
+  font-size: 24px;
 }
 
 /* 公司信息页的活动库入口和管理弹框 */
@@ -477,14 +489,14 @@
 
 .library-pending button {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 24px;
-  height: 24px;
+  top: 2px;
+  right: 2px;
+  width: 36px;
+  height: 36px;
   border: 0;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
-  font-size: 14px;
-  line-height: 24px;
+  font-size: 20px;
+  line-height: 36px;
 }

@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { GrabPage } from './pages/grab/GrabPage'
 import { useAuth } from './auth/authState'
 import { canRoleOpenPath, homeFor } from './navigation'
 import { CompanyPage } from './pages/CompanyPage'
@@ -33,6 +34,7 @@ export default function App() {
       <Route path="/dispatcher" element={<DispatcherPage />} />
       <Route path="/dispatcher/*" element={<Navigate to="/dispatcher" replace />} />
       <Route path="/driver/calendar" element={<DriverCalendarPage />} />
+      <Route path="/driver/grab" element={<GrabPage />} />
       <Route path="/driver/*" element={<Navigate to="/driver/calendar" replace />} />
       <Route path="/company/assign" element={<DispatcherPage />} />
       <Route path="/company" element={<CompanyPage />} />

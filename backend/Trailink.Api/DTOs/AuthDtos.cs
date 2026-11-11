@@ -143,24 +143,60 @@ public class CompanyDeskDto
     public bool CanManage { get; set; }
     public List<CompanyApplicationDto> Applications { get; set; } = [];
     public List<CompanyMemberDto> Dispatchers { get; set; } = [];
-    public List<CompanyOrderDto> Orders { get; set; } = [];
 }
 
-public class CompanyOrderDto
+/// <summary>公司信息页「订单记录」的一行：调度员看分配给自己的单，公司账户看本公司全部，司导看自己跑的。</summary>
+public class CompanyOrderRecordDto
 {
     public Guid Id { get; set; }
-    public string OrderNo { get; set; } = string.Empty;
-    public string? PlatformOrderNo { get; set; }
 
     /// <summary>订单显示名，规则同 <see cref="OrderReadDto.Label"/>。</summary>
     public string? Label { get; set; }
 
-    public string? Notes { get; set; }
-    public string? DriverNotes { get; set; }
-    public string? SharedNotes { get; set; }
+    public int GuestCount { get; set; }
+    public string? VehicleType { get; set; }
+
+    /// <summary>south / north / both；没填为 null（界面按南岛显示）。</summary>
+    public string? Island { get; set; }
+
     public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
     public int DayCount { get; set; }
-    public string Kind { get; set; } = "company";
+
+    /// <summary>行程路线：共用备注。界面只显示前 10 个字。</summary>
+    public string? Route { get; set; }
+
+    /// <summary>派到的司导，按日期先后、不重复。</summary>
+    public List<string> Drivers { get; set; } = [];
+
+    /// <summary>和 <see cref="Drivers"/> 一一对应的司导 id（订单记录点司导跳到调度台用）。</summary>
+    public List<Guid> DriverIds { get; set; } = [];
+
+    /// <summary>配到的车牌，按日期先后、不重复。</summary>
+    public List<string> Plates { get; set; } = [];
+
+    /// <summary>和 <see cref="Plates"/> 一一对应的车辆 id。</summary>
+    public List<Guid> VehicleIds { get; set; } = [];
+
+    /// <summary>这张单在自己的调度台上（公司账户、调度员）：点司导、车牌可以跳到调度台。</summary>
+    public bool OnDesk { get; set; }
+
+    /// <summary>还没派司导的天数。</summary>
+    public int UnassignedDays { get; set; }
+
+    /// <summary>还没配车的天数。</summary>
+    public int NoVehicleDays { get; set; }
+
+    public int ShareLevel { get; set; }
+
+    /// <summary>能改订单信息（调度员、公司账户）。</summary>
+    public bool CanEdit { get; set; }
+
+    /// <summary>能改抢单状态，规则同 <see cref="OrderReadDto.CanSetShareLevel"/>。</summary>
+    public bool CanSetShareLevel { get; set; }
+
+    /// <summary>能退回公司：单子在自己调度台上且已绑公司（同调度台上的删除）。</summary>
+    public bool CanReturn { get; set; }
 }
 
 public class CompanyContactDto
