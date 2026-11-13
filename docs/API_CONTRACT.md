@@ -128,15 +128,20 @@ DELETE /api/dispatchers/drivers/{driverId}
   - `desk` 调度：自己调度台上的（`OrderRules.OnDesk`，调度员是分配给自己的，公司账户同它的调度台）：公司账户、调度员。
   - `driver` 司导：这家公司的单里派给自己跑的（行程日 `driver_id` 是自己）：所有人。
   - 不传用角色能选的第一项（公司账户 `all`、调度员 `desk`、司导 `driver`）；不在角色范围里的 403。
-  - 每行：`id`、`label`、`guestCount`、`vehicleType`、`island`、`startDate`、`endDate`、`dayCount`、`route`（共用备注）、`drivers[]`、`plates[]`（按日期先后、不重复）、`driverIds[]`、`vehicleIds[]`（和 `drivers`、`plates` 一一对应）、`onDesk`（单子在自己调度台上：公司账户、调度员，点司导、车牌跳调度台用；`canReturn` 是它再加已绑公司）、`unassignedDays`（没派司导的天数）、`noVehicleDays`（没配车的天数）、`shareLevel`。
+  - 每行：`id`、`orderNo`（系统订单号 TL-…）、`label`、`guestCount`、`vehicleType`、`island`、`startDate`、`endDate`、`dayCount`、`route`（共用备注）、`drivers[]`、`plates[]`（按日期先后、不重复）、`driverIds[]`、`vehicleIds[]`（和 `drivers`、`plates` 一一对应）、`onDesk`（单子在自己调度台上：公司账户、调度员，点司导、车牌跳调度台用；`canReturn` 是它再加已绑公司）、`unassignedDays`（没派司导的天数）、`noVehicleDays`（没配车的天数）、`shareLevel`。
   - 操作权限只给自己管的单：`canEdit`（公司账户管本公司全部，调度员管自己调度台上的；只是自己跑的单为 false）、`canSetShareLevel`（同订单的 `canSetShareLevel`）、`canReturn`（单子在自己调度台上且已绑公司，同调度台删除的退回）。操作仍走 `PUT /api/orders/{id}`、`PUT /api/orders/{id}/share-level`、`DELETE /api/orders/{id}?release=true`。
 - `GET /api/company/orders/export?companyId=&scope=` 订单记录导出成默认样式的 Excel（.xlsx）。范围和权限同上（范围不对 403），导出这个范围的全部记录。响应头 `X-Export-Added` 是条数；文件名「订单记录-调度中-yyyyMMdd-HHmmss.xlsx」（新西兰时间）。
 - `POST /api/company/orders/export?companyId=&scope=`（multipart，字段 `file`）把订单记录填进上传的表格，返回填好的 .xlsx（文件名「原文件名-yyyyMMdd-HHmmss.xlsx」，新西兰时间）。
   - 只收 .xlsx / .xlsm，最大 5MB；服务器一次只填一张表（第二个请求最多等 1 分钟）；其他格式、打不开、认不出表头时 400 并说明原因。
   - 配了 `Recognition__ApiKey` 时，把各工作表的前 25 行和最后 12 行文字（每格 30 字以内，带合并单元格和底色）交给 AI。AI 回填：工作表、表头行、各信息所在列、已有内容的最后一行、样式行、年份行、日期写法、人数是否纯数字。
   - 回答对不上表格（表不存在、行号超出、认出的列少于两列）或 AI 出错时，改按表头文字找（订单来源 / 客人 / 人数 / 负责人 / 司导 / 司机 / 车型 / 车牌 / 起止 / 日期 / 南北岛 / 行程 / 路线 / 线路）。
-  - 只往后追加，不改已有格子。已有的单（起止日期的月日数字，加行程开头 6 个字；没有行程列时用负责人）跳过。
-  - 响应头：`X-Export-Added`、`X-Export-Skipped`，以及 `X-Export-Mode`（`ai` 或 `auto`）。
+  - 默认表格最后一列是「系统订单号」（TL-…）。上传的表格里：
+    - 先按「系统订单号」一列对单（表头写「系统订单号」，或某一列写的就是 TL-… 订单号；AI 或表头认出的列里写着别的内容时不用它）；表里没有这一列时在表头最右边加一列。
+    - 没写订单号的行再按起止日期的月日数字加行程开头 6 个字（没有行程列时用负责人）对，对上的补写订单号。
+    - 写着别的订单号（不在这次范围里、已删除）的行不动。一张单只对一行。
+  - 对上的行就地更新：人数、负责人、车型、车牌、起止时间、南/北岛、行程路线、订单号。订单来源不改；系统里空着的（没派司导、没配车）不清空表里的字；内容一样的格子不碰。
+  - 对不上的新单接在已有内容后面，下面的「合计」之类往下挪。
+  - 响应头：`X-Export-Added`（新增）、`X-Export-Updated`（更新）、`X-Export-Skipped`（对上了但没有变化），以及 `X-Export-Mode`（`ai` 或 `auto`）。
 - 司导看自己当前跑着的单，调度员看自己当前跑着的和自己当前分配的单（行程日 `assigned_by_user_id` 是自己）；已结束（最后一天早于今天）和尚未结束的都在内。
 - 只创建或只被指派为调度、但没有自己跑或分配的单不出现。
 - 分配改掉后，当前行程日不再属于自己，这张单就不再出现。

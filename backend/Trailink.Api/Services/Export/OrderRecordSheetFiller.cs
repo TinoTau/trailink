@@ -19,16 +19,22 @@ public sealed record SheetLayout(
     DateStyle Dates,
     bool GuestsAsNumber);
 
-public sealed record SheetFillResult(byte[]? Bytes, int Added, int Skipped, string Mode, string? Error)
+/// <summary>填表结果：新增、更新（表里已有，改了司导 / 车辆 / 订单信息）、没变化的条数。</summary>
+public sealed record SheetFillResult(byte[]? Bytes, int Added, int Updated, int Skipped, string Mode, string? Error)
 {
-    public static SheetFillResult Fail(string error) => new(null, 0, 0, "", error);
+    public static SheetFillResult Fail(string error) => new(null, 0, 0, 0, "", error);
 }
+
+/// <summary><see cref="OrderRecordSheetFiller.Write"/> 的结果。</summary>
+public sealed record SheetWriteResult(int Added, int Updated, int Skipped);
 
 /// <summary>
 /// 把订单记录填进用户上传的 .xlsx（空表、只有表头、已经有内容的都可以）。
 /// 配了 AI 密钥（和 AI 建单同一个）时，把表头和已有的几行文字发给 AI，让它说出每一列是什么、从哪一行往下写、
 /// 年份分隔行和日期的写法；没配或 AI 出错时按表头文字自己找。
-/// 只往后追加，不改已有的格子；已有的单（起止日期和行程 / 负责人对得上）跳过；新行照已有数据行的样式。
+/// 表里已有的单：先按「系统订单号」一列对（没有这一列时在表头最右边加一列），对不上再按起止日期和行程 / 负责人对；
+/// 对上的那一行就地更新司导、车牌、车型、人数、日期、南/北岛、行程（订单来源不改；系统里空着的不清空表里的字）。
+/// 对不上的新单接在后面，照已有数据行的样式。
 /// </summary>
 public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<OrderRecordSheetFiller> logger)
 {
@@ -39,6 +45,8 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
 
     private static readonly Dictionary<RecordField, string[]> Keywords = new()
     {
+        // 放第一个：「系统订单号」里有「订单」两个字，先认它。
+        [RecordField.OrderNo] = ["系统订单号", "系统单号"],
         [RecordField.Source] = ["订单来源", "来源", "渠道", "客户来源"],
         [RecordField.Guests] = ["客人信息", "客人", "人数", "客户"],
         [RecordField.Driver] = ["负责人", "司导", "司机", "导游", "负责"],
@@ -119,17 +127,17 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
             }
 
             var sheet = workbook.Worksheet(layout.Sheet);
-            var (added, skipped) = Write(sheet, layout, rows);
+            var written = Write(sheet, layout, rows);
             using var output = new MemoryStream();
             workbook.SaveAs(output);
-            return new SheetFillResult(output.ToArray(), added, skipped, mode, null);
+            return new SheetFillResult(output.ToArray(), written.Added, written.Updated, written.Skipped, mode, null);
         }
     }
 
-    /// <summary>按认出的结构追加。返回写入和跳过（表里已经有）的条数。</summary>
-    public static (int Added, int Skipped) Write(IXLWorksheet sheet, SheetLayout layout, IReadOnlyList<OrderRecordRow> rows)
+    /// <summary>按认出的结构更新已有的单、追加新单。</summary>
+    public static SheetWriteResult Write(IXLWorksheet sheet, SheetLayout layout, IReadOnlyList<OrderRecordRow> rows)
     {
-        var columns = layout.Columns;
+        var columns = new Dictionary<RecordField, int>(layout.Columns);
         var headerRow = layout.HeaderRow;
         var lastDataRow = layout.LastDataRow;
         var dataStyleRow = layout.DataStyleRow;
@@ -147,20 +155,47 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
                 .Select((field, index) => (field, column: index + 1))
                 .ToDictionary(item => item.field, item => item.column);
         }
-
-        var existing = ExistingKeys(sheet, headerRow, lastDataRow, columns);
-        var lastYear = LastYear(sheet, headerRow, lastDataRow);
-        var pending = rows
-            .OrderBy(row => row.Start)
-            .ThenBy(row => row.End)
-            .Where(row => !existing.Contains(Key(row, columns)))
-            .ToList();
-        var skipped = rows.Count - pending.Count;
-        if (pending.Count == 0)
+        else
         {
-            return (0, skipped);
+            // 认出的「系统订单号」列里要是写着别的东西（旅行社订单号、团号），不能拿来对单，当作没有这一列。
+            if (columns.TryGetValue(RecordField.OrderNo, out var claimed) && !LooksLikeOrderNoColumn(sheet, headerRow, lastDataRow, claimed))
+            {
+                columns.Remove(RecordField.OrderNo);
+            }
         }
 
+        if (!columns.ContainsKey(RecordField.OrderNo))
+        {
+            // 表头没写「系统订单号」：先看有没有哪一列写的就是 TL-… 订单号，没有就在最右边加一列。
+            var found = FindOrderNoColumn(sheet, headerRow, lastDataRow, columns);
+            columns[RecordField.OrderNo] = found > 0 ? found : AddOrderNoColumn(sheet, headerRow, lastDataRow, dataStyleRow, columns);
+        }
+
+        var matches = MatchRows(sheet, headerRow, lastDataRow, columns, rows);
+        var updated = 0;
+        foreach (var (sheetRow, index) in matches)
+        {
+            if (UpdateRow(sheet, sheetRow, rows[index], columns, layout))
+            {
+                updated++;
+            }
+        }
+
+        var matchedIndexes = matches.Values.ToHashSet();
+        var pending = rows
+            .Select((row, index) => (row, index))
+            .Where(item => !matchedIndexes.Contains(item.index))
+            .Select(item => item.row)
+            .OrderBy(row => row.Start)
+            .ThenBy(row => row.End)
+            .ToList();
+        var skipped = matches.Count - updated;
+        if (pending.Count == 0)
+        {
+            return new SheetWriteResult(0, updated, skipped);
+        }
+
+        var lastYear = LastYear(sheet, headerRow, lastDataRow);
         // 先算要写几行（含年份行），下面还有别的内容（合计、备注）时整体下移，不覆盖。
         var plan = new List<(OrderRecordRow? Row, int Year)>();
         var year = lastYear;
@@ -223,7 +258,199 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
             current++;
         }
 
-        return (pending.Count, skipped);
+        return new SheetWriteResult(pending.Count, updated, skipped);
+    }
+
+    /// <summary>
+    /// 表里每一行对应哪张单（表格行号 → rows 下标）。先按系统订单号；没写订单号的行再按起止日期和行程 / 负责人。
+    /// 写着别的订单号（不在这次导出范围里、或已经删了的单）的行不动。一张单只对一行。
+    /// </summary>
+    private static Dictionary<int, int> MatchRows(
+        IXLWorksheet sheet,
+        int headerRow,
+        int lastDataRow,
+        IReadOnlyDictionary<RecordField, int> columns,
+        IReadOnlyList<OrderRecordRow> rows)
+    {
+        var matches = new Dictionary<int, int>();
+        var taken = new HashSet<int>();
+        var byNo = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (rows[index].OrderNo.Length > 0)
+            {
+                byNo.TryAdd(rows[index].OrderNo, index);
+            }
+        }
+
+        var noColumn = columns.GetValueOrDefault(RecordField.OrderNo);
+        var withoutNo = new List<int>();
+        for (var row = headerRow + 1; row <= lastDataRow; row++)
+        {
+            var no = noColumn > 0 ? sheet.Cell(row, noColumn).GetFormattedString().Trim() : "";
+            if (no.Length == 0)
+            {
+                withoutNo.Add(row);
+            }
+            else if (byNo.TryGetValue(no, out var index) && taken.Add(index))
+            {
+                matches[row] = index;
+            }
+        }
+
+        if (!columns.TryGetValue(RecordField.Dates, out var datesColumn))
+        {
+            return matches;
+        }
+
+        var textColumn = columns.TryGetValue(RecordField.Route, out var route)
+            ? route
+            : columns.TryGetValue(RecordField.Driver, out var driver) ? driver : 0;
+        var byKey = new Dictionary<string, Queue<int>>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (taken.Contains(index))
+            {
+                continue;
+            }
+
+            var key = Key(rows[index], columns);
+            if (!byKey.TryGetValue(key, out var queue))
+            {
+                byKey[key] = queue = new Queue<int>();
+            }
+
+            queue.Enqueue(index);
+        }
+
+        foreach (var row in withoutNo)
+        {
+            var key = RowKey(sheet, row, datesColumn, textColumn);
+            if (key is not null && byKey.TryGetValue(key, out var queue) && queue.Count > 0)
+            {
+                var index = queue.Dequeue();
+                taken.Add(index);
+                matches[row] = index;
+            }
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// 用系统里的内容更新表里的一行：订单来源不改（那是调度员自己写的）；系统里空着的（如还没派司导）不清空表里的字；
+    /// 内容一样的格子不碰，保留原来的格式。有改动时返回 true。
+    /// </summary>
+    private static bool UpdateRow(
+        IXLWorksheet sheet,
+        int row,
+        OrderRecordRow record,
+        IReadOnlyDictionary<RecordField, int> columns,
+        SheetLayout layout)
+    {
+        var changed = false;
+        foreach (var (field, column) in columns)
+        {
+            if (field == RecordField.Source)
+            {
+                continue;
+            }
+
+            var value = record.Value(field, layout.Dates, layout.GuestsAsNumber);
+            var text = value.ToString() ?? "";
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            var cell = sheet.Cell(row, column);
+            if (cell.IsMerged() && !cell.Address.Equals(cell.MergedRange().RangeAddress.FirstAddress))
+            {
+                continue;
+            }
+
+            if (field == RecordField.Dates && cell.DataType == XLDataType.DateTime)
+            {
+                // 日期格式的格子（Excel 日期）：同一天的单、日子没变就不动。
+                var date = cell.GetDateTime();
+                if (record.Start == record.End && date.Month == record.Start.Month && date.Day == record.Start.Day)
+                {
+                    continue;
+                }
+            }
+            else if (WhitespacePattern().Replace(cell.GetFormattedString(), " ").Trim() == text)
+            {
+                continue;
+            }
+
+            OrderRecordSheet.SetValue(cell, value);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    /// <summary>这一列已有的内容都是 TL-… 订单号（或空着）。</summary>
+    private static bool LooksLikeOrderNoColumn(IXLWorksheet sheet, int headerRow, int lastDataRow, int column)
+    {
+        for (var row = headerRow + 1; row <= lastDataRow; row++)
+        {
+            var text = sheet.Cell(row, column).GetFormattedString().Trim();
+            if (text.Length > 0 && !OrderRecordSheet.IsSystemOrderNo(text))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>没写「系统订单号」表头时，找一列里写着 TL-… 订单号的列；没有返回 0。</summary>
+    private static int FindOrderNoColumn(
+        IXLWorksheet sheet,
+        int headerRow,
+        int lastDataRow,
+        IReadOnlyDictionary<RecordField, int> columns)
+    {
+        for (var row = headerRow + 1; row <= lastDataRow; row++)
+        {
+            foreach (var cell in sheet.Row(row).CellsUsed())
+            {
+                if (!columns.Values.Contains(cell.Address.ColumnNumber) && OrderRecordSheet.IsSystemOrderNo(cell.GetFormattedString()))
+                {
+                    return cell.Address.ColumnNumber;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>在表头最右边加「系统订单号」一列：表头照左边一格的样式，数据行照左边一格的样式（年份行不加）。</summary>
+    private static int AddOrderNoColumn(
+        IXLWorksheet sheet,
+        int headerRow,
+        int lastDataRow,
+        int dataStyleRow,
+        IReadOnlyDictionary<RecordField, int> columns)
+    {
+        var column = 1 + Math.Max(
+            Math.Max(columns.Values.DefaultIfEmpty(1).Max(), sheet.Row(headerRow).LastCellUsed()?.Address.ColumnNumber ?? 1),
+            dataStyleRow > 0 ? sheet.Row(dataStyleRow).LastCellUsed()?.Address.ColumnNumber ?? 1 : 1);
+        var header = sheet.Cell(headerRow, column);
+        header.Style = sheet.Cell(headerRow, column - 1).Style;
+        header.Value = OrderRecordSheet.SystemOrderNoHeader;
+        sheet.Column(column).Width = OrderRecordSheet.OrderNoWidth;
+        for (var row = headerRow + 1; row <= lastDataRow; row++)
+        {
+            var left = sheet.Cell(row, column - 1);
+            if (!left.IsMerged() && !left.IsEmpty())
+            {
+                sheet.Cell(row, column).Style = left.Style;
+            }
+        }
+
+        return column;
     }
 
     private sealed record YearRowTemplate(int FirstColumn, int LastColumn, int TextColumn, bool WithUnit, int StyleRow);
@@ -281,40 +508,23 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
         return $"{numbers}|{Prefix(text)}";
     }
 
-    private static HashSet<string> ExistingKeys(
-        IXLWorksheet sheet,
-        int headerRow,
-        int lastDataRow,
-        IReadOnlyDictionary<RecordField, int> columns)
+    /// <summary>表里一行的键（同 <see cref="Key"/>）；日期格是空的返回 null。</summary>
+    private static string? RowKey(IXLWorksheet sheet, int row, int datesColumn, int textColumn)
     {
-        var keys = new HashSet<string>();
-        if (!columns.TryGetValue(RecordField.Dates, out var datesColumn))
+        var cell = sheet.Cell(row, datesColumn);
+        var dates = cell.DataType == XLDataType.DateTime
+            ? $"{cell.GetDateTime().Month},{cell.GetDateTime().Day}"
+            : string.Join(",", NumberPattern().Matches(cell.GetFormattedString())
+                .Select(match => int.Parse(match.Value))
+                .Where(number => number < 1000)
+                .Take(4));
+        if (dates.Length == 0)
         {
-            return keys;
+            return null;
         }
 
-        var textColumn = columns.TryGetValue(RecordField.Route, out var route)
-            ? route
-            : columns.TryGetValue(RecordField.Driver, out var driver) ? driver : 0;
-        for (var row = headerRow + 1; row <= lastDataRow; row++)
-        {
-            var cell = sheet.Cell(row, datesColumn);
-            var dates = cell.DataType == XLDataType.DateTime
-                ? $"{cell.GetDateTime().Month},{cell.GetDateTime().Day}"
-                : string.Join(",", NumberPattern().Matches(cell.GetFormattedString())
-                    .Select(match => int.Parse(match.Value))
-                    .Where(number => number < 1000)
-                    .Take(4));
-            if (dates.Length == 0)
-            {
-                continue;
-            }
-
-            var text = textColumn > 0 ? sheet.Cell(row, textColumn).GetFormattedString() : "";
-            keys.Add($"{dates}|{Prefix(text)}");
-        }
-
-        return keys;
+        var text = textColumn > 0 ? sheet.Cell(row, textColumn).GetFormattedString() : "";
+        return $"{dates}|{Prefix(text)}";
     }
 
     private static string Prefix(string text)
@@ -495,6 +705,7 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
         - dates 起止时间（日期，如「11.11-11.15」）
         - island 南/北岛
         - route 行程路线
+        - orderNo 系统订单号：形如「TL-20261111-AB12CD」，表头一般写「系统订单号」；旅行社自己的订单号、团号不算
         表里没有的信息填空字符串，不要硬凑；一列只对应一种信息。
         lastDataRow 是已有内容的最后一行（新记录写在它下面）；只有表头时等于表头行。表格完全是空的时 headerRow 和 lastDataRow 都填 0。
         dataStyleRow 是一行有代表性的普通数据行（新行照它的样式），没有就填 0。
@@ -602,7 +813,7 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
     private static JsonObject LayoutSchema()
     {
         var columns = new JsonObject();
-        foreach (var name in new[] { "source", "guests", "driver", "vehicleType", "plate", "dates", "island", "route" })
+        foreach (var name in new[] { "source", "guests", "driver", "vehicleType", "plate", "dates", "island", "route", "orderNo" })
         {
             columns[name] = new JsonObject { ["type"] = "string", ["description"] = "列字母，如 A、B；没有填空字符串" };
         }
@@ -618,7 +829,7 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
                 {
                     ["type"] = "object",
                     ["properties"] = columns,
-                    ["required"] = new JsonArray("source", "guests", "driver", "vehicleType", "plate", "dates", "island", "route")
+                    ["required"] = new JsonArray("source", "guests", "driver", "vehicleType", "plate", "dates", "island", "route", "orderNo")
                 },
                 ["lastDataRow"] = new JsonObject { ["type"] = "integer" },
                 ["dataStyleRow"] = new JsonObject { ["type"] = "integer" },
@@ -664,7 +875,7 @@ public sealed partial class OrderRecordSheetFiller(IDraftModel model, ILogger<Or
                      {
                          ("source", RecordField.Source), ("guests", RecordField.Guests), ("driver", RecordField.Driver),
                          ("vehicleType", RecordField.VehicleType), ("plate", RecordField.Plate), ("dates", RecordField.Dates),
-                         ("island", RecordField.Island), ("route", RecordField.Route)
+                         ("island", RecordField.Island), ("route", RecordField.Route), ("orderNo", RecordField.OrderNo)
                      })
             {
                 var letter = map.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

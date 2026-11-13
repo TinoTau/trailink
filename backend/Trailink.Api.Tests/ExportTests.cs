@@ -89,8 +89,8 @@ public class ExportTests : IClassFixture<RecognitionFactory>
         using var workbook = Open(await response.Content.ReadAsByteArrayAsync());
         var sheet = workbook.Worksheet(1);
         Assert.Equal(
-            ["订单来源", "客人信息", "负责人", "车型", "车牌", "起止时间", "南/北岛", "行程路线"],
-            Enumerable.Range(1, 8).Select(column => sheet.Cell(1, column).GetString()).ToArray());
+            ["订单来源", "客人信息", "负责人", "车型", "车牌", "起止时间", "南/北岛", "行程路线", "系统订单号"],
+            Enumerable.Range(1, 9).Select(column => sheet.Cell(1, column).GetString()).ToArray());
         Assert.True(sheet.Cell(1, 1).Style.Font.Bold);
         // 年份行：整行合并、绿底。
         Assert.Equal("2026年", sheet.Cell(2, 1).GetString());
@@ -103,6 +103,7 @@ public class ExportTests : IClassFixture<RecognitionFactory>
         Assert.Equal("11.11-11.15", sheet.Cell(3, 6).GetString());
         Assert.Equal("南岛", sheet.Cell(3, 7).GetString());
         Assert.Equal(XLAlignmentHorizontalValues.Left, sheet.Cell(3, 8).Style.Alignment.Horizontal);
+        Assert.Matches(@"^TL-\d{8}-[0-9A-F]{6}$", sheet.Cell(3, 9).GetString());
         // 一天的单只写一个日期；行程里的换行变成空格；没填南北岛按南岛。
         Assert.Equal("11.24", sheet.Cell(4, 6).GetString());
         Assert.Equal("基督城酒店-特卡波 基督城民宿", sheet.Cell(4, 8).GetString());
@@ -160,6 +161,11 @@ public class ExportTests : IClassFixture<RecognitionFactory>
         // 已有的单不重复；新单写在已有内容下面，「合计」往下挪。
         Assert.Equal("11月11日-11月15日", sheet.Cell(4, 1).GetString());
         Assert.Equal("老客人", sheet.Cell(4, 5).GetString());
+        // 表里没有「系统订单号」：在最右边加一列，已有的单补上订单号（下次就按订单号对）。
+        Assert.Equal("系统订单号", sheet.Cell(2, 6).GetString());
+        Assert.Matches(@"^TL-\d{8}-[0-9A-F]{6}$", sheet.Cell(4, 6).GetString());
+        Assert.Matches(@"^TL-\d{8}-[0-9A-F]{6}$", sheet.Cell(5, 6).GetString());
+        Assert.Equal("", sheet.Cell(6, 6).GetString());
         Assert.Equal("11月24日", sheet.Cell(5, 1).GetString());
         Assert.Equal("基督城酒店-特卡波 基督城民宿", sheet.Cell(5, 2).GetString());
         Assert.Equal(4, sheet.Cell(5, 3).GetValue<int>());
@@ -184,7 +190,7 @@ public class ExportTests : IClassFixture<RecognitionFactory>
             {
               "sheet": "我的单",
               "headerRow": 2,
-              "columns": { "source": "", "guests": "C", "driver": "D", "vehicleType": "", "plate": "", "dates": "A", "island": "", "route": "B" },
+              "columns": { "source": "", "guests": "C", "driver": "D", "vehicleType": "", "plate": "", "dates": "A", "island": "", "route": "B", "orderNo": "E" },
               "lastDataRow": 4,
               "dataStyleRow": 4,
               "yearRows": true,
@@ -193,18 +199,76 @@ public class ExportTests : IClassFixture<RecognitionFactory>
               "guestsAsNumber": true
             }
             """;
+        // AI 把「备注」当成了系统订单号：那一列写的不是 TL-… 订单号，不用它，另加一列。
         var response = await setup.Dispatcher.PostAsync(
             $"/api/company/orders/export?companyId={setup.CompanyId}&scope=desk",
             Upload(ExistingSheet(), "我的表.xlsx"));
         response.EnsureSuccessStatusCode();
         Assert.Equal("ai", response.Headers.GetValues("X-Export-Mode").Single());
         Assert.Equal("2", response.Headers.GetValues("X-Export-Added").Single());
-        Assert.Equal("1", response.Headers.GetValues("X-Export-Skipped").Single());
+        // 已有的那张单补写了订单号，算更新。
+        Assert.Equal("1", response.Headers.GetValues("X-Export-Updated").Single());
+        Assert.Equal("0", response.Headers.GetValues("X-Export-Skipped").Single());
         Assert.Matches(@"^我的表-\d{8}-\d{6}\.xlsx$", response.Content.Headers.ContentDisposition!.FileNameStar);
         // 发给 AI 的是表格文字（表头和已有的几行）。
         var sent = Assert.IsType<Trailink.Api.Services.Recognition.DraftPart.Text>(_factory.Model.LastParts.Single()).Value;
         Assert.Contains("第2行：A=日期 | B=线路 | C=人数 | D=司机 | E=备注", sent);
         AssertFilled(await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [Fact]
+    public async Task Rows_with_the_system_order_no_are_updated_in_place()
+    {
+        var setup = await SetupAsync();
+        _factory.Model.Enabled = false;
+        try
+        {
+            var exported = await setup.Dispatcher.GetAsync($"/api/company/orders/export?companyId={setup.CompanyId}&scope=desk");
+            exported.EnsureSuccessStatusCode();
+            byte[] edited;
+            string orderNo;
+            using (var workbook = Open(await exported.Content.ReadAsByteArrayAsync()))
+            {
+                // 第 3 行是 11.11 那张单：表里的内容改得和系统不一样（行程也改了，按日期 + 行程已经对不上，只能靠订单号）。
+                var sheet = workbook.Worksheet(1);
+                orderNo = sheet.Cell(3, 9).GetString();
+                sheet.Cell(3, 1).Value = "我写的来源";
+                sheet.Cell(3, 2).Value = "9人";
+                sheet.Cell(3, 3).Value = "旧司机";
+                sheet.Cell(3, 5).Value = "手写车牌";
+                sheet.Cell(3, 8).Value = "改过的行程";
+                // 一行写着别的订单号（不在这次导出范围里）：不动。
+                sheet.Cell(7, 3).Value = "别人";
+                sheet.Cell(7, 6).Value = "12.1";
+                sheet.Cell(7, 9).Value = "TL-20260101-ABCDEF";
+                using var stream = new MemoryStream();
+                workbook.SaveAs(stream);
+                edited = stream.ToArray();
+            }
+
+            var response = await setup.Dispatcher.PostAsync(
+                $"/api/company/orders/export?companyId={setup.CompanyId}&scope=desk",
+                Upload(edited, "订单记录.xlsx"));
+            response.EnsureSuccessStatusCode();
+            Assert.Equal("0", response.Headers.GetValues("X-Export-Added").Single());
+            Assert.Equal("1", response.Headers.GetValues("X-Export-Updated").Single());
+            Assert.Equal("2", response.Headers.GetValues("X-Export-Skipped").Single());
+            using var filled = Open(await response.Content.ReadAsByteArrayAsync());
+            var result = filled.Worksheet(1);
+            Assert.Equal(orderNo, result.Cell(3, 9).GetString());
+            // 人数、司导、行程按系统改回来；订单来源是调度员自己写的，不改；系统里没配车，不清空表里的车牌。
+            Assert.Equal("2人", result.Cell(3, 2).GetString());
+            Assert.Equal("唐姐", result.Cell(3, 3).GetString());
+            Assert.Equal("基督城-特卡波-库克山-奥马鲁", result.Cell(3, 8).GetString());
+            Assert.Equal("我写的来源", result.Cell(3, 1).GetString());
+            Assert.Equal("手写车牌", result.Cell(3, 5).GetString());
+            Assert.Equal("别人", result.Cell(7, 3).GetString());
+            Assert.Equal("", result.Cell(8, 1).GetString());
+        }
+        finally
+        {
+            _factory.Model.Enabled = true;
+        }
     }
 
     [Fact]

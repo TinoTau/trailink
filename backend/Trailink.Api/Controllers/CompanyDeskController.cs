@@ -108,8 +108,10 @@ public class CompanyDeskController(
     /// <summary>
     /// 把订单记录填进用户上传的表格（.xlsx，空表或已有内容的都可以）：
     /// 配了 AI 密钥时让 AI 看表头和已有的几行，认出每一列是什么、从哪一行往下写、日期怎么写；
-    /// 没配或 AI 失败时按表头文字自己找。已有的单（起止日期和行程 / 负责人对得上）不重复写。
-    /// 文件名是「原文件名-年月日-时分秒.xlsx」。结果里 <c>X-Export-Added</c> / <c>X-Export-Skipped</c> 是写入和跳过的条数，<c>X-Export-Mode</c> 是 ai / auto。
+    /// 没配或 AI 失败时按表头文字自己找。表里已有的单（系统订单号对得上，没有订单号时起止日期和行程 / 负责人对得上）
+    /// 就地更新司导、车辆和订单信息，新单接在后面；没有「系统订单号」一列时在最右边加上。
+    /// 文件名是「原文件名-年月日-时分秒.xlsx」。结果里 <c>X-Export-Added</c> / <c>X-Export-Updated</c> / <c>X-Export-Skipped</c>
+    /// 是新增、更新、没变化的条数，<c>X-Export-Mode</c> 是 ai / auto。
     /// </summary>
     [HttpPost("orders/export")]
     [RequestSizeLimit(OrderRecordSheet.MaxUploadBytes + 64 * 1024)]
@@ -158,6 +160,7 @@ public class CompanyDeskController(
         }
 
         Response.Headers["X-Export-Added"] = result.Added.ToString();
+        Response.Headers["X-Export-Updated"] = result.Updated.ToString();
         Response.Headers["X-Export-Skipped"] = result.Skipped.ToString();
         Response.Headers["X-Export-Mode"] = result.Mode;
         return File(result.Bytes!, OrderRecordSheet.ContentType, ExportFileName(chosen, file.FileName));
@@ -260,6 +263,7 @@ public class CompanyDeskController(
             return new CompanyOrderRecordDto
             {
                 Id = order.Id,
+                OrderNo = order.OrderNo,
                 Label = OrderRules.Label(order.PlatformOrderNo, order.SharedNotes),
                 GuestCount = order.GuestCount,
                 VehicleType = order.VehicleType,

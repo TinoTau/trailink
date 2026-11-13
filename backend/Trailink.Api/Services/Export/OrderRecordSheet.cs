@@ -15,7 +15,9 @@ public enum RecordField
     Plate,
     Dates,
     Island,
-    Route
+    Route,
+    /// <summary>系统订单号（TL-…）：再次上传时靠它找到表里的那一行，更新司导、车辆和订单信息。</summary>
+    OrderNo
 }
 
 /// <summary>起止时间的写法。默认 <see cref="Dot"/>（11.11-11.15）。</summary>
@@ -37,7 +39,8 @@ public sealed record OrderRecordRow(
     string VehicleType,
     string Plates,
     string Island,
-    string Route)
+    string Route,
+    string OrderNo = "")
 {
     public static OrderRecordRow From(CompanyOrderRecordDto record, string source) => new(
         record.StartDate,
@@ -48,7 +51,8 @@ public sealed record OrderRecordRow(
         record.VehicleType ?? "",
         string.Join("、", record.Plates),
         OrderRecordSheet.IslandLabel(record.Island),
-        OrderRecordSheet.OneLine(record.Route));
+        OrderRecordSheet.OneLine(record.Route),
+        record.OrderNo ?? "");
 
     /// <summary>格子里写的文字。人数可以写成「2人」或纯数字。</summary>
     public object Value(RecordField field, DateStyle dates, bool guestsAsNumber) => field switch
@@ -61,6 +65,7 @@ public sealed record OrderRecordRow(
         RecordField.Dates => OrderRecordSheet.FormatDates(Start, End, dates),
         RecordField.Island => Island,
         RecordField.Route => Route,
+        RecordField.OrderNo => OrderNo,
         _ => ""
     };
 }
@@ -74,11 +79,17 @@ public static class OrderRecordSheet
     public const string ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     /// <summary>上传表格最大 5MB：订单记录表一般只有几十 KB，太大的表读进内存会挤占小服务器。</summary>
     public const int MaxUploadBytes = 5 * 1024 * 1024;
+    public const string SystemOrderNoHeader = "系统订单号";
+    public const double OrderNoWidth = 22;
+
+    /// <summary>系统订单号的样子：TL-年月日-6 位。</summary>
+    public static bool IsSystemOrderNo(string? text) =>
+        !string.IsNullOrWhiteSpace(text) && Regex.IsMatch(text.Trim(), @"^TL-\d{8}-[0-9A-Z]{6}$", RegexOptions.IgnoreCase);
 
     public static readonly IReadOnlyList<RecordField> DefaultFields =
     [
         RecordField.Source, RecordField.Guests, RecordField.Driver, RecordField.VehicleType,
-        RecordField.Plate, RecordField.Dates, RecordField.Island, RecordField.Route
+        RecordField.Plate, RecordField.Dates, RecordField.Island, RecordField.Route, RecordField.OrderNo
     ];
 
     public static string Header(RecordField field) => field switch
@@ -91,13 +102,14 @@ public static class OrderRecordSheet
         RecordField.Dates => "起止时间",
         RecordField.Island => "南/北岛",
         RecordField.Route => "行程路线",
+        RecordField.OrderNo => SystemOrderNoHeader,
         _ => ""
     };
 
     private static readonly XLColor HeaderFill = XLColor.FromHtml("#8DD0EE");
     private static readonly XLColor YearFill = XLColor.FromHtml("#70AD47");
     private static readonly XLColor GridColor = XLColor.FromHtml("#D9D9D9");
-    private static readonly double[] DefaultWidths = [11, 11, 11, 22, 12, 15, 9, 80];
+    private static readonly double[] DefaultWidths = [11, 11, 11, 22, 12, 15, 9, 80, OrderNoWidth];
 
     public static bool IsXlsx(string fileName) =>
         Path.GetExtension(fileName).ToLowerInvariant() is ".xlsx" or ".xlsm";
@@ -208,6 +220,13 @@ public static class OrderRecordSheet
         cell.Style.Alignment.Horizontal = field == RecordField.Route
             ? XLAlignmentHorizontalValues.Left
             : XLAlignmentHorizontalValues.Center;
+        if (field == RecordField.OrderNo)
+        {
+            // 订单号是给系统对单用的，字小一点、灰一点，不抢眼。
+            cell.Style.Font.FontName = "Consolas";
+            cell.Style.Font.FontSize = 9;
+            cell.Style.Font.FontColor = XLColor.FromHtml("#8C8C8C");
+        }
         cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         Grid(cell.Style);
     }

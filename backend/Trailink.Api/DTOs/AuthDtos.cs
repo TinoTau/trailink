@@ -150,6 +150,9 @@ public class CompanyOrderRecordDto
 {
     public Guid Id { get; set; }
 
+    /// <summary>系统订单号（TL-…），导出表格时写进「系统订单号」一列，再上传时用来对单。</summary>
+    public string OrderNo { get; set; } = string.Empty;
+
     /// <summary>订单显示名，规则同 <see cref="OrderReadDto.Label"/>。</summary>
     public string? Label { get; set; }
 

@@ -9,8 +9,9 @@ const MENU_WIDTH = 300
 /**
  * 订单记录标题右边的「导出」：导出当前范围的全部订单记录。
  * - 「导出新表格」：默认样式（浅蓝表头、绿色年份行）。
- * - 「填进我的表格」：上传自己的 .xlsx（空表或已有内容都可以），服务器认出每一列（配了 AI 时用 AI），
- *   新单接在已有内容后面，已有的单不重复；下载填好的表格。
+ * - 「填进我的表格」：上传自己的 .xlsx（空表或已有内容都可以），服务器认出每一列（配了 AI 时用 AI）。
+ *   表里已有的单按「系统订单号」对上（没有这一列时自动加上），就地更新司导、车辆和订单信息；
+ *   新单接在已有内容后面；下载填好的表格。
  */
 export function OrderRecordsExport({
   companyId,
@@ -46,15 +47,10 @@ export function OrderRecordsExport({
       const file = await companyApi.fillOrders(companyId, scope, picked)
       saveDownloaded(file, `${picked.name.replace(/\.xls[xm]?$/i, '')}-${fileStamp()}.xlsx`)
       const added = Number(file.headers.get('X-Export-Added') ?? 0)
+      const updated = Number(file.headers.get('X-Export-Updated') ?? 0)
       const skipped = Number(file.headers.get('X-Export-Skipped') ?? 0)
       const how = file.headers.get('X-Export-Mode') === 'ai' ? 'AI 认出了表格的每一列，' : ''
-      message.success({
-        content:
-          added === 0
-            ? `${how}表格里已经有全部 ${skipped} 张单，没有新增`
-            : `${how}填入 ${added} 条${skipped > 0 ? `，跳过表格里已有的 ${skipped} 条` : ''}`,
-        duration: 6,
-      })
+      message.success({ content: `${how}${fillSummary(added, updated, skipped)}`, duration: 6 })
     } catch (error) {
       message.error({ content: error instanceof Error ? error.message : '填写表格失败', duration: 8 })
     } finally {
@@ -125,13 +121,29 @@ export function OrderRecordsExport({
               }}
             >
               <strong>填进我的表格…</strong>
-              <span>上传 .xlsx（空表或已有内容都行），认出每一列，新单接在后面，已有的不重复；下载的文件名是原名加日期时间</span>
+              <span>
+                上传 .xlsx（空表或已有内容都行）：已有的单按「系统订单号」更新司导、车辆和订单信息，新单接在后面；下载的文件名是原名加日期时间
+              </span>
             </button>
           </div>
         </div>
       ) : null}
     </>
   )
+}
+
+/** 填表结果的提示，例如「新增 2 条，更新 3 条，1 条没有变化」。 */
+function fillSummary(added: number, updated: number, skipped: number) {
+  if (added === 0 && updated === 0) {
+    return `表格里的 ${skipped} 张单都是最新的，没有改动`
+  }
+
+  const parts = [
+    added > 0 ? `新增 ${added} 条` : '',
+    updated > 0 ? `更新 ${updated} 条` : '',
+    skipped > 0 ? `${skipped} 条没有变化` : '',
+  ].filter(Boolean)
+  return parts.join('，')
 }
 
 /** 服务器没给文件名时用：新西兰时间的年月日-时分秒，例如 20261111-000912。 */

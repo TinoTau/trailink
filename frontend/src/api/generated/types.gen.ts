@@ -86,6 +86,7 @@ export type CompanyNoteWriteDto = {
 
 export type CompanyOrderRecordDto = {
     id?: string;
+    orderNo?: string;
     label?: null | string;
     guestCount?: number;
     vehicleType?: null | string;
@@ -2237,6 +2238,8 @@ export type GetApiRecognitionStatusResponse = GetApiRecognitionStatusResponses[k
 export type PostApiRecognitionOrderDraftData = {
     body: {
         files?: Array<IFormFile>;
+    } & {
+        text?: string;
     };
     path?: never;
     query?: never;
