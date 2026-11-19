@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { message } from 'antd'
+import { recognitionApi } from '../../api/recognition'
+import { AiOrderCard } from '../dispatcher/AiOrderCard'
 import { isStoredFile, itineraryDayWrite, ordersApi } from '../../api/orders'
 import { useAuthenticatedAuth } from '../../auth/authState'
 import { FileField } from '../FileField'
@@ -33,6 +37,23 @@ export function DriverDayEditor({
   const [orders, setOrders] = useState<Order[]>([])
   const [splitHint, setSplitHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** 服务器配了 AI：自己能改日期的单（自己的「仅日期」单）上可以「填入行程明细」。 */
+  const [fillEnabled, setFillEnabled] = useState(false)
+  const [fillOrder, setFillOrder] = useState<Order | null>(null)
+
+  useEffect(() => {
+    if (!showOrderInfo) {
+      return
+    }
+    let active = true
+    recognitionApi.cachedStatus().then(
+      (status) => active && setFillEnabled(status.fillEnabled),
+      () => undefined,
+    )
+    return () => {
+      active = false
+    }
+  }, [showOrderInfo])
 
   useEffect(() => {
     let active = true
@@ -90,6 +111,16 @@ export function DriverDayEditor({
                 order={order}
                 meta={dispatcherContactLine(order, group.trips[0], user.id)}
                 onSaved={onChanged}
+                extraFields={
+                  fillEnabled && order.canReschedule ? (
+                    <div className="reschedule-entry">
+                      <span>行程明细</span>
+                      <button type="button" className="dispatcher-chip" onClick={() => setFillOrder(order)}>
+                        填入行程明细
+                      </button>
+                    </div>
+                  ) : null
+                }
                 extraActions={
                   <button
                     type="button"
@@ -116,6 +147,31 @@ export function DriverDayEditor({
           </div>
         )
       })}
+      {fillOrder
+        ? createPortal(
+            <div className="dispatcher-overlay ai-overlay ai-fill-page">
+              <AiOrderCard
+                key={fillOrder.id}
+                fill={{
+                  order: fillOrder,
+                  // 司导没有调度备注。
+                  notes: false,
+                  onFilled: (result) => {
+                    setFillOrder(null)
+                    if (result.warnings.length > 0) {
+                      message.warning({ content: `已填入行程明细。${result.warnings.join('；')}`, duration: 8 })
+                    } else {
+                      message.success('已填入行程明细')
+                    }
+                    void onChanged()
+                  },
+                }}
+                onClose={() => setFillOrder(null)}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

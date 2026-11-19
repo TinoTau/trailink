@@ -170,6 +170,21 @@ export type OrderWrite = Omit<OrderWriteDto, 'startDate' | 'guestCount'> & {
 
 export type OrderDatesResult = { order: Order; removedDayCount: number; warnings: string[] }
 
+/** 填入行程明细前的对照：细单每天接粗单第几天的司导、车辆（fromDate 为空是新加的一天），哪些天冲突、哪些天删掉。 */
+export interface OrderFillPreview {
+  days: {
+    serviceDate: string
+    fromDate: string | null
+    driverName: string | null
+    plate: string | null
+    driverConflict: boolean
+    vehicleConflict: boolean
+  }[]
+  removed: { serviceDate: string; driverName: string | null; plate: string | null; hasContent: boolean }[]
+  warnings: string[]
+}
+export type OrderFillResult = { order: Order; warnings: string[] }
+
 export type AssignmentResult = Omit<RequiredApi<AssignmentResultDto>, 'warnings'> & {
   warnings: string[]
 }

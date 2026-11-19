@@ -13,6 +13,11 @@
   max-width: 760px;
 }
 
+/* 司导日历上的「填入行程明细」：盖住整页（在确认框下面）。 */
+.dispatcher-overlay.ai-overlay.ai-fill-page {
+  z-index: 900;
+}
+
 @media (max-width: 800px) {
   .dispatcher-overlay.ai-overlay {
     padding: 8px;
@@ -611,4 +616,45 @@
   .ai-paste textarea {
     font-size: 16px;
   }
+}
+
+/* 填入行程明细前的对照（确认框里）。冲突用和日历冲突一样的红色。 */
+.ai-fill-preview ul {
+  list-style: none;
+  margin: 6px 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.ai-fill-preview li {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fafafa;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ai-fill-preview li.conflict {
+  background: #fff1f0;
+  color: #cf1322;
+  font-weight: 600;
+}
+
+.ai-fill-preview li.removed {
+  color: #8c8c8c;
+  text-decoration: line-through;
+}
+
+.ai-fill-date {
+  white-space: nowrap;
+}
+
+.ai-fill-lead {
+  margin: 0;
+  color: #595959;
+  font-size: 13px;
 }

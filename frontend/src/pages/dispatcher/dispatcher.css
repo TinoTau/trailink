@@ -1233,11 +1233,17 @@ a.dispatcher-chip {
 /* 改日期：编辑订单里的入口，和日历底部的操作条。 */
 .reschedule-entry {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   color: #262626;
   font-size: 13px;
+}
+
+/* 「行程日期」靠左，「改日期」「填入行程明细」两个按钮靠右；手机上放不下时按钮换行。 */
+.reschedule-entry > span {
+  margin-right: auto;
 }
 
 .reschedule-bar {

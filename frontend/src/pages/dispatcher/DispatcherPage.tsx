@@ -15,7 +15,7 @@ import { calendarHorizon, earlierDate, formatLocalDate, formatMonthDay, laterDat
 import { conflictChoices, conflictDateChoices, ConflictDatePopover, type ConflictDateChoice } from '../../ConflictDatePopover'
 import { assignedDriverFocus, calendarTrip, dateOrderEdges, dateSpan, driverAssignerCaption, driverDisplayLabel, conflictPatternStyle, conflictingOrderIds, conflictingVehicleOrderIds, dayOnVehicleDate, hasDispatcherAssignment, hasUnassignedDays, isOwnAssignment, orderDisplayLabel, orderSpan, orderTileLabel, ordersOnDriverDate, ordersOnVehicleDate, patternForOrder, CONFLICT_RED, type ConflictPattern } from '../../orderFlags'
 import { placeMark } from '../../placeMark'
-import type { ItineraryDay, Order, OrderClaim, Vehicle } from '../../types'
+import type { ItineraryDay, Order, OrderClaim, OrderFillResult, Vehicle } from '../../types'
 import { grabApi } from '../../api/grab'
 import { recognitionApi } from '../../api/recognition'
 import { AiOrderCard } from './AiOrderCard'
@@ -103,6 +103,10 @@ export function DispatcherPage() {
   /** AI 建单：服务器配了密钥才显示入口。 */
   const [aiEnabled, setAiEnabled] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
+  /** 能在订单上「填入行程明细」（服务器配了密钥）。 */
+  const [fillEnabled, setFillEnabled] = useState(false)
+  /** 正在给哪张单填入行程明细；换了打开的订单就不显示。 */
+  const [fillOrderId, setFillOrderId] = useState<string | null>(null)
   const ordersRef = useRef<Order[]>([])
   const driverTripsRef = useRef<Order[]>([])
   const driverTripDriverIdRef = useRef<string | null>(null)
@@ -136,7 +140,12 @@ export function DispatcherPage() {
   useEffect(() => {
     let alive = true
     recognitionApi.status().then(
-      (status) => alive && setAiEnabled(status.enabled),
+      (status) => {
+        if (alive) {
+          setAiEnabled(status.enabled)
+          setFillEnabled(status.fillEnabled)
+        }
+      },
       () => undefined,
     )
     return () => {
@@ -275,6 +284,10 @@ export function DispatcherPage() {
     [drivers],
   )
   const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? null
+  // 换了打开的订单（或关掉了）：「填入行程明细」跟着关掉，再打开同一张单时不会自己冒出来。
+  if (fillOrderId !== null && fillOrderId !== selectedOrderId) {
+    setFillOrderId(null)
+  }
   const orderRangeStart = earlierDate(horizon.start, selectedOrder?.days[0]?.serviceDate || selectedOrder?.startDate) || horizon.start
   const orderRangeEnd = laterDate(horizon.end, selectedOrder?.endDate || selectedOrder?.days.at(-1)?.serviceDate) || horizon.end
   const selectedOrderDay = selectedOrder?.days.find((day) => day.id === selectedOrderDayId) ?? null
@@ -629,6 +642,16 @@ export function DispatcherPage() {
     setSelectedOrderId(null)
     setSelectedOrderDayId(null)
     setAiOpen(true)
+  }
+
+  async function onItineraryFilled(result: OrderFillResult) {
+    setFillOrderId(null)
+    if (result.warnings.length > 0) {
+      message.warning({ content: `已填入行程明细。${result.warnings.join('；')}`, duration: 8 })
+    } else {
+      message.success('已填入行程明细')
+    }
+    await loadBoard()
   }
 
   async function onAiOrderCreated(orderId: string) {
@@ -1909,7 +1932,17 @@ export function DispatcherPage() {
         }
         creatingOrder={creatingOrder}
         onToggleCreate={toggleCreateOrder}
-        aiOrder={aiOpen ? <AiOrderCard onMyDesk={!assignDesk} onClose={() => setAiOpen(false)} onCreated={(id) => void onAiOrderCreated(id)} /> : null}
+        aiOrder={
+          aiOpen ? (
+            <AiOrderCard onMyDesk={!assignDesk} onClose={() => setAiOpen(false)} onCreated={(id) => void onAiOrderCreated(id)} />
+          ) : selectedOrder && fillOrderId === selectedOrder.id ? (
+            <AiOrderCard
+              key={selectedOrder.id}
+              fill={{ order: selectedOrder, notes: true, onFilled: (result) => void onItineraryFilled(result) }}
+              onClose={() => setFillOrderId(null)}
+            />
+          ) : null
+        }
         onToggleAi={aiEnabled ? toggleAiOrder : undefined}
         filter={filter}
         onFilterChange={setFilter}
@@ -1964,6 +1997,7 @@ export function DispatcherPage() {
                     }
                   : null,
                 onStartReschedule: selectedOrder.canReschedule ? startReschedule : undefined,
+                onStartFill: selectedOrder.canReschedule && fillEnabled && !reschedulePreview ? () => setFillOrderId(selectedOrder.id) : undefined,
                 bodyRef: orderCalBodyRef,
                 onBodyScroll: syncDriverCalendarFromTop,
                 infoOpen: orderInfoOpen,

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Trailink.Api.DTOs;
 using Trailink.Api.Models;
@@ -14,7 +15,8 @@ public class RecognitionController(
     AuthSession session,
     IDraftModel model,
     OrderDraftRecognizer recognizer,
-    OrderImport import) : ControllerBase
+    OrderImport import,
+    Data.TrailinkDbContext db) : ControllerBase
 {
     private const long RequestLimit = RecognitionSources.MaxTotalBytes + 2_000_000;
 
@@ -30,21 +32,39 @@ public class RecognitionController(
         return Ok(new RecognitionStatusDto
         {
             Enabled = model.Enabled && CanUse(user),
+            FillEnabled = model.Enabled && user is not null,
             Model = model.ModelName
         });
     }
 
-    /// <summary>识别，只返回草稿，不写数据库。文件字段名都叫 <c>files</c>，按选择的顺序；粘贴的行程文字放在 <c>text</c>。两样至少有一样。</summary>
+    /// <summary>
+    /// 识别，只返回草稿，不写数据库。文件字段名都叫 <c>files</c>，按选择的顺序；粘贴的行程文字放在 <c>text</c>。两样至少有一样。
+    /// 给已有订单填入行程明细时带上 <c>orderId</c>：能改这张单日期的人都能用（司导在自己的「仅日期」单上也能用）。
+    /// </summary>
     [HttpPost("order-draft")]
     [RequestSizeLimit(RequestLimit)]
     [RequestFormLimits(MultipartBodyLengthLimit = RequestLimit)]
     public async Task<ActionResult<OrderDraftDto>> Draft(
         [FromForm] List<IFormFile> files,
         [FromForm] string? text,
+        [FromForm] Guid? orderId,
         CancellationToken cancellationToken)
     {
         var user = await session.GetUserAsync(cancellationToken);
-        if (!CanUse(user))
+        if (orderId is Guid fillId)
+        {
+            var order = await db.Orders.FirstOrDefaultAsync(item => item.Id == fillId, cancellationToken);
+            if (order is null)
+            {
+                return NotFound();
+            }
+
+            if (!OrderReschedule.CanReschedule(order, user))
+            {
+                return this.Forbidden("只有这张单的调度员、所属公司或建单人能填入行程明细。");
+            }
+        }
+        else if (!CanUse(user))
         {
             return this.Forbidden("只有调度员和公司账户能用 AI 建单。");
         }

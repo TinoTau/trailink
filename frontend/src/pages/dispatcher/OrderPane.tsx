@@ -73,6 +73,8 @@ export interface SelectedOrderProps {
   } | null
   /** 能改日期时：编辑订单里「改日期」按钮。 */
   onStartReschedule?: () => void
+  /** 能改日期、服务器配了 AI 时：「填入行程明细」（上传或粘贴明细，AI 识别后填进这张单）。 */
+  onStartFill?: () => void
   onClose: () => void
   onBackToCalendar: () => void
   onChanged: () => Promise<void>
@@ -138,6 +140,7 @@ function SelectedOrderCard({
   ink,
   reschedule,
   onStartReschedule,
+  onStartFill,
   onClose,
   onBackToCalendar,
   onChanged,
@@ -172,12 +175,19 @@ function SelectedOrderCard({
       onShareLevelChange={onShareLevelChange}
       shareLevelLocked={!order.companyId}
       datesField={
-        onStartReschedule ? (
+        onStartReschedule || onStartFill ? (
           <div className="reschedule-entry">
             <span>行程日期</span>
-            <button type="button" className="dispatcher-chip" onClick={onStartReschedule}>
-              在日历上拖动改日期
-            </button>
+            {onStartReschedule ? (
+              <button type="button" className="dispatcher-chip" onClick={onStartReschedule}>
+                在日历上拖动改日期
+              </button>
+            ) : null}
+            {onStartFill ? (
+              <button type="button" className="dispatcher-chip" onClick={onStartFill}>
+                填入行程明细
+              </button>
+            ) : null}
           </div>
         ) : undefined
       }

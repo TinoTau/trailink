@@ -15,8 +15,14 @@ public class OrdersController(
     OrderReschedule reschedule,
     OrderPresenter presenter,
     AuthSession session,
-    AppFileStore files) : ControllerBase
+    AppFileStore files,
+    OrderItineraryFill fill) : ControllerBase
 {
+    private static readonly System.Text.Json.JsonSerializerOptions FormJson = new(System.Text.Json.JsonSerializerDefaults.Web)
+    {
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.Strict
+    };
+
     [HttpGet]
     public async Task<ActionResult<List<OrderReadDto>>> List(
         [FromQuery] DateOnly? startDate,
@@ -229,6 +235,103 @@ public class OrdersController(
             RemovedDayCount = result.RemovedDayCount,
             Warnings = result.Warnings
         });
+    }
+
+    /// <summary>填入行程明细前的对照：细单每天接粗单第几天的司导、车辆，哪些天冲突，哪些天会删掉。不写数据库。</summary>
+    [HttpPost("{id:guid}/itinerary-fill/preview")]
+    public async Task<ActionResult<OrderFillPreviewDto>> FillPreview(
+        Guid id,
+        OrderFillDto request,
+        CancellationToken cancellationToken)
+    {
+        if (OrderItineraryFill.Validate(request) is string error)
+        {
+            return this.Invalid(error);
+        }
+
+        var (order, _, denied) = await LoadFillableAsync(id, cancellationToken);
+        return denied ?? Ok(await fill.PreviewAsync(order!, request, cancellationToken));
+    }
+
+    /// <summary>
+    /// 粗单填入行程明细（AI 识别、核对后的细单）。表单字段 <c>order</c> 是 <see cref="OrderFillDto"/> 的 JSON，
+    /// 文件字段 <c>file-{序号}</c> 是识别时的第几个文件：被活动引用的存为电子票，其余图片存为订单截图。和 AI 建单的写法一样。
+    /// </summary>
+    [HttpPost("{id:guid}/itinerary-fill")]
+    [RequestSizeLimit(Services.Recognition.RecognitionSources.MaxTotalBytes + 2_000_000)]
+    [RequestFormLimits(MultipartBodyLengthLimit = Services.Recognition.RecognitionSources.MaxTotalBytes + 2_000_000)]
+    public async Task<ActionResult<OrderFillResultDto>> Fill(Guid id, CancellationToken cancellationToken)
+    {
+        if (!Request.HasFormContentType)
+        {
+            return this.Invalid("请用表单提交。");
+        }
+
+        var form = await Request.ReadFormAsync(cancellationToken);
+        OrderFillDto? request;
+        try
+        {
+            request = System.Text.Json.JsonSerializer.Deserialize<OrderFillDto>(form["order"].ToString(), FormJson);
+        }
+        catch (System.Text.Json.JsonException error)
+        {
+            return this.Invalid($"行程内容格式不对：{error.Message}");
+        }
+
+        if (request is null)
+        {
+            return this.Invalid("缺少行程内容。");
+        }
+
+        if (OrderItineraryFill.Validate(request) is string invalid)
+        {
+            return this.Invalid(invalid);
+        }
+
+        var (order, user, denied) = await LoadFillableAsync(id, cancellationToken);
+        if (denied is not null)
+        {
+            return denied;
+        }
+
+        var uploads = new Dictionary<int, IFormFile>();
+        foreach (var file in form.Files)
+        {
+            if (file.Name.StartsWith("file-", StringComparison.Ordinal) &&
+                int.TryParse(file.Name["file-".Length..], out var index) && index >= 0)
+            {
+                uploads[index] = file;
+            }
+        }
+
+        var result = await fill.ApplyAsync(user!, order!, request, uploads, cancellationToken);
+        if (result.Error is not null)
+        {
+            return this.Invalid(result.Error);
+        }
+
+        db.ChangeTracker.Clear();
+        var updated = await LoadOrderAsync(id, cancellationToken);
+        return Ok(new OrderFillResultDto
+        {
+            Order = await presenter.PresentAsync(updated!, user, cancellationToken),
+            Warnings = result.Warnings
+        });
+    }
+
+    /// <summary>能填入行程明细的人和能改日期的人一样。</summary>
+    private async Task<(Order? Order, User? User, ActionResult? Denied)> LoadFillableAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var order = await LoadOrderAsync(id, cancellationToken);
+        if (order is null)
+        {
+            return (null, null, NotFound());
+        }
+
+        var user = await session.GetUserAsync(cancellationToken);
+        return OrderReschedule.CanReschedule(order, user)
+            ? (order, user, null)
+            : (order, user, this.Forbidden("只有这张单的调度员、所属公司或建单人能填入行程明细。"));
     }
 
     /// <summary>

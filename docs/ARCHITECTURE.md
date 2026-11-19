@@ -151,7 +151,7 @@ trailink/
 
 ## 7. 安全与配置
 
-- 登录：Cookie `trailink.auth`，HttpOnly、SameSite=Lax、滑动过期 14 天。未登录返回 401，不重定向。
+- 登录：Cookie `trailink.auth`，HttpOnly、SameSite=Lax、滑动过期 14 天，持久 cookie（`IsPersistent`，带过期时间；不然手机浏览器在后台被关掉后就没了）。未登录返回 401，不重定向。
 - 默认所有接口都需要登录，只有健康检查、注册、登录、OpenAPI 文档例外。
 - 密码：PBKDF2（HMAC-SHA256，10 万次迭代）加盐哈希。
 - 角色以数据库为准，不读 Cookie 里的角色声明。

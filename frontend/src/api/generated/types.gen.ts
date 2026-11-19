@@ -408,6 +408,58 @@ export type OrderFileReadDto = {
     fileName?: string;
 };
 
+export type OrderFillDayPreviewDto = {
+    serviceDate?: string;
+    fromDate?: null | string;
+    driverName?: null | string;
+    plate?: null | string;
+    driverConflict?: boolean;
+    vehicleConflict?: boolean;
+};
+
+export type OrderFillDto = {
+    platformOrderNo?: null | string;
+    guestCount?: null | number;
+    vehicleType?: null | string;
+    island?: null | string;
+    notes?: null | string;
+    days?: Array<OrderImportDayDto>;
+};
+
+export type OrderFillPreviewDto = {
+    days?: Array<OrderFillDayPreviewDto>;
+    removed?: Array<OrderFillRemovedDayDto>;
+    warnings?: Array<string>;
+};
+
+export type OrderFillRemovedDayDto = {
+    serviceDate?: string;
+    driverName?: null | string;
+    plate?: null | string;
+    hasContent?: boolean;
+};
+
+export type OrderFillResultDto = {
+    order?: OrderReadDto;
+    warnings?: Array<string>;
+};
+
+export type OrderImportActivityDto = {
+    content?: string;
+    provider?: null | string;
+    libraryActivityId?: null | string;
+    bookingTime?: unknown;
+    checkinTime?: unknown;
+    ticketIndex?: null | number;
+};
+
+export type OrderImportDayDto = {
+    serviceDate?: string;
+    description?: null | string;
+    endLocation?: null | string;
+    activities?: Array<OrderImportActivityDto>;
+};
+
 export type OrderReadDto = {
     id?: string;
     orderNo?: string;
@@ -492,6 +544,7 @@ export type ProfileUsernameWriteDto = {
 
 export type RecognitionStatusDto = {
     enabled?: boolean;
+    fillEnabled?: boolean;
     model?: string;
 };
 
@@ -2077,6 +2130,42 @@ export type PutApiOrdersByIdDatesResponses = {
 
 export type PutApiOrdersByIdDatesResponse = PutApiOrdersByIdDatesResponses[keyof PutApiOrdersByIdDatesResponses];
 
+export type PostApiOrdersByIdItineraryFillPreviewData = {
+    body: OrderFillDto;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/orders/{id}/itinerary-fill/preview';
+};
+
+export type PostApiOrdersByIdItineraryFillPreviewResponses = {
+    /**
+     * OK
+     */
+    200: OrderFillPreviewDto;
+};
+
+export type PostApiOrdersByIdItineraryFillPreviewResponse = PostApiOrdersByIdItineraryFillPreviewResponses[keyof PostApiOrdersByIdItineraryFillPreviewResponses];
+
+export type PostApiOrdersByIdItineraryFillData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/orders/{id}/itinerary-fill';
+};
+
+export type PostApiOrdersByIdItineraryFillResponses = {
+    /**
+     * OK
+     */
+    200: OrderFillResultDto;
+};
+
+export type PostApiOrdersByIdItineraryFillResponse = PostApiOrdersByIdItineraryFillResponses[keyof PostApiOrdersByIdItineraryFillResponses];
+
 export type GetApiOrdersByIdFilesData = {
     body?: never;
     path: {
@@ -2240,6 +2329,8 @@ export type PostApiRecognitionOrderDraftData = {
         files?: Array<IFormFile>;
     } & {
         text?: string;
+    } & {
+        orderId?: string;
     };
     path?: never;
     query?: never;

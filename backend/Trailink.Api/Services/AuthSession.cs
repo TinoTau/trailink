@@ -48,9 +48,12 @@ public class AuthSession(TrailinkDbContext db, IHttpContextAccessor accessor)
                 new Claim(ClaimTypes.Name, user.Username),
             ],
             CookieAuthenticationDefaults.AuthenticationScheme);
+        // 保持登录：cookie 带过期时间（14 天，用着就自动续期）。不带的话是会话 cookie，
+        // 手机浏览器在后台被系统关掉后就没了，每次打开都要重新登录。
         await accessor.HttpContext!.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(identity));
+            new ClaimsPrincipal(identity),
+            new AuthenticationProperties { IsPersistent = true });
     }
 
     public Task SignOutAsync()

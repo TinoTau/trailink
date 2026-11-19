@@ -556,6 +556,8 @@ interface OrderInfoEditorProps {
   onSaved: () => void | Promise<void>
   extraActions?: ReactNode
   meta?: string | null
+  /** 订单信息展开后，截图上面的一行，例如「填入行程明细」。 */
+  extraFields?: ReactNode
 }
 
 export function OrderInfoEditor(props: OrderInfoEditorProps) {
@@ -564,7 +566,7 @@ export function OrderInfoEditor(props: OrderInfoEditorProps) {
   return <OrderInfoEditorState key={version} {...props} />
 }
 
-function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoEditorProps) {
+function OrderInfoEditorState({ order, onSaved, extraActions, meta, extraFields }: OrderInfoEditorProps) {
   const [open, setOpen] = useState(false)
   const [notes, setNotes] = useState(order.driverNotes ?? '')
   const [sharedNotes, setSharedNotes] = useState(order.sharedNotes ?? '')
@@ -605,6 +607,7 @@ function OrderInfoEditorState({ order, onSaved, extraActions, meta }: OrderInfoE
         onSave={() => void save()}
         extra={
           <>
+          {extraFields}
           <label className="dispatcher-notes-field">
             订单截图
             <OrderFilesBlock

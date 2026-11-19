@@ -6,6 +6,12 @@ public class RecognitionStatusDto
 {
     /// <summary>服务器配置了密钥，调度台才显示「AI 建单」。</summary>
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// 能在订单上「填入行程明细」：服务器配置了密钥就行（司导也能用，在自己能改日期的单上）。
+    /// 具体某张单能不能填，看订单的 <c>canReschedule</c>。
+    /// </summary>
+    public bool FillEnabled { get; set; }
     public string Model { get; set; } = string.Empty;
 }
 
@@ -94,6 +100,60 @@ public class OrderImportActivityDto
     [JsonConverter(typeof(LocalDateTimeJsonConverter))]
     public DateTime? CheckinTime { get; set; }
     public int? TicketIndex { get; set; }
+}
+
+/// <summary>
+/// 粗单填入行程明细：核对后的细单。以细单为准；细单没填的（人数、车型、南/北岛、订单号，某天的行程说明、住宿、活动）保留粗单原来的。
+/// 电子票和行程图随表单以 <c>file-{序号}</c> 上传，和 AI 建单一样。
+/// </summary>
+public class OrderFillDto
+{
+    public string? PlatformOrderNo { get; set; }
+    /// <summary>没写为 null，保留粗单的人数。</summary>
+    public int? GuestCount { get; set; }
+    public string? VehicleType { get; set; }
+    /// <summary>south / north / both；没写为 null，保留粗单的。</summary>
+    public string? Island { get; set; }
+    /// <summary>整单补充说明，接在自己备注的后面（司导没有调度备注，不写）。</summary>
+    public string? Notes { get; set; }
+    public List<OrderImportDayDto> Days { get; set; } = [];
+}
+
+/// <summary>填入行程明细前的对照：细单每一天对应粗单的第几天，司导、车辆跟着第几天走。</summary>
+public class OrderFillPreviewDto
+{
+    public List<OrderFillDayPreviewDto> Days { get; set; } = [];
+    /// <summary>细单比粗单短，粗单末尾多出来、会删掉的天。</summary>
+    public List<OrderFillRemovedDayDto> Removed { get; set; } = [];
+    /// <summary>给人看的提醒：冲突、删掉的天上派过的司导。</summary>
+    public List<string> Warnings { get; set; } = [];
+}
+
+public class OrderFillDayPreviewDto
+{
+    public DateOnly ServiceDate { get; set; }
+    /// <summary>粗单上对应的那天；null 是新加的一天（没派司导）。</summary>
+    public DateOnly? FromDate { get; set; }
+    public string? DriverName { get; set; }
+    public string? Plate { get; set; }
+    /// <summary>司导那天已经有别的行程：照样保留，日历上标红，由调度员调整。</summary>
+    public bool DriverConflict { get; set; }
+    public bool VehicleConflict { get; set; }
+}
+
+public class OrderFillRemovedDayDto
+{
+    public DateOnly ServiceDate { get; set; }
+    public string? DriverName { get; set; }
+    public string? Plate { get; set; }
+    /// <summary>这天原来写了行程或活动。</summary>
+    public bool HasContent { get; set; }
+}
+
+public class OrderFillResultDto
+{
+    public OrderReadDto Order { get; set; } = null!;
+    public List<string> Warnings { get; set; } = [];
 }
 
 public class CreatedOrderDto

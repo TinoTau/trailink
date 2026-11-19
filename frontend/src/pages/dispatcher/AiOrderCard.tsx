@@ -1,10 +1,12 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { Modal } from 'antd'
-import { recognitionApi } from '../../api/recognition'
+import { recognitionApi, type OrderImport } from '../../api/recognition'
 import { WEEKDAYS, parseYmd } from '../../localDate'
+import { orderDisplayLabel } from '../../orderFlags'
 import { IslandToggle } from '../OrderInfoFields'
-import type { DraftActivity, DraftDay, OrderDraft } from '../../types'
+import type { DraftActivity, DraftDay, Order, OrderDraft, OrderFillPreview, OrderFillResult } from '../../types'
 import { CloseIcon } from '../icons'
+import './dispatcher.css'
 import './ai-order.css'
 
 const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf'
@@ -14,19 +16,30 @@ const MAX_TEXT = 20000
 
 type Step = 'pick' | 'busy' | 'review' | 'saving'
 
+/** 给已有的粗单填入行程明细（而不是新建订单）。 */
+export interface AiFillTarget {
+  order: Order
+  /** 写调度备注：司导没有调度备注，不显示备注一栏。 */
+  notes: boolean
+  onFilled: (result: OrderFillResult) => void
+}
+
 /**
  * 调度台「AI 建单」：上传旅行社的行程图和电子票 → AI 整理成草稿 → 调度员核对修改 → 一次生成订单。
  * 草稿里 AI 拿不准的地方标黄；不在南岛包车范围的日子默认不勾。
+ * 带 <code>fill</code> 时是「填入行程明细」：同样识别、核对，再看一眼对照（司导、车辆按第几天挪，冲突标红），填进这张粗单。
  */
 export function AiOrderCard({
   onClose,
   onCreated,
   onMyDesk = false,
+  fill,
 }: {
   onClose: () => void
-  onCreated: (orderId: string) => void
+  onCreated?: (orderId: string) => void
   /** 在调度台上建单：放在自己的调度台上；派给调度里建单留在公司订单池。 */
   onMyDesk?: boolean
+  fill?: AiFillTarget
 }) {
   const [step, setStep] = useState<Step>('pick')
   const [files, setFiles] = useState<File[]>([])
@@ -52,7 +65,7 @@ export function AiOrderCard({
     setStep('busy')
     setError(null)
     try {
-      setDraft(await recognitionApi.draft(files, text))
+      setDraft(await recognitionApi.draft(files, text, fill?.order.id))
       setStep('review')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'AI 识别失败，请稍后再试。')
@@ -64,7 +77,7 @@ export function AiOrderCard({
     if (!draft) {
       return
     }
-    const days = draft.days.filter((day) => day.include)
+    const days = includedDays(draft)
     if (days.length === 0) {
       setError('请至少勾选一天。')
       return
@@ -81,27 +94,63 @@ export function AiOrderCard({
           island: draft.island ?? 'south',
           notes: draft.notes?.trim() || null,
           onMyDesk,
-          days: days.map((day) => ({
-            serviceDate: day.serviceDate,
-            description: day.description,
-            endLocation: day.endLocation,
-            // 改过日期的那天，活动时间跟着换到新日期。
-            activities: day.activities
-              .filter((activity) => activity.content.trim())
-              .map((activity) => ({
-                ...activity,
-                bookingTime: moveToDate(activity.bookingTime, day.serviceDate),
-                checkinTime: moveToDate(activity.checkinTime, day.serviceDate),
-              })),
-          })),
+          days,
         },
         files,
       )
-      onCreated(created.orderId)
+      onCreated?.(created.orderId)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '生成订单失败')
       setStep('review')
     }
+  }
+
+  /** 填入行程明细：先取对照给人确认，确认后才写入。细单没写的（人数、车型、南/北岛）传空，保留粗单的。 */
+  async function fillOrder() {
+    if (!draft || !fill) {
+      return
+    }
+    const days = includedDays(draft)
+    if (days.length === 0) {
+      setError('请至少勾选一天。')
+      return
+    }
+    const payload = {
+      platformOrderNo: draft.platformOrderNo?.trim() || null,
+      guestCount: draft.guestCount ?? null,
+      vehicleType: draft.vehicleType?.trim() || null,
+      island: draft.island ?? null,
+      notes: fill.notes ? draft.notes?.trim() || null : null,
+      days,
+    }
+    setStep('saving')
+    setError(null)
+    let preview: OrderFillPreview
+    try {
+      preview = await recognitionApi.fillPreview(fill.order.id, payload)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '对照失败')
+      setStep('review')
+      return
+    }
+    setStep('review')
+    Modal.confirm({
+      title: `填入 ${orderDisplayLabel(fill.order) || '这张单'}？`,
+      icon: null,
+      width: 460,
+      content: <FillPreviewList preview={preview} />,
+      okText: `填入（${days.length} 天）`,
+      cancelText: '再改改',
+      onOk: async () => {
+        setStep('saving')
+        try {
+          fill.onFilled(await recognitionApi.fill(fill.order.id, payload, files))
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : '填入行程明细失败')
+          setStep('review')
+        }
+      },
+    })
   }
 
   function close() {
@@ -164,8 +213,10 @@ export function AiOrderCard({
   const included = draft?.days.filter((day) => day.include).length ?? 0
   const subtitle =
     step === 'review' || step === 'saving'
-      ? `${draft?.days.length ?? 0} 天，导入 ${included} 天 · 黄色待核对 · 点文字修改`
-      : '上传旅行社发来的行程图和电子票，或直接粘贴行程文字，AI 整理成订单草稿，核对后一键生成。'
+      ? `${draft?.days.length ?? 0} 天，${fill ? '填入' : '导入'} ${included} 天 · 黄色待核对 · 点文字修改`
+      : fill
+        ? `${[orderDisplayLabel(fill.order), `${fill.order.dayCount} 天`].filter(Boolean).join(' · ')}。上传或粘贴这张单的行程明细，核对后填进去：以明细为准，司导、车辆按第几天跟着挪。`
+        : '上传旅行社发来的行程图和电子票，或直接粘贴行程文字，AI 整理成订单草稿，核对后一键生成。'
 
   return (
     <article
@@ -181,7 +232,7 @@ export function AiOrderCard({
       <header className="dispatcher-card-head">
         <div className="order-info-main">
           <div className="dispatcher-card-title">
-            <strong>AI 建单</strong>
+            <strong>{fill ? '填入行程明细' : 'AI 建单'}</strong>
           </div>
           <p className="dispatcher-card-meta">{subtitle}</p>
         </div>
@@ -191,9 +242,9 @@ export function AiOrderCard({
               type="button"
               className="dispatcher-chip card-save reschedule-save"
               disabled={step === 'saving' || included === 0}
-              onClick={() => void create()}
+              onClick={() => void (fill ? fillOrder() : create())}
             >
-              {step === 'saving' ? '生成中…' : `生成订单（${included} 天）`}
+              {step === 'saving' ? (fill ? '填入中…' : '生成中…') : fill ? `填入（${included} 天）` : `生成订单（${included} 天）`}
             </button>
           ) : null}
           <button type="button" className="dispatcher-icon-btn" aria-label="关闭" onClick={close}>
@@ -308,14 +359,16 @@ export function AiOrderCard({
                 <span>南/北岛</span>
                 <IslandToggle island={draft.island} onChange={(island) => setDraft({ ...draft, island })} />
               </div>
-              <InlineText
-                label="备注"
-                className="ai-span"
-                value={draft.notes ?? ''}
-                placeholder="只有自己看得到"
-                multiline
-                onChange={(notes) => setDraft({ ...draft, notes })}
-              />
+              {fill && !fill.notes ? null : (
+                <InlineText
+                  label="备注"
+                  className="ai-span"
+                  value={draft.notes ?? ''}
+                  placeholder={fill ? '只有自己看得到，接在原来的备注后面' : '只有自己看得到'}
+                  multiline
+                  onChange={(notes) => setDraft({ ...draft, notes })}
+                />
+              )}
             </section>
             <div className="ai-days">
               {draft.days.map((day, index) => (
@@ -328,6 +381,7 @@ export function AiOrderCard({
               ))}
             </div>
             <p className="ai-caption">
+              {fill ? '没识别出来的（人数、车型、某天的行程）保留这张单原来的。' : ''}
               电子票会挂到对应活动上，行程图存为订单截图（7 天后自动删除）。
               {draft.model ? ` 识别：${modelLabel(draft.model)}，${(draft.inputTokens + draft.outputTokens).toLocaleString()} token。` : ''}
             </p>
@@ -354,6 +408,76 @@ export function AiOrderCard({
       ) : null}
     </article>
   )
+}
+
+/** 核对后要提交的日期（勾选的），改过日期的那天活动时间跟着换到新日期。 */
+function includedDays(draft: OrderDraft): OrderImport['days'] {
+  return draft.days
+    .filter((day) => day.include)
+    .map((day) => ({
+      serviceDate: day.serviceDate,
+      description: day.description,
+      endLocation: day.endLocation,
+      activities: day.activities
+        .filter((activity) => activity.content.trim())
+        .map((activity) => ({
+          ...activity,
+          bookingTime: moveToDate(activity.bookingTime, day.serviceDate),
+          checkinTime: moveToDate(activity.checkinTime, day.serviceDate),
+        })),
+    }))
+}
+
+/** 填入前的对照：每一天接原来哪天的司导、车辆；冲突标红（照样保留）；删掉的天。 */
+function FillPreviewList({ preview }: { preview: OrderFillPreview }) {
+  return (
+    <div className="ai-fill-preview">
+      <p className="ai-fill-lead">以明细为准。司导、车辆按第几天跟着挪；冲突的照样保留，日历上标红，之后再调整。</p>
+      <ul>
+        {preview.days.map((day) => {
+          const conflict = day.driverConflict || day.vehicleConflict
+          return (
+            <li key={day.serviceDate} className={conflict ? 'conflict' : undefined}>
+              <span className="ai-fill-date">{formatDay(day.serviceDate)}</span>
+              <span className="ai-fill-who">
+                {day.fromDate == null
+                  ? '新加的一天，未派'
+                  : [
+                      day.fromDate !== day.serviceDate ? `原 ${formatShort(day.fromDate)}` : '日期不变',
+                      day.driverName ? `${day.driverName}${day.driverConflict ? '（那天已有行程）' : ''}` : '未派',
+                      day.plate ? `${day.plate}${day.vehicleConflict ? '（那天已被占用）' : ''}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      {preview.removed.length > 0 ? (
+        <>
+          <p className="ai-fill-lead">明细比原来短，删掉这些天：</p>
+          <ul>
+            {preview.removed.map((day) => (
+              <li key={day.serviceDate} className="removed">
+                <span className="ai-fill-date">{formatDay(day.serviceDate)}</span>
+                <span className="ai-fill-who">
+                  {[day.driverName ? `原派 ${day.driverName}` : '未派', day.plate ?? '', day.hasContent ? '写过行程' : '']
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function formatShort(value: string) {
+  const date = parseYmd(value)
+  return `${date.getMonth() + 1}月${date.getDate()}日`
 }
 
 function DraftDayCard({ day, files, onChange }: { day: DraftDay; files: string[]; onChange: (change: Partial<DraftDay>) => void }) {

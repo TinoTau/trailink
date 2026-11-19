@@ -625,7 +625,8 @@ POST /api/recognition/order-draft
 POST /api/recognition/import
 ```
 
-- 只有调度员和公司账户能用，其他人 403。`status` 返回 `{ enabled, model }`：服务器配了 `Recognition__ApiKey` 且当前用户能用时 `enabled` 为 `true`。
+- 只有调度员和公司账户能用，其他人 403。`status` 返回 `{ enabled, fillEnabled, model }`：服务器配了 `Recognition__ApiKey` 且当前用户能用时 `enabled` 为 `true`；`fillEnabled` 是配了密钥、已登录（司导也算），能在订单上「填入行程明细」（具体某张单看订单的 `canReschedule`）。
+- `order-draft` 带表单字段 `orderId` 时是给这张已有订单填入行程明细：能改这张单日期的人（`canReschedule`，司导在自己的「仅日期」单上也算）都能用，否则 403；订单不存在 404。
 - `order-draft`：`multipart/form-data`，文件字段都叫 `files`，按选择顺序；jpg / png / webp / pdf，单个 10MB、合计 40MB、最多 12 个。粘贴的行程文字放在 `text`（最多 20000 字，连续空行压成一行），交给模型时放在文件后面、标成「粘贴的文字」，电子票序号只算文件。文件和文字至少一样，都没有或文字太长 400；文字里认不出日期 422。只返回草稿，不写数据库。
   - 返回 `OrderDraftDto`：`platformOrderNo`、`guestCount`、`vehicleType`（照原文简短写的车型，没写为 null）、`island`（`south` / `north` / `both`，只看要导入的日子，看不出为 null）、`notes`、`days[]`、`warnings[]`、`files[]`（上传的文件名，序号从 0 开始）、`model`、`inputTokens`、`outputTokens`。
   - `days[]`：`serviceDate`、`include`（默认是否导入）、`note`、`description`、`endLocation`、`uncertain[]`、`activities[]`。
@@ -635,6 +636,25 @@ POST /api/recognition/import
   - 被活动 `ticketIndex` 引用的文件存为该活动的电子票（8MB 以内）；其余图片存为订单截图；其他 PDF 不保存。
   - 订单的起始日期取最早一天；建单归属和 `POST /api/orders` 一样；`notes` 写进建单人自己的备注。不存在的活动库 id 当作手填。
   - 成功返回 `{ orderId }`；同一天出现两次、没有日期等返回 400。
+
+## 填入行程明细（粗单 → 细单）
+
+```http
+POST /api/orders/{id}/itinerary-fill/preview
+POST /api/orders/{id}/itinerary-fill
+```
+
+- 权限同改日期（`canReschedule`）：所属公司的公司账户；公司的单只有分到它的调度员；自留单（含司导自己的「仅日期」单）是建单人或负责的调度员。其他人 403。
+- 请求（`OrderFillDto`）：`{ platformOrderNo, guestCount, vehicleType, island, notes, days: [...] }`，`days` 同 AI 建单的 `import`。`guestCount`、`island` 可以为 null。检查同 AI 建单，另外起止不能超过 93 天。
+- `preview`：JSON 请求，不写数据库。返回 `{ days: [{ serviceDate, fromDate, driverName, plate, driverConflict, vehicleConflict }], removed: [{ serviceDate, driverName, plate, hasContent }], warnings[] }`。
+- `itinerary-fill`：`multipart/form-data`，字段 `order` 是上面的 JSON，文件字段 `file-{序号}` 同 AI 建单（被活动引用的存电子票，其余图片接在订单截图后面）。成功返回 `{ order, warnings[] }`。
+- 规则（以细单为准）：
+  - 细单按日期排序后的第 N 天接粗单第 N 天：那一条行程日（同一个 id）挪到新日期，司导、派出人、车辆跟着走；细单更长，多出的天是新的空白日（未派）；更短，粗单末尾多出来的天删掉（连同活动，电子票在写库成功后删）。
+  - 挪过去后司导或车辆那天已有别的订单：**照样保留**（和改日期不同，不改回未派），返回的提醒里写明，日历上按平时的冲突标红。真实订单（绑公司）上，司导自己那几天的「仅日期」占位单照常被覆盖，不算冲突。
+  - 某天细单写了行程说明 / 住宿就用细单的，没写保留粗单的；细单这天写了活动就整天换成细单的活动，没写就保留粗单的活动（时间跟着日期挪）。
+  - 订单号、车型、南/北岛：细单写了才改；人数：细单大于 0 才改。起始日期取细单第一天。
+  - `notes` 接在自己原来的备注后面（同样的内容不重复接）；司导不写。
+  - 订单号（TL-…）、所属公司、调度分配、抢单等级、截图、别人的备注都不变。
 
 ## 活动库
 

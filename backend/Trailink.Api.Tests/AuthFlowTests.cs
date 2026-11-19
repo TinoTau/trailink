@@ -26,6 +26,33 @@ public class AuthFlowTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Login_cookie_is_persistent()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var client = _factory.CreateClient(new() { HandleCookies = false });
+        var registered = await client.PostAsJsonAsync("/api/auth/register", new RegisterDto
+        {
+            Username = $"keep_{suffix}",
+            Password = TestAuth.Password,
+            Name = "保持登录",
+            AccountType = "company",
+            CompanyName = $"保持登录{suffix}"
+        });
+        registered.EnsureSuccessStatusCode();
+        // 带过期时间（不是会话 cookie）：手机浏览器在后台被关掉、再打开还是登录状态。
+        var setCookie = registered.Headers.GetValues("Set-Cookie").Single(value => value.StartsWith("trailink.auth="));
+        Assert.Contains("expires=", setCookie, StringComparison.OrdinalIgnoreCase);
+
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+        {
+            Content = JsonContent.Create(new LoginDto { Username = $"keep_{suffix}", Password = TestAuth.Password })
+        };
+        var loggedIn = await client.SendAsync(login);
+        loggedIn.EnsureSuccessStatusCode();
+        Assert.Contains("expires=", loggedIn.Headers.GetValues("Set-Cookie").Single(value => value.StartsWith("trailink.auth=")), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Login_logout_and_company_contact_work()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];

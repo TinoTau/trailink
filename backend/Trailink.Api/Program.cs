@@ -50,6 +50,7 @@ builder.Services.AddHttpClient<IDraftModel, AnthropicDraftModel>((services, http
 });
 builder.Services.AddScoped<OrderDraftRecognizer>();
 builder.Services.AddScoped<OrderImport>();
+builder.Services.AddScoped<OrderItineraryFill>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
