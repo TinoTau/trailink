@@ -481,3 +481,50 @@ public class LibraryMatcherTests
         Assert.Null(LibraryMatcher.Match("", ["蒂阿瑙"], Library));
     }
 }
+
+/// <summary>原文没写年份时，模型推断的年份往后挪：跨年、整段在一个月以前。</summary>
+public class DraftYearTests
+{
+    [Fact]
+    public void Inferred_years_move_forward_to_the_next_trip()
+    {
+        var today = new DateOnly(2026, 11, 20);
+        OrderDraftDto Draft(params string[] dates) => new()
+        {
+            Days = dates.Select(date => new OrderDraftDayDto
+            {
+                ServiceDate = DateOnly.Parse(date),
+                Activities = [new OrderDraftActivityDto { Content = "活动", BookingTime = DateOnly.Parse(date).ToDateTime(new TimeOnly(9, 0)) }]
+            }).ToList()
+        };
+
+        // 跨年：模型把明年 1 月写成了今年 1 月，排在 12 月前面。
+        var crossing = Draft("2026-01-02", "2026-01-03", "2026-12-30", "2026-12-31");
+        OrderDraftRecognizer.FixYears(crossing, today, yearStated: false);
+        Assert.Equal(
+            ["2026-12-30", "2026-12-31", "2027-01-02", "2027-01-03"],
+            crossing.Days.Select(day => day.ServiceDate.ToString("yyyy-MM-dd")));
+        Assert.Equal(new DateTime(2027, 1, 2, 9, 0, 0), crossing.Days[2].Activities[0].BookingTime);
+        Assert.Contains("2026年12月30日", crossing.Warnings[0]);
+
+        // 整段都在一个多月以前：是明年的行程。
+        var january = Draft("2026-01-05", "2026-01-06");
+        OrderDraftRecognizer.FixYears(january, today, yearStated: false);
+        Assert.Equal(new DateOnly(2027, 1, 5), january.Days[0].ServiceDate);
+        Assert.Single(january.Warnings);
+
+        // 补录最近跑完的行程、已经是将来的跨年行程、原文写了年份的：都不动。
+        foreach (var (draft, stated) in new[]
+                 {
+                     (Draft("2026-11-14", "2026-11-15"), false),
+                     (Draft("2026-12-30", "2027-01-02"), false),
+                     (Draft("2025-03-01", "2025-03-02"), true)
+                 })
+        {
+            var before = draft.Days.Select(day => day.ServiceDate).ToList();
+            OrderDraftRecognizer.FixYears(draft, today, stated);
+            Assert.Equal(before, draft.Days.Select(day => day.ServiceDate));
+            Assert.Empty(draft.Warnings);
+        }
+    }
+}

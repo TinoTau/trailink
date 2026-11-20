@@ -178,8 +178,10 @@ export function DispatcherPage() {
         ? scoped.filter((order) =>
             order.dayCount > 0 &&
             (assignDesk ? !hasDispatcherAssignment(order) : hasUnassignedDays(order) || conflictedIds.has(order.id)))
-        : scoped.filter((order) => order.dayCount > 0 && !order.isHistorical)
-    return sortBoardOrders(listed)
+        : scoped.filter((order) => order.dayCount > 0)
+    // 「所有订单」里已结束的单也显示（灰色），排在最后：补录的过去行程派完司导也找得到。
+    const sorted = sortBoardOrders(listed)
+    return [...sorted.filter((order) => !order.isFinished), ...sorted.filter((order) => order.isFinished)]
   }, [assignDesk, companyId, conflictedIds, filter, orders])
   const { from: createFrom, to: createTo } = createRange
   const horizon = calendarHorizon()
@@ -1317,8 +1319,16 @@ export function DispatcherPage() {
       driverScrollPending.current = null
       setSelectedDriverId(null)
     } else if (selectedOrderIdRef.current) {
-      driverScrollPending.current = null
-      setSelectedDriverId(next)
+      // 开着订单时打开司导：司导日历直接到这张单的日期（他在这张单上的第一天，没派他就是订单第一天），
+      // 不停在今天——过去的单、几个月后的单都要能一眼看到。
+      const order = orders.find((item) => item.id === selectedOrderIdRef.current)
+      const date = order?.days.find((day) => day.driverId === next)?.serviceDate ?? order?.days[0]?.serviceDate
+      if (date) {
+        queueDriverFocus(next, date, false)
+      } else {
+        driverScrollPending.current = null
+        setSelectedDriverId(next)
+      }
     } else {
       // 「未配车」时打开司导直接跳到他第一个还没配车的日期。
       const missingFirst = missingMode ? missingVehicles.byDriver.get(next)?.first : undefined
@@ -1779,6 +1789,8 @@ export function DispatcherPage() {
     const conflicted = conflictedIds.has(order.id)
     const focusPattern = conflictIds.includes(order.id) ? patternForOrder([...conflictedIds], order.id) : undefined
     const live = order.isInProgress
+    // 已结束（日期都过了）的单：灰色填充，和进行中、将来的单区分开。冲突照样标红。
+    const ended = order.isFinished
     const fullyAssigned = byDriver ? assigned > 0 && !hasUnassignedDays(order) : hasDispatcherAssignment(order)
     const orderClaims = assignDesk ? [] : (claimsByOrder.get(order.id) ?? [])
     // 放出去的单（公司内部、面向所有人）用虚线框：随时可能被抢。多位司导抢同一张单时右上角标红。
@@ -1789,15 +1801,19 @@ export function DispatcherPage() {
         key={order.id}
         type="button"
         data-order-tile={order.id}
-        className={`dispatcher-tile${drag?.id === order.id ? ' dragging' : ''}${assigned > 0 ? ' assigned' : ''}${split ? ' split' : ''}${conflicted || claimConflict ? ' conflict' : ''}${live ? ' live' : ''}${selectedOrderId === order.id ? ' open' : ''}${shared ? ' shared' : ''}${orderClaims.length ? ' claimed' : ''}`}
+        className={`dispatcher-tile${drag?.id === order.id ? ' dragging' : ''}${assigned > 0 ? ' assigned' : ''}${split ? ' split' : ''}${conflicted || claimConflict ? ' conflict' : ''}${live ? ' live' : ''}${selectedOrderId === order.id ? ' open' : ''}${shared ? ' shared' : ''}${orderClaims.length ? ' claimed' : ''}${ended ? ' ended' : ''}`}
         style={
           focusPattern
             ? ({ ...conflictPatternStyle(focusPattern), ['--assigned-color']: assignedColor } as CSSProperties)
-            : split || conflicted || claimConflict
+            : conflicted || claimConflict
               ? ({ ['--assigned-color']: assignedColor } as CSSProperties)
-              : fullyAssigned
-                ? { background: assignedColor, color: contrastText(assignedColor) }
-                : undefined
+              : ended
+                ? undefined
+                : split
+                  ? ({ ['--assigned-color']: assignedColor } as CSSProperties)
+                  : fullyAssigned
+                    ? { background: assignedColor, color: contrastText(assignedColor) }
+                    : undefined
         }
         onPointerDown={(event) =>
           beginPointer(event, { kind: 'order', id: order.id, from, x: event.clientX, y: event.clientY })
@@ -1816,6 +1832,9 @@ export function DispatcherPage() {
       return order.assignedDispatcherName || (hasDispatcherAssignment(order) ? '已分配' : `${order.dayCount} 天`)
     }
     const assigned = order.assignedDayCount
+    if (order.isFinished && assigned === order.dayCount && !order.isSplit) {
+      return '已结束'
+    }
     if (assigned === 0) {
       return order.isInProgress ? '进行中' : `${order.dayCount} 天`
     }

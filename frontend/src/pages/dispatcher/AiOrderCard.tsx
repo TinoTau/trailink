@@ -1,7 +1,7 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { Modal } from 'antd'
 import { recognitionApi, type OrderImport } from '../../api/recognition'
-import { WEEKDAYS, parseYmd } from '../../localDate'
+import { WEEKDAYS, parseYmd, todayLocal } from '../../localDate'
 import { orderDisplayLabel } from '../../orderFlags'
 import { IslandToggle } from '../OrderInfoFields'
 import type { DraftActivity, DraftDay, Order, OrderDraft, OrderFillPreview, OrderFillResult } from '../../types'
@@ -359,6 +359,7 @@ export function AiOrderCard({
                 <span>南/北岛</span>
                 <IslandToggle island={draft.island} onChange={(island) => setDraft({ ...draft, island })} />
               </div>
+              <YearField draft={draft} onChange={setDraft} />
               {fill && !fill.notes ? null : (
                 <InlineText
                   label="备注"
@@ -770,6 +771,59 @@ function parseTime(text: string): string | null | undefined {
     return undefined
   }
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+/**
+ * 年份：行程第一天的年份。原文没写年份时由 AI 推断，可以在这里改：整段行程连同活动时间一起挪整年，
+ * 跨年的行程（12 月接 1 月）保持先后。
+ */
+function YearField({ draft, onChange }: { draft: OrderDraft; onChange: (draft: OrderDraft) => void }) {
+  const first = draft.days.map((day) => day.serviceDate).sort()[0]
+  if (!first) {
+    return null
+  }
+  const year = Number(first.slice(0, 4))
+  const thisYear = todayLocal().getFullYear()
+  const choices = [...new Set([thisYear - 1, thisYear, thisYear + 1, thisYear + 2, year])].sort()
+  return (
+    <label className="ai-island ai-year">
+      <span>年份</span>
+      <select
+        value={year}
+        onChange={(event) => {
+          const shift = Number(event.target.value) - year
+          onChange({
+            ...draft,
+            days: draft.days.map((day) => ({
+              ...day,
+              serviceDate: addYears(day.serviceDate, shift),
+              activities: day.activities.map((activity) => ({
+                ...activity,
+                bookingTime: activity.bookingTime ? addYears(activity.bookingTime, shift) : null,
+                checkinTime: activity.checkinTime ? addYears(activity.checkinTime, shift) : null,
+              })),
+            })),
+          })
+        }}
+      >
+        {choices.map((choice) => (
+          <option key={choice} value={choice}>
+            {choice}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/** 「2026-02-29…」这样的日期（或日期时间）挪几年；2 月 29 日挪到平年变成 2 月 28 日。 */
+function addYears(value: string, years: number) {
+  const year = Number(value.slice(0, 4)) + years
+  let rest = value.slice(4)
+  if (rest.startsWith('-02-29') && !(year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0))) {
+    rest = `-02-28${rest.slice(6)}`
+  }
+  return `${year}${rest}`
 }
 
 function moveToDate(value: string | null, date: string) {

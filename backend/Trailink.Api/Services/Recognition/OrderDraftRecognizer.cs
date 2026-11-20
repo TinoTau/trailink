@@ -86,6 +86,8 @@ public class OrderDraftRecognizer(TrailinkDbContext db, IDraftModel model)
             }
 
             var draft = Clean(reply.Input, library, prepared.FileNames);
+            var yearStated = reply.Input.TryGetProperty("yearStated", out var stated) && stated.ValueKind == JsonValueKind.True;
+            FixYears(draft, today, yearStated);
             draft.Model = reply.Model;
             draft.InputTokens = reply.InputTokens;
             draft.OutputTokens = reply.OutputTokens;
@@ -154,7 +156,7 @@ public class OrderDraftRecognizer(TrailinkDbContext db, IDraftModel model)
             今天是 {today:yyyy-MM-dd}（新西兰时间）。
 
             规则：
-            1. 日期：以每天那一行写的日期为准。没写年份时，取今天之后最近的那一年（行程都是将来的），并在 warnings 写「年份是按今天推断的」。抬头的出行时间和每天的日期矛盾时，以每天的日期为准，并在 warnings 说明。每个日期只出现一次，按日期排序。
+            1. 日期：以每天那一行写的日期为准。原文写了年份时 yearStated 填 true，照写的年份；没写年份时 yearStated 填 false，取今天之后最近的那一年（行程都是将来的；快到年底时，1、2 月的日期是明年的，跨年的行程 12 月在前、1 月在后），并在 warnings 写「年份是按今天推断的」。抬头的出行时间和每天的日期矛盾时，以每天的日期为准，并在 warnings 说明。每个日期只出现一次，按日期排序。
             2. include：南岛包车要服务的日子为 true。客人已飞去北岛或离开新西兰之后的日子（如奥克兰、罗托鲁瓦）为 false；用车情况写「自由行」、不用车的日子也为 false。从南岛机场送机的那一天仍为 true。为 false 时在 note 写一句原因。
             3. description：给司导看的当天安排，一到三行。写路线（如「基督城→特卡波」）和按时间顺序的安排、出发 / 签到 / 航班等时间点，去掉景点介绍和宣传语。接送机写上航班号和时间。
             4. endLocation：当晚住宿的地方。是以下常用地点之一时，必须写清单里的中文名：{places}。其他地点写行程里的中文地名。当天离开新西兰或没有住宿时为 null。
@@ -245,11 +247,82 @@ public class OrderDraftRecognizer(TrailinkDbContext db, IDraftModel model)
                     ["enum"] = new JsonArray("south", "north", "both", null)
                 },
                 ["notes"] = Nullable("string"),
+                ["yearStated"] = new JsonObject { ["type"] = "boolean", ["description"] = "行程原文里写明了年份" },
                 ["warnings"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } },
                 ["days"] = new JsonObject { ["type"] = "array", ["items"] = day }
             },
-            ["required"] = new JsonArray("days", "warnings")
+            ["required"] = new JsonArray("days", "warnings", "yearStated")
         };
+    }
+
+    /// <summary>
+    /// 原文没写年份时，年份是模型推断的，不全信（快到年底时常把明年 1 月写成今年 1 月，成了过去的日子；
+    /// 过去的单派完司导就当作已结束，在调度台上看不到）：
+    /// <list type="number">
+    /// <item>跨年：按日期排好后，相邻两天隔了半年以上，说明前面那段（1 月）其实是下一年，挪到下一年。</item>
+    /// <item>整段行程在一个月以前就开始了：按今天之后最近的那一年算（补录最近一个月内跑完的行程不受影响）。</item>
+    /// </list>
+    /// 只往后挪整年，活动时间跟着挪；改了就在提醒里写明。原文写了年份时不动。
+    /// </summary>
+    public static void FixYears(OrderDraftDto draft, DateOnly today, bool yearStated)
+    {
+        if (yearStated || draft.Days.Count == 0)
+        {
+            return;
+        }
+
+        // 先算每天要往后挪几年，确认挪完不撞到同一天再动。
+        var days = draft.Days.OrderBy(day => day.ServiceDate).ToList();
+        var years = new int[days.Count];
+        for (var index = 1; index < days.Count; index++)
+        {
+            if (days[index].ServiceDate.DayNumber - days[index - 1].ServiceDate.DayNumber > 180)
+            {
+                for (var earlier = 0; earlier < index; earlier++)
+                {
+                    years[earlier] = 1;
+                }
+
+                break;
+            }
+        }
+
+        var start = days.Select((day, index) => day.ServiceDate.AddYears(years[index])).Min();
+        var extra = 0;
+        while (extra < 2 && start.AddYears(extra) < today.AddDays(-30))
+        {
+            extra++;
+        }
+
+        if (extra == 0 && years.All(value => value == 0))
+        {
+            return;
+        }
+
+        var moved = days.Select((day, index) => day.ServiceDate.AddYears(years[index] + extra)).ToList();
+        if (moved.Distinct().Count() != moved.Count)
+        {
+            // 挪完撞到同一天（行程本身跨了一年多），不像是年份推错了，保持原样。
+            return;
+        }
+
+        for (var index = 0; index < days.Count; index++)
+        {
+            ShiftYears(days[index], years[index] + extra);
+        }
+
+        draft.Days = days.OrderBy(day => day.ServiceDate).ToList();
+        draft.Warnings.Insert(0, $"原文没写年份，日期已按今天之后推断：从 {draft.Days[0].ServiceDate:yyyy年M月d日} 开始，请核对年份。");
+    }
+
+    private static void ShiftYears(OrderDraftDayDto day, int years)
+    {
+        day.ServiceDate = day.ServiceDate.AddYears(years);
+        foreach (var activity in day.Activities)
+        {
+            activity.BookingTime = activity.BookingTime?.AddYears(years);
+            activity.CheckinTime = activity.CheckinTime?.AddYears(years);
+        }
     }
 
     /// <summary>模型的回答不全信：日期解析不了的丢掉、同一天合并、活动库 id 和电子票序号核对一遍。</summary>

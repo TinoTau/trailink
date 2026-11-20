@@ -409,6 +409,22 @@ a.dispatcher-chip {
   overflow: hidden;
 }
 
+/* 已结束的单：灰色填充（盖过已分配颜色和拆单的斜纹），冲突时还是按冲突显示。 */
+.dispatcher-tile.ended:not(.conflict) {
+  background: #e8e8e8;
+  border-color: #d9d9d9;
+  color: #595959;
+}
+
+.dispatcher-tile.ended:not(.conflict)::before,
+.dispatcher-tile.ended:not(.conflict)::after {
+  display: none;
+}
+
+.dispatcher-tile.ended:not(.conflict) em {
+  color: #8c8c8c;
+}
+
 .dispatcher-tile.split::after,
 .dispatcher-tile.conflict::after {
   content: '';
@@ -640,6 +656,11 @@ a.dispatcher-chip {
   color: #595959;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* 「删除」字是红的：真删，和「退回公司」区分开。 */
+.dispatcher-chip.dispatcher-card-return.delete {
+  color: #cf1322;
 }
 
 /* 套红框只换边框颜色，不往外扩，不压到旁边的文字。 */

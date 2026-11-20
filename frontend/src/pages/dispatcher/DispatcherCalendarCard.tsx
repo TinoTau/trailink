@@ -505,19 +505,21 @@ function cardRemoveButton(onRemove: (() => void) | undefined, removeLabel: strin
   if (!onRemove) {
     return null
   }
-  // 调度台上公司的单是退回，不是删除：按钮直接写「退回公司」，不用垃圾桶。同样先套红框，再点一次才执行。
-  if (removeLabel === '退回公司') {
+  // 订单卡片写字，不用垃圾桶，一眼看出点了会怎样：调度台上公司的单是「退回公司」（回到公司订单池）；
+  // 没绑公司的单（自己建的）和派给调度里的单是真删，写「删除」。同样先套红框，再点一次才执行。
+  if (removeLabel === '退回公司' || removeLabel === '删除订单') {
+    const text = removeLabel === '退回公司' ? '退回公司' : '删除'
     return (
       <button
         type="button"
-        className={`dispatcher-chip dispatcher-card-return${armed ? ' release' : ''}`}
-        aria-label={armed ? '确认退回公司' : '退回公司'}
+        className={`dispatcher-chip dispatcher-card-return${removeLabel === '删除订单' ? ' delete' : ''}${armed ? ' release' : ''}`}
+        aria-label={armed ? `确认${text}` : text}
         aria-pressed={armed}
         data-card-remove={armed ? 'true' : undefined}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={onRemove}
       >
-        退回公司
+        {armed && removeLabel === '删除订单' ? '再点一次删除' : text}
       </button>
     )
   }

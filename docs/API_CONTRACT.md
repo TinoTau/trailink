@@ -631,6 +631,7 @@ POST /api/recognition/import
   - 返回 `OrderDraftDto`：`platformOrderNo`、`guestCount`、`vehicleType`（照原文简短写的车型，没写为 null）、`island`（`south` / `north` / `both`，只看要导入的日子，看不出为 null）、`notes`、`days[]`、`warnings[]`、`files[]`（上传的文件名，序号从 0 开始）、`model`、`inputTokens`、`outputTokens`。
   - `days[]`：`serviceDate`、`include`（默认是否导入）、`note`、`description`、`endLocation`、`uncertain[]`、`activities[]`。
   - `activities[]`：`content`、`kind`（`activity` / `hotel`）、`provider`、`libraryActivityId`、`bookingTime`、`checkinTime`（当地时间 `YYYY-MM-DDTHH:mm:ss`）、`ticketIndex`（指向 `files` 的序号）、`uncertain[]`。
+  - 年份：原文没写年份时由模型推断，服务器再核一遍（`OrderDraftRecognizer.FixYears`）：排好序后相邻两天隔了半年以上，前面那段挪到下一年（跨年行程被写成同一年）；整段在一个月以前就开始了，按今天之后最近的那一年。只往后挪整年，活动时间跟着挪，`warnings` 第一条写明。原文写了年份时不动。
   - 识别不出任何日期、模型出错、未配密钥时返回 422，`detail` 是中文原因。
 - `import`：`multipart/form-data`。字段 `order` 是 JSON（`island` 不传或为空时按 `south` 写入）：`{ platformOrderNo, guestCount, vehicleType, island, notes, days: [{ serviceDate, description, endLocation, activities: [{ content, provider, libraryActivityId, bookingTime, checkinTime, ticketIndex }] }] }`，只放要导入的日期；文件字段 `file-{序号}` 是识别时的第几个文件。
   - 被活动 `ticketIndex` 引用的文件存为该活动的电子票（8MB 以内）；其余图片存为订单截图；其他 PDF 不保存。
